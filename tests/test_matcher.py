@@ -267,7 +267,7 @@ def test_dlc_by_title_id():
 
 def test_dlc_by_name():
     named = evaluate(alan(), "Alan_Wake_Remastered_Bonus_Pack_DLC_NSW-GRP", want="dlc", dlc=DLC)
-    assert named.score == 6
+    assert named.score == 8
     vague = evaluate(alan(), "Alan Wake Remastered DLC Pack NSW", want="dlc", dlc=DLC)
     assert vague.score == 3
     update = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW", want="dlc", dlc=DLC)
@@ -282,6 +282,40 @@ def test_dlc_named_without_the_abbreviation_of_the_game():
     game = Game(id="01006560184E6000", name="Mortal Kombat™ 1")
     dlc = {"id": "01006560184E7005", "name": "MK1: MKII Movie Skins"}
     named = evaluate(game, "Mortal Kombat 1 MKII Movie Skins DLC NSW-VENOM", want="dlc", dlc=dlc)
-    assert named.score == 6
+    assert named.score == 8
     pack = evaluate(game, "Mortal Kombat 1 v1.28.0 DLC Unlocker NSW-VENOM-FTP", want="dlc", dlc=dlc)
     assert pack.score == 3
+
+
+def fc25():
+    names = ["Dutch", "Spanish", "Latin American Spanish", "Brazilian Portuguese"]
+    return Game(id="010054E01D878000", name="EA SPORTS FC™ 25", dlc=[
+        {"id": f"010054E01D87900{n}", "name": f"EA SPORTS FC™ 25 In-Game Commentary - {name}"}
+        for n, name in enumerate(names, 1)])
+
+
+def fc25_release(language):
+    return f"EA SPORTS FC 25 In-Game Commentary {language} DLC NSW-VENOM"
+
+
+@pytest.mark.parametrize("wanted, release, score", [
+    (0, "Dutch", 8),
+    (1, "Spanish", 8),
+    (2, "Latin American Spanish", 8),
+    (3, "Brazilian Portuguese", 8),
+    (0, "Spanish", None),                    # names another DLC
+    (3, "Dutch", None),
+    (1, "Latin American Spanish", None),     # "Spanish" is in it, but the other names it better
+    (2, "Spanish", None),
+    (0, "Japanese", 3),                      # names none of the known DLCs: cannot tell
+])
+def test_release_belongs_to_the_dlc_it_names_best(wanted, release, score):
+    game = fc25()
+    result = evaluate(game, fc25_release(release), want="dlc", dlc=game.dlc[wanted])
+    assert getattr(result, "score", None) == score, getattr(result, "reason", None)
+
+
+def test_same_release_whatever_the_separators():
+    assert matcher.same_release("Diablo.II.Resurrected.Update.v1.0.35.0.incl.Offline.Crack.NSW-VENOM") == \
+        matcher.same_release("Diablo II Resurrected Update v1.0.35.0 incl Offline Crack NSW-VENOM")
+    assert matcher.same_release("Game Update v1.0.1 NSW-A") != matcher.same_release("Game Update v1.0.2 NSW-A")

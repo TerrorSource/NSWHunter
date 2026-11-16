@@ -103,7 +103,11 @@ Daarnaast wordt elke game die iets mist op naam gezocht. Hoe vaak stel je in op 
 
 ## DLC
 
-Met `INCLUDE_DLC=true` krijgt elke ontbrekende DLC een eigen item. Alleen een release met de title ID van die DLC is zeker. Staat alleen de naam erin, dan is het waarschijnlijk of twijfel.
+Met **Ook ontbrekende DLC zoeken** op de tab Configuratie worden ook de DLC's gezocht die je bibliotheek mist. Ze staan in de kaart van de game, onder de update.
+
+- Een release met de title ID van de DLC krijgt score 10.
+- Staat de naam van de DLC in de titel, dan is de score 8. Heeft een game meerdere DLC's met bijna dezelfde naam ("In-Game Commentary - Dutch", "... - Spanish"), dan hoort een release bij de DLC die hij het best noemt en valt hij bij de andere af.
+- Een release die alleen zegt dat het DLC van de game is ("DLC Unlocker", "DLC Pack") krijgt score 3 en staat bij elke ontbrekende DLC van die game.
 
 ## Ontwikkelen en testen
 

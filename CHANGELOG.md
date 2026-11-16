@@ -2,6 +2,20 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.5.0] - 2026-11-16
+
+### Opgelost
+
+- Een game stond er net zo vaak in als hij DLC's mist (EA SPORTS FC 25 en 26 samen 22 keer), en onder elke DLC stonden ook de releases van de andere DLC's. Een release hoort nu bij de DLC die hij het best noemt en valt bij de andere af.
+- Na het downloaden van een release verdwenen de andere releases van die game uit beeld. Ze blijven nu staan; de verstuurde is gemarkeerd en een andere kan alsnog gedownload worden.
+- Dezelfde release stond dubbel als twee indexers hem met punten en met spaties schrijven.
+
+### Gewijzigd
+
+- **Eén kaart per game** met daarin de update en alle ontbrekende DLC's. De tabbladen tellen games. **Negeer** op de kaart negeert alles van de game; per update of DLC kan het ook.
+- Komt een verstuurde update binnen die niet de nieuwste was, dan staat de game weer bij Te beoordelen in plaats van na 48 uur als "niet aangekomen" te gelden.
+- Woorden uit de naam van een DLC tellen niet meer als "extra woorden in de titel".
+
 ## [1.4.0] - 2026-11-16
 
 ### Toegevoegd

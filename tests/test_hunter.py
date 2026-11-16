@@ -14,6 +14,7 @@ from fakes import NZB, make_fakes
 ALAN, ALAN_DLC, HADES, SCARLET, HOLLOW, NARUTO = (
     "0100623017A58000", "0100623017A59001", "0100AAAA0000A000", "0100BBBB0000B000", "0100DDDD0000D000",
     "0100EEEE0000E000")
+EA_DUTCH, EA_SPANISH = "0100FFFF0000F001", "0100FFFF0000F002"
 
 
 def run(test, **settings):
@@ -168,7 +169,7 @@ def test_every_game_is_searched_once_per_interval():
 def test_test_buttons_use_the_values_of_the_form():
     async def test(hunter, fakes):
         good = config.overlay({})
-        assert await hunter.test("slm", good) == "6 games in de bibliotheek"
+        assert await hunter.test("slm", good) == "7 games in de bibliotheek"
         assert await hunter.test("prowlarr", good) == "Prowlarr 2.0.0, 1 usenet-indexer"
         assert await hunter.test("downloader", good) == "NZBGet 24.5"
         assert await hunter.test("downloader", config.overlay({"DOWNLOAD_CLIENT": "prowlarr"})) == "via Prowlarr: NZBGet"
@@ -217,6 +218,51 @@ def test_dlc_is_its_own_item():
         # The DLC release is not offered as the update.
         assert "Alan Wake Remastered [0100623017A59001][v0] DLC" not in titles(hunter, ALAN)
     run(test, INCLUDE_DLC=True)
+
+
+def test_each_dlc_gets_only_its_own_releases():
+    """Twenty DLCs that differ in one word: a release belongs to the DLC it names best, and the
+    same release with dots instead of spaces is listed once."""
+    async def test(hunter, fakes):
+        await hunter.round()
+        assert titles(hunter, EA_DUTCH) == ["EA SPORTS FC 25 In-Game Commentary Dutch DLC NSW-VENOM"]
+        assert titles(hunter, EA_SPANISH) == ["EA SPORTS FC 25 In-Game Commentary Spanish DLC NSW-VENOM"]
+        found = hunter.state["items"][EA_DUTCH]["candidates"][0]
+        assert found["score"] == 8 and found["reasons"] == ["naam komt overeen", "naam van de DLC staat in de titel"]
+    run(test, INCLUDE_DLC=True)
+
+
+def test_other_releases_stay_after_one_was_sent():
+    """The user's case: one release sent, the newer one next to it must stay in view."""
+    async def test(hunter, fakes):
+        await hunter.round()
+        item = hunter.state["items"][ALAN]
+        older = next(c for c in item["candidates"] if "v131072" in c["title"])
+        before = titles(hunter, ALAN)
+        await hunter.grab(ALAN, older["guid"])
+        shown = next(i for i in hunter.view()["items"] if i["key"] == ALAN)
+        assert shown["status"] == "sent" and shown["sent"] == [older["guid"]]
+        assert [c["title"] for c in shown["candidates"]] == before
+        # A second one can still be sent; both are marked.
+        await hunter.grab(ALAN, item["candidates"][0]["guid"])
+        assert item["sent"] == [older["guid"], item["candidates"][0]["guid"]]
+    run(test)
+
+
+def test_sent_update_that_is_not_the_newest_arrives():
+    async def test(hunter, fakes):
+        await hunter.round()
+        item = hunter.state["items"][ALAN]
+        await hunter.grab(ALAN, next(c["guid"] for c in item["candidates"] if "v131072" in c["title"]))
+        fakes["library"][0].update(localUpdate=131072, version="1.0.2")
+        await hunter.round()
+        item = hunter.state["items"][ALAN]
+        assert item["grab"] is None and item["blocked"] == []
+        assert any("Er is nog een nieuwere update" in e["text"] for e in hunter.state["events"])
+        # What it has now is no longer offered; the newest still is.
+        assert "[NSW] Alan Wake Remastered (Update v131072) (EUR)" not in titles(hunter, ALAN)
+        assert titles(hunter, ALAN)[0] == "Alan Wake Remastered [0100623017A58800][v196608].nsz"
+    run(test)
 
 
 def test_grab_through_prowlarr():

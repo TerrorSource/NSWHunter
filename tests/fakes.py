@@ -26,6 +26,12 @@ LIBRARY = [
     title("0100CCCC0000C000", "Stardew Valley", 131072, 131072, "1.6.9"),
     title("0100DDDD0000D000", "Hollow Knight", 65536, 131072, "1.4.3"),
     title("0100EEEE0000E000", "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS", 655360, 720896, "1.7.0"),
+    # Up to date, but with DLCs that differ in one word, as in the user's library.
+    title("0100FFFF0000F000", "EA SPORTS FC™ 25", 65536, 65536, "1.0.1", dlc=[
+        {"id": "0100FFFF0000F001", "name": "EA SPORTS FC™ 25 In-Game Commentary - Dutch", "status": "missing"},
+        {"id": "0100FFFF0000F002", "name": "EA SPORTS FC™ 25 In-Game Commentary - Spanish", "status": "missing"},
+        {"id": "0100FFFF0000F003", "name": "EA SPORTS FC™ 25 In-Game Commentary - Latin American Spanish",
+         "status": "owned"}]),
 ]
 
 RELEASES = [
@@ -41,6 +47,10 @@ RELEASES = [
     ("Pokemon Scarlet The Hidden Treasure Update v262144", "2023-12-14", 2900000000),
     ("Stardew Valley Update v131072", "2024-11-05", 90000000),
     ("Some Unrelated Game Update v65536 NSW", "2024-01-01", 1),
+    ("EA SPORTS FC 25 In-Game Commentary Dutch DLC NSW-VENOM", "2024-09-20", 1600000000),
+    ("EA.SPORTS.FC.25.In-Game.Commentary.Dutch.DLC.NSW-VENOM", "2024-09-20", 1600000000),
+    ("EA SPORTS FC 25 In-Game Commentary Spanish DLC NSW-VENOM", "2024-09-20", 1300000000),
+    ("EA SPORTS FC 25 In-Game Commentary Latin American Spanish DLC NSW-VENOM", "2024-09-20", 1500000000),
     # The same name as the Switch update, but posted in PC > Games (4050): not for the Switch.
     ("Hades.Update.v131072-PCGROUP", "2021-03-02", 150000000, 4050),
     # Real names from the user's Prowlarr: three language variants per update.

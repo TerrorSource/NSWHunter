@@ -149,10 +149,9 @@ class Hunter:
             if name == "Unknown title":
                 name = ""  # nothing to match on; only a title ID can identify it
             update = bool(title.get("updateMissing")) and not title.get("updatesIgnored")
-            missing_dlc = [
-                {"id": str(d.get("id", "")).upper(), "name": d.get("name") or ""}
-                for d in title.get("dlc") or [] if d.get("status") == "missing"
-            ] if config.INCLUDE_DLC else []
+            all_dlc = [{"id": str(d.get("id", "")).upper(), "name": d.get("name") or "",
+                        "status": d.get("status")} for d in title.get("dlc") or [] if isinstance(d, dict)]
+            missing_dlc = [d for d in all_dlc if d["status"] == "missing"] if config.INCLUDE_DLC else []
             if not update and not missing_dlc:
                 continue
             game = matcher.Game(
@@ -160,7 +159,7 @@ class Hunter:
                 local_version=int(title.get("localUpdate") or 0),
                 latest_version=int(title.get("latestUpdate") or 0),
                 local_display=title.get("version") or None,
-                dates=self.dates_for(game_id), missing_dlc=missing_dlc)
+                dates=self.dates_for(game_id), missing_dlc=missing_dlc, dlc=all_dlc)
             games[game_id] = game
             shown = name or game_id
             if update:
@@ -184,6 +183,11 @@ class Hunter:
             item = items.setdefault(key, {
                 "key": key, "candidates": [], "blocked": [], "ignored": False,
                 "grab": None, "first_seen": int(time.time())})
+            grab = item.get("grab")
+            if grab and facts.get("local_version", 0) > grab.get("local_version", facts.get("local_version", 0)):
+                # What was sent arrived, but it was not the newest update: choose again.
+                self.event(f"Binnen: {grab['title']}. Er is nog een nieuwere update.")
+                item["grab"] = None
             item.update(facts)
         self.games = games
         self.state["library"] = {
@@ -251,7 +255,8 @@ class Hunter:
         if any(c["guid"] == release["guid"] for c in item["candidates"]):
             return False
         # The same release on several indexers: keep the one from the indexer that goes first.
-        twin = next((c for c in item["candidates"] if c["title"].lower() == release["title"].lower()), None)
+        same = matcher.same_release(release["title"])
+        twin = next((c for c in item["candidates"] if matcher.same_release(c["title"]) == same), None)
         if twin and twin.get("priority", DEFAULT_PRIORITY) <= release["priority"]:
             return False
         candidate = self.judge(item, release)
@@ -267,8 +272,11 @@ class Hunter:
     def reevaluate(self):
         """The library changed (new local version, newer update out): judge everything again."""
         for item in self.state["items"].values():
-            fresh = [self.judge(item, c) for c in item["candidates"]]
-            item["candidates"] = sorted((c for c in fresh if c), key=best_first)
+            fresh = sorted((c for c in (self.judge(item, c) for c in item["candidates"]) if c), key=best_first)
+            kept = {}
+            for candidate in sorted(fresh, key=lambda c: c.get("priority", DEFAULT_PRIORITY)):
+                kept.setdefault(matcher.same_release(candidate["title"]), candidate)
+            item["candidates"] = [c for c in fresh if c in kept.values()]
 
     def ladder_text(self, game_id):
         """For the panel: which display version is which update, from the library's own up."""
@@ -408,7 +416,11 @@ class Hunter:
             # Prowlarr only grabs what it found in the last half hour: search again, try once more.
             await self.search_game(item["game_id"])
             await clients.send(self.session, candidate)
-        item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto}
+        item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto,
+                        "local_version": item.get("local_version", 0)}
+        item.setdefault("sent", [])
+        if guid not in item["sent"]:
+            item["sent"].append(guid)
         how = "Automatisch verstuurd" if auto else "Verstuurd"
         self.event(f"{how}: {candidate['title']}", "grab")
         self.save()

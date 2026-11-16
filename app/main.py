@@ -120,7 +120,9 @@ async def do_search(hunter, body):
 
 
 async def do_ignore(hunter, body):
-    hunter.state["items"][str(body["key"])]["ignored"] = bool(body["ignored"])
+    """Ignore one item, or every item of a game at once (keys)."""
+    for key in body.get("keys") or [body["key"]]:
+        hunter.state["items"][str(key)]["ignored"] = bool(body["ignored"])
     hunter.save()
 
 

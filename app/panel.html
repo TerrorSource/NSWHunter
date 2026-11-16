@@ -78,6 +78,10 @@
   .cand .name { overflow-wrap: anywhere; }
   .cand a { color: inherit; }
   .cand .acts { display: flex; gap: 4px; }
+  .part { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+          background: color-mix(in srgb, var(--mute-bg) 45%, transparent); }
+  .part b { font-weight: 600; }
+  .rest { border-top: 1px solid var(--line); padding: 9px 14px; color: var(--soft); font-size: 13px; }
   .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .empty { color: var(--soft); text-align: center; padding: 40px 0; }
   .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
@@ -181,10 +185,22 @@ function size(bytes) {
   return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + " GB" : Math.round(bytes / 1048576) + " MB";
 }
 function day(iso) { return iso ? iso.slice(0, 10) : ""; }
-function inTab(item, name) {
+// One card per game: its missing update and all its missing DLC together.
+function games() {
+  const byGame = new Map();
+  for (const item of state.items) {
+    if (!byGame.has(item.game_id)) byGame.set(item.game_id, {id: item.game_id, name: item.name, items: []});
+    byGame.get(item.game_id).items.push(item);
+  }
+  const order = g => g.items.some(i => i.status === "review") ? 0 : g.items.some(i => i.status === "sent") ? 1 : 2;
+  return [...byGame.values()].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+}
+function inTab(game, name) {
+  const has = status => game.items.some(i => i.status === status);
   if (name === "all") return true;
-  if (name === "open") return item.status === "new" || item.status === "none";
-  return item.status === name;
+  if (name === "review" || name === "sent") return has(name);
+  if (name === "ignored") return game.items.every(i => i.status === "ignored");
+  return !has("review") && !has("sent") && (has("new") || has("none"));
 }
 
 async function post(path, body, key) {
@@ -219,6 +235,7 @@ function candidate(item, c, first) {
     c.estimated_version ? (c.deduced ? "" : "waarschijnlijk ") + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
   const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
   const safe = /^https?:\/\//.test(c.infoUrl || "");
+  const sent = (item.sent || []).includes(c.guid);
   return h("div", {class: "cand" + (first ? " first" : "")},
     h("div", {}, score(c.score),
       c.guid === item.auto_guid ? h("div", {class: "sub"}, "gaat vanzelf") : null),
@@ -227,45 +244,79 @@ function candidate(item, c, first) {
       h("div", {class: "sub"}, meta),
       h("div", {class: "sub"}, c.reasons.join("; "))),
     h("div", {class: "acts"},
-      h("button", {class: first ? "primary" : "", disabled: busy.has(c.guid),
-                   onclick: () => post("/api/grab", {key: item.key, guid: c.guid}, c.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))}, "Download"),
+      sent ? h("span", {class: "badge sent"}, "verstuurd") : null,
+      h("button", {class: first && !sent ? "primary" : "", disabled: busy.has(c.guid),
+                   onclick: () => post("/api/grab", {key: item.key, guid: c.guid}, c.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))},
+        sent ? "Nog eens" : "Download"),
       h("button", {class: "quiet", title: "Deze release nooit meer tonen",
                    onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Verwerp")));
 }
 
-function itemCard(item) {
-  const label = {review: "te beoordelen", sent: "verstuurd", none: "niets gevonden", new: "nog niet gezocht", ignored: "genegeerd"}[item.status];
-  const searching = busy.has("s" + item.key);
-  const count = item.candidates.length, best = count ? item.candidates[0].score : 0;
-  const has = count > 0 && !item.grab && !item.ignored, shown = has && expanded.has(item.key);
-  const names = h("div", {},
-    h("div", {class: "title"}, item.name),
-    h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
-      item.last_search ? " · gezocht " + ago(item.last_search) : ""),
-    shown && item.ladder && item.ladder.length > 1 ? h("div", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
-      item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null);
-  const card = h("div", {class: "item"},
-    h("div", {class: "head"},
-      // Collapsed by default: a click on the name shows the releases.
-      has ? h("button", {class: "toggle", "aria-expanded": shown ? "true" : "false",
-                         onclick: () => { shown ? expanded.delete(item.key) : expanded.add(item.key); renderList(); }},
-              h("span", {class: "arrow"}, "▸"), names)
-          : h("div", {class: "grow"}, names),
-      has ? h("span", {class: "sub"}, count + (count === 1 ? " release" : " releases")) : null,
-      has ? score(best, "Hoogste score van de gevonden releases") : h("span", {class: "badge " + item.status}, label),
-      h("button", {disabled: searching,
-                   onclick: () => post("/api/search", {key: item.key}, "s" + item.key).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
-        searching ? "Zoeken…" : "Zoek nu"),
-      h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
-        item.ignored ? "Niet meer negeren" : "Negeer")));
+// One missing thing of a game (the update, or one DLC) with its releases.
+function part(item) {
+  const what = item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id) : "Update";
+  const rows = [h("div", {class: "part"},
+    h("span", {class: "grow"}, h("b", {}, what),
+      item.type === "update" && item.ladder && item.ladder.length > 1
+        ? h("span", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
+            "  " + item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null),
+    item.ignored ? h("span", {class: "badge"}, "genegeerd") : null,
+    h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
+      item.ignored ? "Niet meer negeren" : "Negeer"))];
   if (item.grab) {
-    card.append(h("div", {class: "sent-row"},
+    rows.push(h("div", {class: "sent-row"},
       h("span", {class: "badge sent"}, item.grab.auto ? "automatisch verstuurd" : "verstuurd"),
       h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
-      h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is en kies opnieuw",
-                   onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Opnieuw kiezen")));
-  } else if (shown) {
-    card.append(h("div", {class: "cands"}, item.candidates.map((c, i) => candidate(item, c, i === 0))));
+      h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is, zodat het weer bij Te beoordelen staat",
+                   onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Niet verstuurd")));
+  }
+  // The other releases stay in view after one was sent: another can still be chosen.
+  if (!item.ignored) rows.push(...item.candidates.map((c, i) => candidate(item, c, i === 0 && !item.grab)));
+  return rows;
+}
+
+function gameCard(game) {
+  const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
+  const live = game.items.filter(i => !i.ignored);
+  const review = live.filter(i => i.status === "review"), sent = live.filter(i => i.status === "sent");
+  const count = review.reduce((n, i) => n + i.candidates.length, 0);
+  const best = Math.max(0, ...review.flatMap(i => i.candidates.map(c => c.score || 0)));
+  const withSomething = game.items.filter(i => i.candidates.length || i.grab);
+  const empty = game.items.filter(i => !i.candidates.length && !i.grab);
+  const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
+  const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
+  const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
+  const label = allIgnored ? ["ignored", "genegeerd"] : sent.length ? ["sent", "verstuurd"]
+    : game.items.some(i => i.status === "none") ? ["none", "niets gevonden"] : ["new", "nog niet gezocht"];
+  const names = h("div", {},
+    h("div", {class: "title"}, game.name),
+    h("div", {class: "sub"}, h("span", {class: "mono"}, game.id),
+      update ? " · " + versions(update) : "",
+      dlc.length ? " · " + dlc.length + " DLC " + (dlc.length === 1 ? "ontbreekt" : "ontbreken") : "",
+      searched ? " · gezocht " + ago(searched) : ""));
+  const card = h("div", {class: "item"},
+    h("div", {class: "head"},
+      // Collapsed by default: a click on the name shows what is missing and the releases.
+      can ? h("button", {class: "toggle", "aria-expanded": shown ? "true" : "false",
+                         onclick: () => { shown ? expanded.delete(game.id) : expanded.add(game.id); renderList(); }},
+              h("span", {class: "arrow"}, "▸"), names)
+          : h("div", {class: "grow"}, names),
+      count ? h("span", {class: "sub"}, count + (count === 1 ? " release" : " releases")) : null,
+      sent.length && count ? h("span", {class: "badge sent"}, sent.length + " verstuurd") : null,
+      count ? score(best, "Hoogste score van de gevonden releases") : h("span", {class: "badge " + label[0]}, label[1]),
+      h("button", {disabled: searching,
+                   onclick: () => post("/api/search", {key: game.items[0].key}, "s" + game.id).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
+        searching ? "Zoeken…" : "Zoek nu"),
+      h("button", {class: "quiet", title: "Alles van deze game negeren",
+                   onclick: () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + game.id)},
+        allIgnored ? "Niet meer negeren" : "Negeer")));
+  if (shown) {
+    const first = i => (i.type === "update" ? 0 : 1) * 100 - Math.max(0, ...i.candidates.map(c => c.score || 0));
+    for (const item of withSomething.sort((a, b) => first(a) - first(b))) card.append(...part(item));
+    if (empty.length) {
+      card.append(h("div", {class: "rest"}, "Nog niets gevonden voor: " +
+        empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "de update").join(" · ")));
+    }
   }
   return card;
 }
@@ -290,13 +341,13 @@ function render() {
     !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is nog niet ingesteld. Vul de tab Configuratie in.") : null,
     ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.text)) : []));
 
-  const count = name => state.items.filter(i => inTab(i, name)).length;
+  const all = games(), count = name => all.filter(g => inTab(g, name)).length;
   put($("stats"), 
     h("div", {class: "stat"}, h("b", {}, state.library.games), h("span", {}, "games in je bibliotheek")),
     h("div", {class: "stat"}, h("b", {}, state.library.updates), h("span", {}, "updates ontbreken")),
     state.settings.dlc ? h("div", {class: "stat"}, h("b", {}, state.library.dlc), h("span", {}, "DLC ontbreken")) : null,
-    h("div", {class: "stat"}, h("b", {}, count("review")), h("span", {}, "wachten op je keuze")),
-    h("div", {class: "stat"}, h("b", {}, count("sent")), h("span", {}, "verstuurd, nog niet binnen")));
+    h("div", {class: "stat"}, h("b", {}, count("review")), h("span", {}, "games wachten op je keuze")),
+    h("div", {class: "stat"}, h("b", {}, count("sent")), h("span", {}, "games met iets onderweg")));
 
   put($("tabs"), ...TABS.map(([name, text]) =>
     h("button", {class: tab === name ? "on" : "", onclick: () => { tab = name; render(); }}, text + " (" + count(name) + ")")),
@@ -312,12 +363,12 @@ function render() {
 
 function renderList() {
   const needle = filter.trim().toLowerCase();
-  const items = state.items.filter(i => inTab(i, tab) && (!needle || i.name.toLowerCase().includes(needle) || i.game_id.toLowerCase().includes(needle)));
+  const items = games().filter(g => inTab(g, tab) && (!needle || g.name.toLowerCase().includes(needle) || g.id.toLowerCase().includes(needle)));
   const empty = {
     review: "Niets te beoordelen. Gevonden releases verschijnen hier.",
     sent: "Er is niets onderweg.", open: "Voor alle ontbrekende updates is iets gevonden.",
     ignored: "Je negeert geen games.", all: "Je bibliotheek mist geen updates. Of de eerste ronde loopt nog."}[tab];
-  put($("list"), ...(items.length ? items.map(itemCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
+  put($("list"), ...(items.length ? items.map(gameCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
 }
 
 // ---------------------------------------------------------------- Configuratie

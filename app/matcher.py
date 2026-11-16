@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 IDENTITY = {"tid": 1.0, "exact": 0.9, "extras": 0.5, "fuzzy": 0.35}
 KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0}
 CRACK = 0.9  # an update with a crack holds changed files
+NAMED = 0.6  # the share of a DLC's own words that must be in a title to call it named
 
 # A release may be posted a little before the official date in titledb (time zones, early dumps).
 DATE_SLACK = datetime.timedelta(days=3)
@@ -64,6 +65,7 @@ class Game:
     local_display: str | None = None  # "1.0.2" if the library knows it
     dates: dict = field(default_factory=dict)  # internal version -> datetime.date of release
     missing_dlc: list = field(default_factory=list)  # [{"id": ..., "name": ...}]
+    dlc: list = field(default_factory=list)  # every DLC of the game, owned or not: [{"id", "name"}]
 
 
 @dataclass
@@ -100,6 +102,11 @@ def clean(text):
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"['’‘`´]", "", text.lower())
     return text.replace("&", " and ")
+
+
+def same_release(title):
+    """Two titles with this in common are the same release: indexers differ in dots and spaces."""
+    return " ".join(t for t, _, _ in tokens(clean(title)))
 
 
 def tokens(text):
@@ -482,6 +489,34 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
                      reasons, estimated, deduced)
 
 
+def _dlc_words(game, name, telling=True):
+    """The words of a DLC's name that are its own: not the game's name, not noise. With
+    `telling` also without the words that all DLCs of the game share ("In-Game Commentary -
+    Dutch", "... - Spanish"): those do not tell one DLC from another."""
+    game_tokens = {t for t, _, _ in tokens(clean(game.name))}
+
+    def own(text):
+        words = []
+        for token, _, _ in tokens(clean(text or "")):
+            if token not in game_tokens and not _is_noise(token) and token not in words:
+                words.append(token)
+        return words
+
+    all_words = [own(d.get("name", "")) for d in game.dlc]
+    shared = {t for words in all_words for t in words
+              if len(all_words) > 1 and all(t in other for other in all_words)}
+    mine = own(name)
+    if not telling:
+        return mine
+    return [t for t in mine if t not in shared] or mine
+
+
+def _named(words, own):
+    """How well a release names a DLC: (share of the DLC's own words in the title, how many)."""
+    hits = [t for t in own if t in words]
+    return (len(hits) / len(own), len(hits)) if own else (0.0, 0)
+
+
 def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
     """A missing DLC: only its own title ID makes it certain; a name is a guess."""
     dlc_id = (dlc or {}).get("id", "").upper()
@@ -493,18 +528,27 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
         return Rejection("geen DLC")
     if name_match == "fuzzy":
         return Rejection("naam komt niet overeen")
-    dlc_tokens = [t for t, _, _ in tokens(clean((dlc or {}).get("name", "")))]
-    game_tokens = {t for t, _, _ in tokens(clean(game.name))}
-    own = [t for t in dlc_tokens if t not in game_tokens and not _is_noise(t)]
     words = {t for t, _, _ in tokens(text)}
-    left = [e for e in extras if e not in dlc_tokens]
-    named = [t for t in own if t in words]
-    if own and len(named) >= max(1, round(len(own) * 0.6)):
-        reasons.append("naam van de DLC staat in de titel")
-        chance = 0.7  # that it is this DLC
+    own = _dlc_words(game, (dlc or {}).get("name", ""))
+    mine = _named(words, own)
+    # A game can have twenty DLCs with almost the same name ("Commentary - Dutch", "... -
+    # Spanish"). A release that names another one better is that other one.
+    others = [(_named(words, _dlc_words(game, other.get("name", ""))), other.get("name", ""))
+              for other in game.dlc if str(other.get("id", "")).upper() != dlc_id]
+    rival = max(others, default=((0.0, 0), ""))
+    if rival[0][0] >= NAMED and rival[0] > mine:
+        return Rejection(f"is een andere DLC van deze game: {rival[1]}")
+    # Words of the DLC's name between the game's name and "DLC" are not extra words.
+    whole = _dlc_words(game, (dlc or {}).get("name", ""), telling=False)
+    left = [e for e in extras if e not in whole]
+    reasons = ["extra woorden in de titel: " + " ".join(left)] if left else ["naam komt overeen"]
+    if mine[0] >= NAMED:
+        only = rival[0] < mine
+        chance = 0.85 if only else 0.6
+        reasons.append("naam van de DLC staat in de titel" + ("" if only else "; past ook bij een andere DLC"))
     else:
-        reasons.append("DLC van deze game, maar niet te zien welke")
         chance = 0.3
+        reasons.append("DLC van deze game, maar niet te zien welke")
     kind = "dlc" if kind == "dlc" else "bundle"
     return Candidate(mark("extras" if left else "exact", chance, kind), "dlc", name_match,
                      None, None, None, reasons)
