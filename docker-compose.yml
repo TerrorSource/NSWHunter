@@ -8,19 +8,6 @@ services:
       - TZ=Etc/UTC
       - PUID=1000
       - PGID=1000
-      - SLM_URL=http://192.168.1.10:3000
-      - SLM_API_KEY=
-      - PROWLARR_URL=http://192.168.1.10:9696
-      - PROWLARR_API_KEY=
-      - DOWNLOAD_CLIENT=nzbget
-      - DOWNLOAD_CATEGORY=games
-      - NZBGET_URL=http://192.168.1.10:6789
-      - NZBGET_USER=nzbget
-      - NZBGET_PASSWORD=
-      - AUTO_DOWNLOAD=off
-      - INCLUDE_DLC=false
-      - PANEL_USER=admin
-      - PANEL_PASSWORD=
     ports:
       - 3033:3033
     volumes:

@@ -21,6 +21,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
@@ -76,7 +77,26 @@
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
            padding: 9px 16px; border-radius: 9px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
   #toast.show { opacity: 1; }
-  @media (max-width: 640px) { .cand { grid-template-columns: 1fr; } }
+  .views { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .views button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+                  font-size: 15px; padding: 8px 14px; color: var(--soft); }
+  .views button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  fieldset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin: 0 0 12px; padding: 14px 16px 6px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  .field { display: grid; grid-template-columns: 190px 1fr; gap: 4px 14px; align-items: center; margin-bottom: 12px; }
+  .field label { color: var(--soft); font-size: 14px; }
+  .field .help { grid-column: 2; color: var(--soft); font-size: 13px; }
+  .field .row { display: flex; gap: 6px; align-items: center; }
+  .field input[type=text], .field input[type=url], .field input[type=password], .field select {
+    font: inherit; width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); }
+  .field input:focus, .field select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .savebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .results { margin-top: 12px; display: grid; gap: 6px; }
+  .results div { padding: 8px 12px; border-radius: 8px; background: var(--good-bg); color: var(--good); font-size: 14px; }
+  .results div.bad { background: var(--bad-bg); color: var(--bad); }
+  @media (max-width: 640px) { .cand { grid-template-columns: 1fr; } .field { grid-template-columns: 1fr; } .field .help { grid-column: 1; } }
 </style>
 </head>
 <body>
@@ -86,15 +106,21 @@
     <span class="line grow" id="statusline">Laden…</span>
     <button class="primary" id="sync">Nu synchroniseren</button>
   </header>
+  <nav class="views" id="views"></nav>
   <div class="chips" id="chips"></div>
   <div id="notice"></div>
-  <div class="stats" id="stats"></div>
-  <div class="tabs" id="tabs"></div>
-  <div id="list"></div>
-  <details>
-    <summary>Logboek</summary>
-    <div class="log" id="log"></div>
-  </details>
+  <section id="view-updates">
+    <div class="stats" id="stats"></div>
+    <div class="tabs" id="tabs"></div>
+    <div id="list"></div>
+    <details>
+      <summary>Logboek</summary>
+      <div class="log" id="log"></div>
+    </details>
+  </section>
+  <section id="view-config" hidden>
+    <form id="config" autocomplete="off"></form>
+  </section>
 </main>
 <div id="toast"></div>
 <script>
@@ -111,7 +137,11 @@ function h(tag, attrs, ...children) {
   return el;
 }
 const $ = id => document.getElementById(id);
+function put(el, ...children) {
+  el.replaceChildren(...children.flat().filter(c => c !== null && c !== undefined && c !== false));
+}
 let state = null, tab = "review", filter = "", busy = new Set();
+let view = "updates", settings = null, clearing = new Set(), opened = false;
 
 const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
 const CONFIDENCE = {sure: "Zeker", likely: "Waarschijnlijk", uncertain: "Twijfel"};
@@ -215,31 +245,35 @@ function render() {
   const st = state.status;
   $("statusline").textContent = st.running ? "Bezig: " + (st.phase || "…")
     : "Laatste ronde " + ago(st.last_run) + (st.next_run ? " · volgende over " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
-  $("sync").disabled = st.running;
+  $("sync").disabled = st.running || !state.configured;
+  put($("views"), ...[["updates", "Updates"], ["config", "Configuratie"]].map(([name, text]) =>
+    h("button", {class: view === name ? "on" : "", onclick: () => show(name)}, text)));
 
-  $("chips").replaceChildren(...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
+  put($("chips"), ...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
     h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
     h("span", {class: "chip"}, "Automatisch downloaden " + AUTO[state.settings.auto]),
     h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")));
-  const errors = Object.entries(state.services).filter(([, s]) => !s.ok);
-  $("notice").replaceChildren(...errors.map(([, s]) => h("div", {class: "notice"}, s.text)));
+  const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
+  put($("notice"), 
+    !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is nog niet ingesteld. Vul de tab Configuratie in.") : null,
+    ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.text)) : []));
 
   const count = name => state.items.filter(i => inTab(i, name)).length;
-  $("stats").replaceChildren(
+  put($("stats"), 
     h("div", {class: "stat"}, h("b", {}, state.library.games), h("span", {}, "games in je bibliotheek")),
     h("div", {class: "stat"}, h("b", {}, state.library.updates), h("span", {}, "updates ontbreken")),
     state.settings.dlc ? h("div", {class: "stat"}, h("b", {}, state.library.dlc), h("span", {}, "DLC ontbreken")) : null,
     h("div", {class: "stat"}, h("b", {}, count("review")), h("span", {}, "wachten op je keuze")),
     h("div", {class: "stat"}, h("b", {}, count("sent")), h("span", {}, "verstuurd, nog niet binnen")));
 
-  $("tabs").replaceChildren(...TABS.map(([name, text]) =>
+  put($("tabs"), ...TABS.map(([name, text]) =>
     h("button", {class: tab === name ? "on" : "", onclick: () => { tab = name; render(); }}, text + " (" + count(name) + ")")),
     h("span", {class: "grow"}),
     h("input", {type: "search", placeholder: "Filter op naam", value: filter, id: "filter",
                 oninput: e => { filter = e.target.value; renderList(); }}));
   renderList();
 
-  $("log").replaceChildren(...state.events.map(e =>
+  put($("log"), ...state.events.map(e =>
     h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString("nl-NL", {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text))));
 }
 
@@ -250,14 +284,139 @@ function renderList() {
     review: "Niets te beoordelen. Gevonden releases verschijnen hier.",
     sent: "Er is niets onderweg.", open: "Voor alle ontbrekende updates is iets gevonden.",
     ignored: "Je negeert geen games.", all: "Je bibliotheek mist geen updates. Of de eerste ronde loopt nog."}[tab];
-  $("list").replaceChildren(...(items.length ? items.map(itemCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
+  put($("list"), ...(items.length ? items.map(itemCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
 }
+
+// ---------------------------------------------------------------- Configuratie
+const GROUPS = [
+  {title: "Bibliotheek (Switch-library-manager-web)", fields: [
+    {name: "SLM_URL", label: "Adres", placeholder: "http://192.168.1.10:3000"},
+    {name: "SLM_API_KEY", label: "API key", secret: true,
+     help: "Maak hem in Switch-library-manager-web onder My account > API keys > Make a key, met het recht Read only. De key begint met slm_ en wordt maar één keer getoond. Staat inloggen daar uit, laat dit veld dan leeg."}]},
+  {title: "Prowlarr", fields: [
+    {name: "PROWLARR_URL", label: "Adres", placeholder: "http://192.168.1.10:9696"},
+    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "Staat in Prowlarr onder Settings > General > API Key."}]},
+  {title: "Downloadclient", fields: [
+    {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "De downloadclient van Prowlarr"]]},
+    {name: "DOWNLOAD_CATEGORY", label: "Categorie", placeholder: "games", unless: "prowlarr",
+     help: "De categorie die de download in je client krijgt."},
+    {name: "NZBGET_URL", label: "Adres NZBGet", placeholder: "http://192.168.1.10:6789", only: "nzbget"},
+    {name: "NZBGET_USER", label: "Gebruikersnaam", only: "nzbget", help: "ControlUsername in NZBGet onder Settings > Security."},
+    {name: "NZBGET_PASSWORD", label: "Wachtwoord", secret: true, only: "nzbget", help: "ControlPassword in NZBGet."},
+    {name: "SABNZBD_URL", label: "Adres SABnzbd", placeholder: "http://192.168.1.10:8080", only: "sabnzbd"},
+    {name: "SABNZBD_API_KEY", label: "API key", secret: true, only: "sabnzbd", help: "Staat in SABnzbd onder Config > General > API Key."}]},
+  {title: "Gedrag", fields: [
+    {name: "AUTO_DOWNLOAD", label: "Automatisch downloaden", options: [
+      ["off", "Uit: ik kies zelf"], ["sure", "Zekere releases gaan vanzelf"], ["likely", "Zekere en waarschijnlijke releases gaan vanzelf"]],
+     help: "Twijfelgevallen en tussenversies wachten altijd op je keuze."},
+    {name: "INCLUDE_DLC", label: "Ook ontbrekende DLC zoeken", checkbox: true}]},
+  {title: "Paneel", fields: [
+    {name: "PANEL_USER", label: "Gebruikersnaam"},
+    {name: "PANEL_PASSWORD", label: "Wachtwoord", secret: true,
+     help: "Zonder wachtwoord heeft het paneel geen inlog. Na een wijziging vraagt je browser opnieuw om in te loggen."}]},
+];
+
+function fieldRow(f, client) {
+  const id = "f-" + f.name, hidden = (f.only && f.only !== client) || (f.unless && f.unless === client);
+  let control;
+  if (f.options) {
+    control = h("select", {id, name: f.name, onchange: f.name === "DOWNLOAD_CLIENT" ? e => renderConfig(e.target.value) : null},
+      f.options.map(([value, text]) => h("option", {value, selected: settings.values[f.name] === value}, text)));
+  } else if (f.checkbox) {
+    control = h("input", {id, name: f.name, type: "checkbox", checked: settings.values[f.name] === true});
+  } else if (f.secret) {
+    const set = settings.secrets[f.name], wipe = clearing.has(f.name);
+    control = h("div", {class: "row"},
+      h("input", {id, name: f.name, type: "password", autocomplete: "new-password", disabled: wipe,
+                  placeholder: wipe ? "wordt gewist bij opslaan" : set ? "ingesteld; laat leeg om te behouden" : "niet ingesteld"}),
+      set ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(f.name) : clearing.add(f.name); renderConfig(); }},
+        wipe ? "Toch houden" : "Wis") : null);
+  } else {
+    control = h("input", {id, name: f.name, type: "text", value: settings.values[f.name] || "", placeholder: f.placeholder || "", spellcheck: "false"});
+  }
+  return h("div", {class: "field", hidden},
+    h("label", {for: id}, f.label), control, f.help ? h("div", {class: "help"}, f.help) : null);
+}
+
+// Typed but not yet saved values survive a rebuild of the form (switching client, "Wis").
+function typed() {
+  const values = {};
+  for (const el of $("config").elements) {
+    if (!el.name) continue;
+    values[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  }
+  return values;
+}
+
+function renderConfig(client) {
+  const keep = typed();
+  for (const [name, value] of Object.entries(keep)) if (name in settings.values) settings.values[name] = value;
+  if (client) settings.values.DOWNLOAD_CLIENT = client;
+  put($("config"), 
+    ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title), g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)))),
+    h("div", {class: "savebar"},
+      h("button", {class: "primary", type: "submit", id: "save"}, "Opslaan en verbindingen testen"),
+      h("span", {class: "line"}, "Opgeslagen instellingen staan in /data/settings.json en gaan voor op de waarden in je compose.")),
+    h("div", {class: "results", id: "results"}));
+  for (const [name, value] of Object.entries(keep)) {
+    const el = $("config").elements[name];
+    if (el && el.type === "password" && !el.disabled) el.value = value;
+  }
+}
+
+async function openConfig() {
+  try {
+    const r = await fetch("/api/settings");
+    if (!r.ok) throw new Error();
+    settings = await r.json();
+    clearing.clear();
+    put($("config"), );
+    renderConfig();
+  } catch (e) {
+    toast("Instellingen ophalen mislukt");
+  }
+}
+
+function show(name) {
+  view = name;
+  $("view-updates").hidden = name !== "updates";
+  $("view-config").hidden = name !== "config";
+  if (name === "config") openConfig();
+  render();
+}
+
+$("config").addEventListener("submit", async e => {
+  e.preventDefault();
+  const values = typed();
+  $("save").disabled = true; $("save").textContent = "Opslaan en testen…";
+  try {
+    const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
+                                           body: JSON.stringify({values, clear: [...clearing]})});
+    const data = await r.json();
+    if (!data.ok) { toast(data.error || "Opslaan mislukt"); return; }
+    settings = {values: data.values, secrets: data.secrets};
+    clearing.clear();
+    put($("config"), );
+    renderConfig();
+    const order = ["config", "slm", "prowlarr", "downloader"];
+    put($("results"), ...order.filter(n => data.services[n]).map(n =>
+      h("div", {class: data.services[n].ok ? "" : "bad"}, (data.services[n].ok ? "✓ " : "✕ ") + SERVICES[n] + ": " + data.services[n].text)));
+    toast("Instellingen opgeslagen");
+    load();
+  } catch (err) {
+    toast("Geen verbinding met NSWHunter");
+  } finally {
+    if ($("save")) { $("save").disabled = false; $("save").textContent = "Opslaan en verbindingen testen"; }
+  }
+});
 
 async function load() {
   try {
     const r = await fetch("/api/state");
     if (!r.ok) throw new Error();
     state = await r.json();
+    // First visit without settings: go straight to where they are filled in.
+    if (!opened) { opened = true; if (!state.configured) { show("config"); return; } }
     // Keep typing in the filter box: only rebuild around it when it has no focus.
     if (document.activeElement && document.activeElement.id === "filter") renderList(); else render();
   } catch (e) {

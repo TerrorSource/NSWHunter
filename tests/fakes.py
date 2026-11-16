@@ -85,6 +85,9 @@ def make_fakes():
         return web.Response(body=NZB, content_type="application/x-nzb")
 
     async def nzbget(request):
+        # "nzbget:tegen" in base64, the login the tests configure.
+        if request.headers.get("Authorization") != "Basic bnpiZ2V0OnRlZ2Vu":
+            return web.Response(status=401)
         body = await request.json()
         if body["method"] == "version":
             return web.json_response({"result": "24.5"})

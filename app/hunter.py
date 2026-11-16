@@ -350,6 +350,31 @@ class Hunter:
             except clients.ServiceError as e:
                 self.service(name, False, str(e))
 
+    async def test_connections(self):
+        """Try every service with the current settings, right after they were saved."""
+        problems = config.problems()
+        if problems:
+            self.service("config", False, "; ".join(problems))
+        else:
+            self.state["services"].pop("config", None)
+        if config.SLM_URL:
+            try:
+                self.service("slm", True, f"{len(await clients.library(self.session))} games")
+            except clients.ServiceError as e:
+                self.service("slm", False, str(e))
+        if config.PROWLARR_URL:
+            try:
+                self.service("prowlarr", True, str(await clients.prowlarr_status(self.session)))
+            except clients.ServiceError as e:
+                self.service("prowlarr", False, str(e))
+        if not problems or config.DOWNLOAD_CLIENT == "prowlarr":
+            try:
+                self.service("downloader", True, str(await clients.downloader_status(self.session)))
+            except clients.ServiceError as e:
+                self.service("downloader", False, str(e))
+        self.save()
+        return self.state["services"]
+
     async def round(self):
         problems = config.problems()
         if problems:
@@ -431,4 +456,5 @@ class Hunter:
                 "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
                 "interval": config.SYNC_INTERVAL_MINUTES,
             },
+            "configured": not config.problems(),
         }

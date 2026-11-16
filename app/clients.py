@@ -17,7 +17,7 @@ class ServiceError(Exception):
 
 async def _check(response, what):
     if response.status == 401 or response.status == 403:
-        raise ServiceError(f"{what}: geen toegang (HTTP {response.status}), klopt de API key?")
+        raise ServiceError(f"{what}: geen toegang (HTTP {response.status}). Controleer de API key of de inlog.")
     if response.status >= 400:
         body = (await response.text())[:200].strip()
         raise ServiceError(f"{what}: HTTP {response.status} {body}")
@@ -149,9 +149,12 @@ def nzb_filename(title):
 
 
 async def _nzbget(session, method, params):
-    auth = aiohttp.BasicAuth(config.NZBGET_USER, config.NZBGET_PASSWORD) if config.NZBGET_USER else None
+    headers = {}
+    if config.NZBGET_USER:
+        login = f"{config.NZBGET_USER}:{config.NZBGET_PASSWORD}".encode()
+        headers["Authorization"] = "Basic " + base64.b64encode(login).decode()
     try:
-        async with session.post(f"{config.NZBGET_URL}/jsonrpc", auth=auth, timeout=LONG,
+        async with session.post(f"{config.NZBGET_URL}/jsonrpc", headers=headers, timeout=LONG,
                                 json={"method": method, "params": params, "id": 1}) as r:
             await _check(r, "NZBGet")
             data = await r.json(content_type=None)

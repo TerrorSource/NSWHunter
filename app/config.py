@@ -1,4 +1,7 @@
-"""Settings, all from environment variables (see .env.example)."""
+"""Settings. The ones in EDITABLE can be changed on the Configuratie tab of the panel and are
+then kept in /data/settings.json; a saved value wins from the environment variable of the same
+name. Everything else comes from environment variables only (see .env.example)."""
+import json
 import os
 
 
@@ -26,6 +29,7 @@ TZ = env("TZ", "Etc/UTC")
 DATA_DIR = env("DATA_DIR", "/data")
 PORT = int(number("PORT", 3033))
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
 
 # Switch-library-manager-web: the library and what is missing.
@@ -73,6 +77,99 @@ TITLEDB_VERSIONS_URL = env(
 PANEL_USER = env("PANEL_USER", "admin")
 PANEL_PASSWORD = env("PANEL_PASSWORD")
 NOTIFY_URLS = env("NOTIFY_URLS")
+
+
+# ---------------------------------------------------------------- the Configuratie tab
+
+CLIENTS = ("nzbget", "sabnzbd", "prowlarr")
+AUTO_LEVELS = ("off", "sure", "likely")
+# name -> kind: "url", "text", "secret", "bool", or the tuple of allowed values.
+EDITABLE = {
+    "SLM_URL": "url", "SLM_API_KEY": "secret",
+    "PROWLARR_URL": "url", "PROWLARR_API_KEY": "secret",
+    "DOWNLOAD_CLIENT": CLIENTS, "DOWNLOAD_CATEGORY": "text",
+    "NZBGET_URL": "url", "NZBGET_USER": "text", "NZBGET_PASSWORD": "secret",
+    "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
+    "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool",
+    "PANEL_USER": "text", "PANEL_PASSWORD": "secret",
+}
+SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
+
+
+def normalize(name, value):
+    """A value from the form or the settings file in the shape the app uses. ValueError with a
+    message for the user if it cannot be right."""
+    kind = EDITABLE[name]
+    if kind == "bool":
+        return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on", "ja")
+    value = str(value if value is not None else "").strip()
+    if len(value) > 500 or any(ord(c) < 32 for c in value):
+        raise ValueError(f"{name}: ongeldige waarde")
+    if kind == "url":
+        value = value.rstrip("/")
+        if value and not value.lower().startswith(("http://", "https://")):
+            raise ValueError(f"{name}: begin het adres met http:// of https://")
+    elif isinstance(kind, tuple):
+        value = value.lower()
+        if value not in kind:
+            raise ValueError(f"{name}: kies uit {', '.join(kind)}")
+    elif name == "PANEL_USER" and (not value or ":" in value):
+        raise ValueError("PANEL_USER: vul een naam in, zonder dubbele punt")
+    return value
+
+
+def saved():
+    try:
+        with open(SETTINGS_FILE) as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if k in EDITABLE} if isinstance(data, dict) else {}
+
+
+def load_saved():
+    """Put the saved settings on top of the environment. Called once at start."""
+    for name, value in saved().items():
+        try:
+            globals()[name] = normalize(name, value)
+        except ValueError:
+            continue
+
+
+def update(values, clear=()):
+    """Save settings from the Configuratie tab and use them from now on.
+
+    An empty secret means "keep what is there": the panel never gets a secret back, so it
+    cannot send it again. A name in `clear` empties that secret. Returns what really changed."""
+    new = {}
+    for name, value in values.items():
+        if name not in EDITABLE:
+            raise ValueError(f"Onbekende instelling: {name}")
+        if name in SECRETS and str(value or "").strip() == "":
+            continue
+        new[name] = normalize(name, value)
+    for name in clear:
+        if name not in SECRETS:
+            raise ValueError(f"Onbekende instelling: {name}")
+        new[name] = ""
+    data = {**saved(), **new}
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    # Keys and passwords: readable for the app user only.
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+    changed = sorted(name for name, value in new.items() if globals()[name] != value)
+    globals().update(new)
+    return changed
+
+
+def editable():
+    """What the Configuratie tab shows: values, and for secrets only whether one is set."""
+    return {
+        "values": {n: globals()[n] for n in EDITABLE if n not in SECRETS},
+        "secrets": {n: bool(globals()[n]) for n in SECRETS},
+    }
 
 
 def problems():

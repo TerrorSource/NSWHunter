@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="NSWHunter" \
       org.opencontainers.image.description="Zoekt ontbrekende Switch-updates uit switch-library-manager-web via Prowlarr en stuurt ze naar je usenet-client" \

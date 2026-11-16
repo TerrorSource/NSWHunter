@@ -16,6 +16,8 @@ def test_changelog_has_entry_for_version():
 
 
 def test_compose_file_holds_no_filled_in_secrets():
-    """docker-compose.yml goes to GitHub: keys and passwords are filled in on the NAS, not here."""
+    """docker-compose.yml goes to GitHub: keys and passwords are set in the panel, not here."""
     with open(os.path.join(ROOT, "docker-compose.yml"), encoding="utf-8") as f:
-        assert not re.search(r"(API_KEY|PASSWORD)=\S", f.read())
+        text = f.read()
+    assert not re.search(r"(API_KEY|PASSWORD)=\S", text)
+    assert "3033:3033" in text and "ghcr.io/<account>/nswhunter" in text

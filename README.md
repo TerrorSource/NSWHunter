@@ -12,7 +12,7 @@ Staat de update daarna in je bibliotheek, dan verdwijnt het item vanzelf.
 
 ## Installeren
 
-Het image staat op `ghcr.io/<account>/nswhunter`. In Portainer: **Stacks > Add stack**, plak [docker-compose.yml](docker-compose.yml) en vul de waarden in.
+Het image staat op `ghcr.io/<account>/nswhunter`. In Portainer: **Stacks > Add stack** en plak [docker-compose.yml](docker-compose.yml):
 
 ```yaml
 services:
@@ -25,38 +25,29 @@ services:
       - TZ=Etc/UTC
       - PUID=1000
       - PGID=1000
-      - SLM_URL=http://192.168.1.10:3000
-      - SLM_API_KEY=
-      - PROWLARR_URL=http://192.168.1.10:9696
-      - PROWLARR_API_KEY=
-      - DOWNLOAD_CLIENT=nzbget
-      - DOWNLOAD_CATEGORY=games
-      - NZBGET_URL=http://192.168.1.10:6789
-      - NZBGET_USER=nzbget
-      - NZBGET_PASSWORD=
-      - AUTO_DOWNLOAD=off
-      - INCLUDE_DLC=false
-      - PANEL_USER=admin
-      - PANEL_PASSWORD=
     ports:
       - 3033:3033
     volumes:
       - /path/to/nswhunter/data:/data
 ```
 
-| Instelling | Waar je hem vindt |
-|---|---|
-| `SLM_URL`, `SLM_API_KEY` | Switch-library-manager-web > Mijn account > API keys > maak een key met "Alleen lezen". De key begint met `slm_`. |
-| `PROWLARR_URL`, `PROWLARR_API_KEY` | Prowlarr > Settings > General > API Key |
-| `NZBGET_URL`, `NZBGET_USER`, `NZBGET_PASSWORD` | NZBGet > Settings > Security (ControlUsername en ControlPassword) |
-| `AUTO_DOWNLOAD` | `off`, `sure` of `likely`, zie [Automatisch downloaden](#automatisch-downloaden) |
-| `PANEL_PASSWORD` | Leeg = paneel zonder inlog |
-
-Het paneel staat daarna op `http://<nas>:3033`. Alle instellingen met uitleg staan in [.env.example](.env.example).
-
 De repo is privé, en daarmee het image ook. Portainer heeft dan een registry nodig om het op te halen: **Registries > Add registry > Custom**, URL `ghcr.io`, gebruikersnaam `<account>` en als wachtwoord een GitHub-token met het recht `read:packages`. Of zet het pakket op openbaar onder GitHub > Packages > nswhunter > Package settings.
 
-Vul keys en wachtwoorden in Portainer in, niet in `docker-compose.yml` in deze map: dat bestand gaat naar GitHub, en `commit-git.sh` weigert een compose met ingevulde keys.
+## Instellen
+
+Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
+
+| Instelling | Waar je hem vindt |
+|---|---|
+| Bibliotheek: adres en API key | Switch-library-manager-web > My account > API keys > Make a key, met het recht Read only. De key begint met `slm_` en wordt één keer getoond. Staat inloggen daar uit, dan is er geen key nodig. |
+| Prowlarr: adres en API key | Prowlarr > Settings > General > API Key |
+| Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
+| Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
+| Paneel | Gebruikersnaam en wachtwoord. Zonder wachtwoord heeft het paneel geen inlog. |
+
+**Opslaan en verbindingen testen** bewaart de instellingen, probeert elke service en start een ronde. De instellingen staan in `/data/settings.json`, alleen leesbaar voor de app-gebruiker. Keys en wachtwoorden gaan nooit terug naar de browser: een leeg veld betekent "houden wat er staat", met **Wis** maak je er een leeg.
+
+Dezelfde instellingen kunnen ook als omgevingsvariabele in de compose staan (`SLM_URL`, `PROWLARR_API_KEY`, …). Dat is dan de beginwaarde; een opgeslagen waarde gaat voor. De overige instellingen (tempo, indexers, meldingen) staan alleen in de compose, zie [.env.example](.env.example).
 
 ## Hoe een release beoordeeld wordt
 

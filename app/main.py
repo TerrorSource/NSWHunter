@@ -139,6 +139,26 @@ async def do_unsend(hunter, body):
     hunter.save()
 
 
+async def api_settings(request):
+    return web.json_response(config.editable())
+
+
+async def api_settings_save(request):
+    """Save the Configuratie tab, test the connections with the new values, start a round."""
+    hunter = request.app["hunter"]
+    try:
+        body = await request.json()
+        changed = config.update(dict(body.get("values") or {}), list(body.get("clear") or []))
+    except ValueError as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=400)
+    except (AttributeError, TypeError):
+        return web.json_response({"ok": False, "error": "Ongeldig verzoek"}, status=400)
+    hunter.event("Instellingen opgeslagen: " + (", ".join(changed) or "niets gewijzigd"))
+    services = await hunter.test_connections()
+    request.app["wake"].set()
+    return web.json_response({"ok": True, "services": services, **config.editable()})
+
+
 async def start(app):
     app["session"] = aiohttp.ClientSession(headers={"User-Agent": f"NSWHunter/{__version__}"})
     app["hunter"] = Hunter(app["session"], notify)
@@ -161,6 +181,8 @@ def make_app():
         web.get("/health", health),
         web.get("/api/state", api_state),
         web.post("/api/sync", api_sync),
+        web.get("/api/settings", api_settings),
+        web.post("/api/settings", api_settings_save),
         web.post("/api/grab", action(do_grab)),
         web.post("/api/search", action(do_search)),
         web.post("/api/ignore", action(do_ignore)),
@@ -171,7 +193,8 @@ def make_app():
 
 
 if __name__ == "__main__":
+    config.load_saved()
     log(f"NSWHunter {__version__} start op poort {config.PORT}")
-    for problem in config.problems():
-        log("Instelling:", problem)
+    if config.problems():
+        log(f"Nog niet ingesteld. Open het paneel op poort {config.PORT} en vul de tab Configuratie in.")
     web.run_app(make_app(), port=config.PORT, print=None, access_log=None)

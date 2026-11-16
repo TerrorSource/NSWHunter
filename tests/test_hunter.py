@@ -24,7 +24,8 @@ def run(test, **settings):
         base = str(server.make_url("")).rstrip("/")
         values = {
             "SLM_URL": base, "SLM_API_KEY": "slm_test", "PROWLARR_URL": base,
-            "PROWLARR_API_KEY": "prowlarr_test", "NZBGET_URL": base, "DOWNLOAD_CLIENT": "nzbget",
+            "PROWLARR_API_KEY": "prowlarr_test", "NZBGET_URL": base, "NZBGET_USER": "nzbget", "NZBGET_PASSWORD": "tegen",
+            "DOWNLOAD_CLIENT": "nzbget",
             "DOWNLOAD_CATEGORY": "games", "TITLEDB_VERSIONS_URL": base + "/versions.json",
             "AUTO_DOWNLOAD": "off", "AUTO_BUNDLES": False, "INCLUDE_DLC": False,
             "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 10, "SEARCH_BY_TITLE_ID": False, **settings}
