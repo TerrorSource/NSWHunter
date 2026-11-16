@@ -2,6 +2,28 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.2.0] - 2026-11-16
+
+### Opgelost
+
+- Zoeken gaf nooit resultaten: NSWHunter vroeg Prowlarr om alle torrent-indexers (`-2`) in plaats van alle usenet-indexers (`-1`).
+
+### Toegevoegd
+
+- **Test**-knop bij Bibliotheek, Prowlarr en Downloadclient op de tab Configuratie. De test gebruikt wat er in het formulier staat, ook als het nog niet is opgeslagen. De Prowlarr-test meldt hoeveel usenet-indexers er zijn.
+- **Automatisch zoeken** instelbaar op elke 6, 12, 24 of 48 uur (`SEARCH_INTERVAL_HOURS`). Elke game die iets mist wordt eens per die tijd op naam gezocht.
+- Tab **Logboek**.
+- Een release met alleen een zichtbare versie (`v1.7.1`) krijgt het updatenummer dat op de dag van plaatsen het nieuwste was ("waarschijnlijk update 11"). Is dat de nieuwste update, dan is de release "waarschijnlijk".
+- Het paneel toont updatenummers ("je hebt update 10 → nieuwste is update 11") naast de interne versienummers.
+
+### Gewijzigd
+
+- **Zoek nu** wacht niet meer op een lopende ronde.
+- Is een zichtbare versie hoger dan je eigen versie, dan valt de release niet meer af op de datum alleen.
+- Van gelijkwaardige releases staat de meest gedownloade bovenaan.
+- Downloaden via Prowlarr zoekt zelf opnieuw als Prowlarr de release niet meer kent (na een half uur).
+- `BACKLOG_DAYS` is vervangen door `SEARCH_INTERVAL_HOURS`; `BACKLOG_PER_RUN` staat standaard op 0 (geen limiet).
+
 ## [1.1.0] - 2026-11-16
 
 ### Toegevoegd

@@ -68,6 +68,23 @@ def test_release_posted_before_any_newer_update_existed():
     assert isinstance(result, Rejection)
 
 
+def test_posting_date_tells_which_update_a_display_version_is():
+    result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", AFTER_LATEST)
+    assert (result.estimated_version, result.is_latest) == (196608, True)
+    older = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", day("2023-03-01"))
+    assert (older.estimated_version, older.is_latest) == (131072, False)
+
+
+def test_a_newer_display_version_is_not_rejected_on_dates_alone():
+    """titledb can list an update later than the scene posted it."""
+    result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", day("2022-12-01"))
+    assert isinstance(result, Candidate) and result.confidence == UNCERTAIN and result.estimated_version is None
+
+
+def test_update_name():
+    assert matcher.update_name(720896) == "update 11" and matcher.update_name(100) == "v100"
+
+
 def test_without_dates_a_display_version_stays_uncertain():
     game = alan()
     game.dates = {}

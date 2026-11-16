@@ -25,6 +25,7 @@ LIBRARY = [
     title("0100BBBB0000B000", "Pokémon™ Scarlet", 196608, 262144, "2.0.1"),
     title("0100CCCC0000C000", "Stardew Valley", 131072, 131072, "1.6.9"),
     title("0100DDDD0000D000", "Hollow Knight", 65536, 131072, "1.4.3"),
+    title("0100EEEE0000E000", "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS", 655360, 720896, "1.7.0"),
 ]
 
 RELEASES = [
@@ -40,6 +41,12 @@ RELEASES = [
     ("Pokemon Scarlet The Hidden Treasure Update v262144", "2023-12-14", 2900000000),
     ("Stardew Valley Update v131072", "2024-11-05", 90000000),
     ("Some Unrelated Game Update v65536 NSW", "2024-01-01", 1),
+    # Real names from the user's Prowlarr: three language variants per update.
+    ("NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS", "2026-09-30", 4290000000),
+    ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS", "2026-09-30", 4190000000),
+    ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS", "2026-09-30", 1720000000),
+    ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.0 MULTI4 NSW-SUXXORS", "2026-08-20", 4190000000),
+    ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.0 NSW-SUXXORS", "2026-08-20", 1720000000),
 ]
 
 
@@ -49,11 +56,20 @@ def make_fakes():
     app["sent"] = []  # what reached the download client: (filename, category, nzb bytes)
     app["grabbed"] = []  # what Prowlarr was asked to grab itself
     app["queries"] = []
+    app["indexer_ids"] = []
 
     async def export(request):
         if request.headers.get("Authorization") != "Bearer slm_test":
             return web.Response(status=401)
         return web.json_response(app["library"])
+
+    def keyed(handler):
+        """Like Prowlarr: nothing without the API key."""
+        async def checked(request):
+            if request.headers.get("X-Api-Key") != "prowlarr_test":
+                return web.Response(status=401)
+            return await handler(request)
+        return checked
 
     async def status(request):
         return web.json_response({"version": "2.0.0"})
@@ -63,6 +79,10 @@ def make_fakes():
             return web.Response(status=401)
         query = request.query.get("query", "").lower()
         app["queries"].append(query)
+        app["indexer_ids"].append(request.query.getall("indexerIds", []))
+        # As in Prowlarr: -1 is every usenet indexer, -2 every torrent indexer, else an indexer id.
+        if not {"-1", "1"} & set(request.query.getall("indexerIds", ["-1"])):
+            return web.json_response([])
         words = query.split()
         found = []
         for n, (name, published, size) in enumerate(RELEASES):
@@ -76,6 +96,15 @@ def make_fakes():
                 })
         found.append({"guid": "torrent", "title": "Hades Update v131072", "protocol": "torrent"})
         return web.json_response(found)
+
+    async def indexers(request):
+        return web.json_response([
+            {"id": 1, "name": "FakeIndexer", "protocol": "usenet", "enable": True},
+            {"id": 2, "name": "Off", "protocol": "usenet", "enable": False},
+            {"id": 3, "name": "Tracker", "protocol": "torrent", "enable": True}])
+
+    async def download_clients(request):
+        return web.json_response([{"id": 1, "name": "NZBGet", "enable": True}])
 
     async def grab(request):
         app["grabbed"].append(await request.json())
@@ -100,13 +129,16 @@ def make_fakes():
             "0100623017a58000": {"65536": "2022-11-01", "131072": "2023-02-01", "196608": "2023-06-01"},
             "0100aaaa0000a000": {"65536": "2020-10-01", "131072": "2021-02-25"},
             "0100bbbb0000b000": {"196608": "2023-09-13", "262144": "2023-12-14"},
+            "0100eeee0000e000": {"589824": "2026-05-12", "655360": "2026-08-20", "720896": "2026-09-29"},
         })
 
     app.add_routes([
         web.get("/export/library.json", export),
-        web.get("/api/v1/system/status", status),
+        web.get("/api/v1/system/status", keyed(status)),
         web.get("/api/v1/search", search),
-        web.post("/api/v1/search", grab),
+        web.get("/api/v1/indexer", keyed(indexers)),
+        web.get("/api/v1/downloadclient", keyed(download_clients)),
+        web.post("/api/v1/search", keyed(grab)),
         web.get("/1/download", download),
         web.post("/jsonrpc", nzbget),
         web.get("/versions.json", versions),

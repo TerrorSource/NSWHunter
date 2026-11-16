@@ -29,6 +29,11 @@ async def no_notify(title, body):
     pass
 
 
+def best_first(candidate):
+    """Sort key: the judgement first; of equal releases the one most people took."""
+    return (candidate["rank"], candidate.get("grabs") or 0)
+
+
 class Hunter:
     def __init__(self, session, notify=None):
         self.session = session
@@ -205,7 +210,7 @@ class Hunter:
         if candidate is None:
             return False
         item["candidates"].append(candidate)
-        item["candidates"].sort(key=lambda c: c["rank"], reverse=True)
+        item["candidates"].sort(key=best_first, reverse=True)
         del item["candidates"][MAX_CANDIDATES:]
         return candidate in item["candidates"]
 
@@ -213,7 +218,7 @@ class Hunter:
         """The library changed (new local version, newer update out): judge everything again."""
         for item in self.state["items"].values():
             fresh = [self.judge(item, c) for c in item["candidates"]]
-            item["candidates"] = sorted((c for c in fresh if c), key=lambda c: c["rank"], reverse=True)
+            item["candidates"] = sorted((c for c in fresh if c), key=best_first, reverse=True)
 
     def process(self, releases, game_ids):
         """Hold releases against the items of these games. Returns how many new candidates."""
@@ -267,24 +272,30 @@ class Hunter:
         return found
 
     async def backlog(self):
-        """Search by name for the games that were not searched for the longest time."""
-        due = time.time() - config.BACKLOG_DAYS * 86400
+        """Search by name for every game whose last search is longer ago than the interval."""
+        due = time.time() - config.SEARCH_INTERVAL_HOURS * 3600
         searched = self.state["searched"]
         queue = sorted(
             (g for g in self.games
              if searched.get(g, 0) < due
              and any(not i["ignored"] and not i["grab"] for i in self.items_of(g))),
             key=lambda g: searched.get(g, 0))
-        for n, game_id in enumerate(queue[:config.BACKLOG_PER_RUN]):
+        if config.BACKLOG_PER_RUN > 0:
+            queue = queue[:config.BACKLOG_PER_RUN]
+        for n, game_id in enumerate(queue):
             if n:
                 await asyncio.sleep(config.SEARCH_DELAY_SECONDS)
-            self.status["phase"] = f"zoeken: {self.games[game_id].name or game_id}"
+            if game_id not in self.games:
+                continue
+            self.status["phase"] = f"zoeken {n + 1}/{len(queue)}: {self.games[game_id].name or game_id}"
             try:
                 await self.search_game(game_id)
             except clients.ServiceError as e:
                 self.service("prowlarr", False, str(e))
                 return
-        return len(queue)
+            self.save()  # a long first round: keep what was found so far
+        if queue:
+            self.event(f"{len(queue)} game(s) op naam gezocht")
 
     # ------------------------------------------------------------ sending
 
@@ -317,7 +328,14 @@ class Hunter:
         candidate = next((c for c in (item or {}).get("candidates", []) if c["guid"] == guid), None)
         if candidate is None:
             raise clients.ServiceError("Deze release staat niet meer in de lijst")
-        await clients.send(self.session, candidate)
+        try:
+            await clients.send(self.session, candidate)
+        except clients.ServiceError:
+            if config.DOWNLOAD_CLIENT != "prowlarr":
+                raise
+            # Prowlarr only grabs what it found in the last half hour: search again, try once more.
+            await self.search_game(item["game_id"])
+            await clients.send(self.session, candidate)
         item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto}
         how = "Automatisch verstuurd" if auto else "Verstuurd"
         self.event(f"{how}: {candidate['title']}", "grab")
@@ -407,18 +425,23 @@ class Hunter:
                 self.save()
 
     async def search_now(self, key):
+        """The "Zoek nu" button. Does not wait for a running round: a round can take a while."""
         item = self.state["items"].get(key)
         if item is None:
             raise clients.ServiceError("Onbekende game")
-        async with self.lock:
-            self.status.update(running=True, phase=f"zoeken: {item['name']}")
-            try:
-                found = await self.search_game(item["game_id"])
-                self.service("prowlarr", True, "zoeken gelukt")
-            finally:
-                self.status.update(running=False, phase=None)
-                self.save()
+        found = await self.search_game(item["game_id"])
+        self.save()
         return found
+
+    async def test(self, service, cfg):
+        """One Test button of the Configuratie tab, with the values that are in the form."""
+        if service == "slm":
+            return f"{len(await clients.library(self.session, cfg))} games in de bibliotheek"
+        if service == "prowlarr":
+            return await clients.prowlarr_status(self.session, cfg)
+        if service == "downloader":
+            return await clients.downloader_status(self.session, cfg)
+        raise clients.ServiceError("Onbekende service")
 
     # ------------------------------------------------------------ for the panel
 
@@ -454,7 +477,7 @@ class Hunter:
             "settings": {
                 "auto": config.AUTO_DOWNLOAD, "dlc": config.INCLUDE_DLC,
                 "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
-                "interval": config.SYNC_INTERVAL_MINUTES,
+                "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
             },
             "configured": not config.problems(),
         }

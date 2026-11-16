@@ -34,11 +34,15 @@ def _wrap(what, error):
 # ---------------------------------------------------------------- library
 
 
-async def library(session):
-    """The export of switch-library-manager-web: one entry per game in the library."""
-    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY else {}
+async def library(session, cfg=config):
+    """The export of switch-library-manager-web: one entry per game in the library.
+
+    cfg: where the settings come from. The Test buttons pass the values of the form."""
+    if not cfg.SLM_URL:
+        raise ServiceError("Bibliotheek: vul het adres in")
+    headers = {"Authorization": f"Bearer {cfg.SLM_API_KEY}"} if cfg.SLM_API_KEY else {}
     try:
-        async with session.get(f"{config.SLM_URL}/export/library.json", headers=headers,
+        async with session.get(f"{cfg.SLM_URL}/export/library.json", headers=headers,
                                timeout=LONG) as r:
             await _check(r, "Bibliotheek")
             data = await r.json(content_type=None)
@@ -62,26 +66,38 @@ async def titledb_versions(session):
 # ---------------------------------------------------------------- prowlarr
 
 
-def _prowlarr_headers():
-    return {"X-Api-Key": config.PROWLARR_API_KEY}
+def _prowlarr_headers(cfg=config):
+    return {"X-Api-Key": cfg.PROWLARR_API_KEY}
 
 
-async def prowlarr_status(session):
+async def prowlarr_status(session, cfg=config):
+    """Version of Prowlarr and how many usenet indexers it can search."""
+    if not cfg.PROWLARR_URL or not cfg.PROWLARR_API_KEY:
+        raise ServiceError("Prowlarr: vul het adres en de API key in")
     try:
-        async with session.get(f"{config.PROWLARR_URL}/api/v1/system/status",
-                               headers=_prowlarr_headers(), timeout=SHORT) as r:
+        async with session.get(f"{cfg.PROWLARR_URL}/api/v1/system/status",
+                               headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
             await _check(r, "Prowlarr")
-            return (await r.json()).get("version", "?")
+            version = (await r.json(content_type=None)).get("version", "?")
+        async with session.get(f"{cfg.PROWLARR_URL}/api/v1/indexer",
+                               headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
+            await _check(r, "Prowlarr")
+            indexers = await r.json(content_type=None)
     except Exception as e:
         raise _wrap("Prowlarr", e) from e
+    usenet = [i for i in indexers if isinstance(i, dict)
+              and str(i.get("protocol", "")).lower() == "usenet" and i.get("enable")]
+    if not usenet:
+        raise ServiceError("Prowlarr: geen ingeschakelde usenet-indexer gevonden")
+    return f"Prowlarr {version}, {len(usenet)} usenet-indexer{'s' if len(usenet) != 1 else ''}"
 
 
 async def prowlarr_search(session, query):
     """Usenet releases for a query; an empty query gives the newest posts of every indexer."""
     params = [("query", query), ("type", "search"), ("limit", "100"), ("offset", "0")]
     params += [("categories", c) for c in config.PROWLARR_CATEGORIES]
-    # -2 is Prowlarr's shorthand for "all usenet indexers".
-    params += [("indexerIds", i) for i in (config.PROWLARR_INDEXER_IDS or ["-2"])]
+    # -1 is Prowlarr's shorthand for "all usenet indexers" (-2 is all torrent indexers).
+    params += [("indexerIds", i) for i in (config.PROWLARR_INDEXER_IDS or ["-1"])]
     try:
         async with session.get(f"{config.PROWLARR_URL}/api/v1/search", params=params,
                                headers=_prowlarr_headers(), timeout=LONG) as r:
@@ -91,7 +107,7 @@ async def prowlarr_search(session, query):
         raise _wrap("Prowlarr", e) from e
     releases = []
     for item in data if isinstance(data, list) else []:
-        if item.get("protocol", "usenet") != "usenet" or not item.get("guid") or not item.get("title"):
+        if str(item.get("protocol", "usenet")).lower() != "usenet" or not item.get("guid") or not item.get("title"):
             continue
         releases.append({
             "guid": item["guid"],
@@ -148,13 +164,15 @@ def nzb_filename(title):
     return re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:180] + ".nzb"
 
 
-async def _nzbget(session, method, params):
+async def _nzbget(session, method, params, cfg=config):
+    if not cfg.NZBGET_URL:
+        raise ServiceError("NZBGet: vul het adres in")
     headers = {}
-    if config.NZBGET_USER:
-        login = f"{config.NZBGET_USER}:{config.NZBGET_PASSWORD}".encode()
+    if cfg.NZBGET_USER:
+        login = f"{cfg.NZBGET_USER}:{cfg.NZBGET_PASSWORD}".encode()
         headers["Authorization"] = "Basic " + base64.b64encode(login).decode()
     try:
-        async with session.post(f"{config.NZBGET_URL}/jsonrpc", headers=headers, timeout=LONG,
+        async with session.post(f"{cfg.NZBGET_URL}/jsonrpc", headers=headers, timeout=LONG,
                                 json={"method": method, "params": params, "id": 1}) as r:
             await _check(r, "NZBGet")
             data = await r.json(content_type=None)
@@ -165,14 +183,16 @@ async def _nzbget(session, method, params):
     return data.get("result")
 
 
-async def _sabnzbd(session, fields, nzb=None):
+async def _sabnzbd(session, fields, nzb=None, cfg=config):
+    if not cfg.SABNZBD_URL or not cfg.SABNZBD_API_KEY:
+        raise ServiceError("SABnzbd: vul het adres en de API key in")
     form = aiohttp.FormData()
-    for key, value in {**fields, "apikey": config.SABNZBD_API_KEY, "output": "json"}.items():
+    for key, value in {**fields, "apikey": cfg.SABNZBD_API_KEY, "output": "json"}.items():
         form.add_field(key, value)
     if nzb:
         form.add_field("name", nzb[1], filename=nzb[0], content_type="application/x-nzb")
     try:
-        async with session.post(f"{config.SABNZBD_URL}/api", data=form, timeout=LONG) as r:
+        async with session.post(f"{cfg.SABNZBD_URL}/api", data=form, timeout=LONG) as r:
             await _check(r, "SABnzbd")
             data = await r.json(content_type=None)
     except Exception as e:
@@ -182,13 +202,25 @@ async def _sabnzbd(session, fields, nzb=None):
     return data
 
 
-async def downloader_status(session):
+async def downloader_status(session, cfg=config):
     """Version of the download client, as a connection test."""
-    if config.DOWNLOAD_CLIENT == "nzbget":
-        return f"NZBGet {await _nzbget(session, 'version', [])}"
-    if config.DOWNLOAD_CLIENT == "sabnzbd":
-        return f"SABnzbd {(await _sabnzbd(session, {'mode': 'version'})).get('version', '?')}"
-    return "via Prowlarr"
+    if cfg.DOWNLOAD_CLIENT == "nzbget":
+        return f"NZBGet {await _nzbget(session, 'version', [], cfg)}"
+    if cfg.DOWNLOAD_CLIENT == "sabnzbd":
+        # mode=version answers without a key, so ask for something that needs one.
+        await _sabnzbd(session, {"mode": "get_cats"}, cfg=cfg)
+        return "SABnzbd, API key klopt"
+    await prowlarr_status(session, cfg)
+    try:
+        async with session.get(f"{cfg.PROWLARR_URL}/api/v1/downloadclient",
+                               headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
+            await _check(r, "Prowlarr")
+            names = [c.get("name", "?") for c in await r.json(content_type=None) if c.get("enable")]
+    except Exception as e:
+        raise _wrap("Prowlarr", e) from e
+    if not names:
+        raise ServiceError("Prowlarr heeft geen ingeschakelde downloadclient (Settings > Download Clients)")
+    return "via Prowlarr: " + ", ".join(names)
 
 
 async def send(session, release):

@@ -62,9 +62,17 @@ MAX_GRABS_PER_RUN = int(number("MAX_GRABS_PER_RUN", 10))
 INCLUDE_DLC = flag("INCLUDE_DLC")
 
 SYNC_INTERVAL_MINUTES = max(5, number("SYNC_INTERVAL_MINUTES", 60))
-# Searching by name costs one API call per indexer per game, so the backlog goes slowly.
-BACKLOG_PER_RUN = int(number("BACKLOG_PER_RUN", 10))
-BACKLOG_DAYS = number("BACKLOG_DAYS", 7)
+# Every game that misses something is searched by name once per this many hours. That costs
+# one API call per indexer per game: with many games and a strict indexer, choose 24 or 48.
+INTERVALS = (6, 12, 24, 48)
+try:
+    SEARCH_INTERVAL_HOURS = int(env("SEARCH_INTERVAL_HOURS", "24"))
+except ValueError:
+    SEARCH_INTERVAL_HOURS = 24
+if SEARCH_INTERVAL_HOURS not in INTERVALS:
+    SEARCH_INTERVAL_HOURS = 24
+# At most this many searches by name per round; 0 = no limit.
+BACKLOG_PER_RUN = int(number("BACKLOG_PER_RUN", 0))
 SEARCH_DELAY_SECONDS = number("SEARCH_DELAY_SECONDS", 3)
 SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # A sent release that has not arrived in the library after this long counts as failed.
@@ -90,7 +98,7 @@ EDITABLE = {
     "DOWNLOAD_CLIENT": CLIENTS, "DOWNLOAD_CATEGORY": "text",
     "NZBGET_URL": "url", "NZBGET_USER": "text", "NZBGET_PASSWORD": "secret",
     "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
-    "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool",
+    "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
@@ -102,6 +110,14 @@ def normalize(name, value):
     kind = EDITABLE[name]
     if kind == "bool":
         return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on", "ja")
+    if isinstance(kind, tuple) and isinstance(kind[0], int):
+        try:
+            number_value = int(str(value).strip())
+        except ValueError:
+            number_value = None
+        if number_value not in kind:
+            raise ValueError(f"{name}: kies uit {', '.join(map(str, kind))}")
+        return number_value
     value = str(value if value is not None else "").strip()
     if len(value) > 500 or any(ord(c) < 32 for c in value):
         raise ValueError(f"{name}: ongeldige waarde")
@@ -162,6 +178,23 @@ def update(values, clear=()):
     changed = sorted(name for name, value in new.items() if globals()[name] != value)
     globals().update(new)
     return changed
+
+
+def overlay(values, clear=()):
+    """The settings as they would be after saving this form, without saving or using them:
+    for the Test buttons. Same rules as update(): an empty secret keeps the saved one."""
+    import types
+    result = types.SimpleNamespace(**{name: globals()[name] for name in EDITABLE})
+    for name, value in values.items():
+        if name not in EDITABLE:
+            raise ValueError(f"Onbekende instelling: {name}")
+        if name in SECRETS and str(value or "").strip() == "":
+            continue
+        setattr(result, name, normalize(name, value))
+    for name in clear:
+        if name in SECRETS:
+            setattr(result, name, "")
+    return result
 
 
 def editable():

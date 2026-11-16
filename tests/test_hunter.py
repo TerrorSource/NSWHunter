@@ -11,8 +11,9 @@ import config
 import hunter as hunter_module
 from fakes import NZB, make_fakes
 
-ALAN, ALAN_DLC, HADES, SCARLET, HOLLOW = (
-    "0100623017A58000", "0100623017A59001", "0100AAAA0000A000", "0100BBBB0000B000", "0100DDDD0000D000")
+ALAN, ALAN_DLC, HADES, SCARLET, HOLLOW, NARUTO = (
+    "0100623017A58000", "0100623017A59001", "0100AAAA0000A000", "0100BBBB0000B000", "0100DDDD0000D000",
+    "0100EEEE0000E000")
 
 
 def run(test, **settings):
@@ -28,7 +29,8 @@ def run(test, **settings):
             "DOWNLOAD_CLIENT": "nzbget",
             "DOWNLOAD_CATEGORY": "games", "TITLEDB_VERSIONS_URL": base + "/versions.json",
             "AUTO_DOWNLOAD": "off", "AUTO_BUNDLES": False, "INCLUDE_DLC": False,
-            "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 10, "SEARCH_BY_TITLE_ID": False, **settings}
+            "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 0, "SEARCH_INTERVAL_HOURS": 24,
+            "SEARCH_BY_TITLE_ID": False, **settings}
         saved = {k: getattr(config, k) for k in values}
         for path in (config.STATE_FILE, config.VERSIONS_FILE):
             if os.path.exists(path):
@@ -54,7 +56,7 @@ def test_round_finds_and_ranks_candidates():
         await hunter.round()
         items = hunter.state["items"]
         # Only games that miss an update; Stardew Valley is up to date.
-        assert set(items) == {ALAN, HADES, SCARLET, HOLLOW}
+        assert set(items) == {ALAN, HADES, SCARLET, HOLLOW, NARUTO}
         assert all(s["ok"] for s in hunter.state["services"].values())
         assert titles(hunter, ALAN) == [
             "Alan Wake Remastered [0100623017A58800][v196608].nsz",
@@ -72,10 +74,13 @@ def test_round_finds_and_ranks_candidates():
         # Nothing goes out by itself when AUTO_DOWNLOAD is off.
         assert fakes["sent"] == []
         # One call for the newest posts, then one search per game.
-        assert fakes["queries"] == ["", "alan wake remastered", "hades", "pokemon scarlet", "hollow knight"]
+        assert fakes["queries"] == ["", "alan wake remastered", "hades", "pokemon scarlet", "hollow knight",
+                                    "naruto x boruto ultimate ninja storm connections"]
+        # Every search asks Prowlarr for its usenet indexers (-1); -2 would be the torrent ones.
+        assert all(ids == ["-1"] for ids in fakes["indexer_ids"])
         view = hunter.view()
         assert "downloadUrl" not in str(view) and "secret" not in str(view)
-        assert [i["status"] for i in view["items"]] == ["review", "review", "review", "none"]
+        assert [i["status"] for i in view["items"]] == ["review", "review", "review", "review", "none"]
     run(test)
 
 
@@ -114,8 +119,57 @@ def test_auto_likely_also_sends_display_versions_posted_after_the_latest_update(
         assert sorted(name for name, _, _ in fakes["sent"]) == [
             "Alan Wake Remastered [0100623017A58800][v196608].nsz.nzb",
             "Hades_Update_v1.0.2_NSW-GRP.nzb",
+            "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS.nzb",
             "Pokemon.Scarlet.Update.v3.0.1.NSW-BigBlueBox.nzb"]
     run(test, AUTO_DOWNLOAD="likely")
+
+
+def test_display_version_is_matched_to_the_update_by_its_posting_date():
+    """The user's real case: releases say v1.7.1, the library says update 11 (v720896)."""
+    async def test(hunter, fakes):
+        await hunter.round()
+        found = hunter.state["items"][NARUTO]["candidates"]
+        # v1.7.0 is what the library has; only the three v1.7.1 variants remain, most grabbed first.
+        assert [c["title"] for c in found] == [
+            "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS",
+            "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS",
+            "NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS"]
+        assert {(c["confidence"], c["is_latest"], c["estimated_version"]) for c in found} == {
+            ("likely", True, 720896)}
+        assert any("update 11" in reason for reason in found[0]["reasons"])
+    run(test)
+
+
+def test_every_game_is_searched_once_per_interval():
+    async def test(hunter, fakes):
+        await hunter.round()
+        first = len(fakes["queries"])
+        await hunter.round()
+        assert len(fakes["queries"]) == first + 1  # only the newest posts, no search by name
+        for game_id in hunter.state["searched"]:
+            hunter.state["searched"][game_id] -= 7 * 3600
+        await hunter.round()
+        assert len(fakes["queries"]) == first + 2  # 7 hours ago, interval 24: still nothing
+        config.SEARCH_INTERVAL_HOURS = 6
+        await hunter.round()
+        assert len(fakes["queries"]) == first + 3 + 5  # now every game again
+    run(test)
+
+
+def test_test_buttons_use_the_values_of_the_form():
+    async def test(hunter, fakes):
+        good = config.overlay({})
+        assert await hunter.test("slm", good) == "6 games in de bibliotheek"
+        assert await hunter.test("prowlarr", good) == "Prowlarr 2.0.0, 1 usenet-indexer"
+        assert await hunter.test("downloader", good) == "NZBGet 24.5"
+        assert await hunter.test("downloader", config.overlay({"DOWNLOAD_CLIENT": "prowlarr"})) == "via Prowlarr: NZBGet"
+        for service, values in (("slm", {"SLM_API_KEY": "slm_wrong"}), ("prowlarr", {"PROWLARR_API_KEY": "x"}),
+                                ("downloader", {"NZBGET_PASSWORD": "x"}), ("slm", {"SLM_URL": ""})):
+            with pytest.raises(hunter_module.clients.ServiceError):
+                await hunter.test(service, config.overlay(values))
+        # Testing changed nothing.
+        assert config.SLM_API_KEY == "slm_test" and not os.path.exists(config.SETTINGS_FILE)
+    run(test)
 
 
 def test_dlc_is_its_own_item():

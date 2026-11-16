@@ -159,6 +159,21 @@ async def api_settings_save(request):
     return web.json_response({"ok": True, "services": services, **config.editable()})
 
 
+async def api_test(request):
+    """A Test button: try one service with the values in the form. Nothing is saved."""
+    try:
+        body = await request.json()
+        cfg = config.overlay(dict(body.get("values") or {}), list(body.get("clear") or []))
+        text = await request.app["hunter"].test(str(body.get("service")), cfg)
+    except clients.ServiceError as e:
+        return web.json_response({"ok": False, "text": str(e)})
+    except ValueError as e:
+        return web.json_response({"ok": False, "text": str(e)})
+    except (AttributeError, TypeError):
+        return web.json_response({"ok": False, "text": "Ongeldig verzoek"}, status=400)
+    return web.json_response({"ok": True, "text": text})
+
+
 async def start(app):
     app["session"] = aiohttp.ClientSession(headers={"User-Agent": f"NSWHunter/{__version__}"})
     app["hunter"] = Hunter(app["session"], notify)
@@ -183,6 +198,7 @@ def make_app():
         web.post("/api/sync", api_sync),
         web.get("/api/settings", api_settings),
         web.post("/api/settings", api_settings_save),
+        web.post("/api/test", api_test),
         web.post("/api/grab", action(do_grab)),
         web.post("/api/search", action(do_search)),
         web.post("/api/ignore", action(do_ignore)),

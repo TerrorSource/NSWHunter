@@ -68,6 +68,7 @@ class Candidate:
     is_latest: bool | None  # None: cannot tell from the title
     reasons: list
     rank: tuple = ()
+    estimated_version: int | None = None  # by posting date, when the title has no internal number
 
     def to_dict(self):
         d = asdict(self)
@@ -103,6 +104,13 @@ def search_term(name):
 def family(title_id):
     """Base game, update and DLC of one game share everything but the last 13 bits."""
     return int(title_id, 16) & ~0x1FFF
+
+
+def update_name(version):
+    """v720896 is the eleventh update: Nintendo numbers updates in steps of 65536."""
+    if version and version % 65536 == 0:
+        return f"update {version // 65536}"
+    return f"v{version}"
 
 
 def version_tuple(text):
@@ -267,6 +275,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
         reasons.append(f"v{display} is eerder gezien als v{internal}")
 
     is_latest = None
+    estimated = None  # the internal version this release probably is, judged by its posting date
     if internal is not None:
         if internal == 0:
             return Rejection("basisspel (v0), geen update")
@@ -274,8 +283,9 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
             return Rejection(f"v{internal} is niet nieuwer dan je eigen versie")
         is_latest = bool(game.latest_version) and internal >= game.latest_version
         reasons.append("is de nieuwste versie" if is_latest else
-                       f"nieuwer dan je eigen versie, maar niet de nieuwste (v{game.latest_version})")
+                       f"nieuwer dan je eigen versie, maar niet de nieuwste ({update_name(game.latest_version)})")
     else:
+        proven_newer = False
         if display:
             parsed = version_tuple(display)
             if parsed <= (1, 0, 0) and kind != "update":
@@ -284,23 +294,25 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
                 try:
                     if parsed <= version_tuple(game.local_display):
                         return Rejection(f"v{display} is niet nieuwer dan je eigen versie")
+                    proven_newer = True
                     reasons.append(f"v{display} is nieuwer dan je eigen v{game.local_display}")
                 except ValueError:
                     pass
         elif kind == "unknown":
             return Rejection("geen versie en geen 'update' in de titel")
-        # No internal number in the title: the posting date tells which version it can be.
-        newer = sorted(v for v in game.dates if v > game.local_version)
-        if published and newer:
-            if published < game.dates[newer[0]] - DATE_SLACK:
-                return Rejection("geplaatst voordat er een nieuwere update bestond")
-            latest_date = game.dates.get(game.latest_version)
-            if latest_date and published >= latest_date - DATE_SLACK:
-                is_latest = True
-                reasons.append("geplaatst na de release van de nieuwste update")
-            elif latest_date:
-                is_latest = False
-                reasons.append("geplaatst voor de release van de nieuwste update")
+        # No internal number in the title. A display version (v1.7.1) cannot be translated to
+        # one, but the posting date can: the release holds the update that was newest that day.
+        if published and any(v > game.local_version for v in game.dates):
+            out = [v for v, day in game.dates.items() if day - DATE_SLACK <= published]
+            estimated = max(out) if out else 0
+            if estimated <= game.local_version:
+                if not proven_newer:
+                    return Rejection("geplaatst voordat er een nieuwere update bestond")
+                estimated = None  # the dates and the version disagree: trust the version
+            elif game.latest_version in game.dates:
+                is_latest = estimated >= game.latest_version
+                reasons.append(f"geplaatst toen {update_name(estimated)} de nieuwste was"
+                               + ("" if is_latest else f"; de nieuwste is nu {update_name(game.latest_version)}"))
         if is_latest is None:
             reasons.append("niet te zien of dit de nieuwste versie is")
 
@@ -324,7 +336,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
         version_tuple(display) if display else (),
         published.toordinal() if published else 0,
     )
-    return Candidate(confidence, kind, name_match, internal, display, is_latest, reasons, rank)
+    return Candidate(confidence, kind, name_match, internal, display, is_latest, reasons, rank, estimated)
 
 
 def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):

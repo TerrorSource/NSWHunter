@@ -55,6 +55,7 @@ def test_empty_secret_keeps_the_old_one_and_clear_removes_it():
     {"DOWNLOAD_CLIENT": "transmission"},
     {"PANEL_USER": "a:b"},
     {"PANEL_USER": ""},
+    {"SEARCH_INTERVAL_HOURS": "7"},          # only 6, 12, 24 and 48
     {"TZ": "UTC"},                           # not a setting of the Configuratie tab
     {"SLM_URL": "http://ok", "AUTO_DOWNLOAD": "nee"},
 ])
@@ -63,6 +64,21 @@ def test_wrong_values_change_nothing(values):
     with pytest.raises(ValueError):
         config.update(values)
     assert config.SLM_URL == before and not os.path.exists(config.SETTINGS_FILE)
+
+
+def test_search_interval_is_a_number_of_hours():
+    config.update({"SEARCH_INTERVAL_HOURS": "48"})
+    assert config.SEARCH_INTERVAL_HOURS == 48 and config.editable()["values"]["SEARCH_INTERVAL_HOURS"] == 48
+
+
+def test_api_test_button_reports_instead_of_failing():
+    async def test(client):
+        r = await client.post("/api/test", json={"service": "prowlarr", "values": {"PROWLARR_URL": ""}})
+        data = await r.json()
+        assert r.status == 200 and data["ok"] is False and "adres" in data["text"]
+        r = await client.post("/api/test", json={"service": "slm", "values": {"SLM_URL": "geen-adres"}})
+        assert (await r.json())["ok"] is False
+    api(test)
 
 
 def test_secrets_never_leave():

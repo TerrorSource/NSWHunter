@@ -68,10 +68,9 @@
   .cand .acts { display: flex; gap: 4px; }
   .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .empty { color: var(--soft); text-align: center; padding: 40px 0; }
-  details { margin-top: 24px; }
-  summary { cursor: pointer; color: var(--soft); }
-  .log { font-size: 13px; margin-top: 8px; }
-  .log div { padding: 3px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
+  .log div { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 12px; }
+  .log div:last-child { border-bottom: none; }
   .log time { color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
   .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
@@ -92,6 +91,7 @@
     background: var(--bg); color: var(--text); }
   .field input:focus, .field select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .testresult { font-size: 14px; } .testresult.ok { color: var(--good); } .testresult.bad { color: var(--bad); }
   .savebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .results { margin-top: 12px; display: grid; gap: 6px; }
   .results div { padding: 8px 12px; border-radius: 8px; background: var(--good-bg); color: var(--good); font-size: 14px; }
@@ -113,10 +113,9 @@
     <div class="stats" id="stats"></div>
     <div class="tabs" id="tabs"></div>
     <div id="list"></div>
-    <details>
-      <summary>Logboek</summary>
-      <div class="log" id="log"></div>
-    </details>
+  </section>
+  <section id="view-log" hidden>
+    <div class="log" id="log"></div>
   </section>
   <section id="view-config" hidden>
     <form id="config" autocomplete="off"></form>
@@ -141,7 +140,7 @@ function put(el, ...children) {
   el.replaceChildren(...children.flat().filter(c => c !== null && c !== undefined && c !== false));
 }
 let state = null, tab = "review", filter = "", busy = new Set();
-let view = "updates", settings = null, clearing = new Set(), opened = false;
+let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {};
 
 const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
 const CONFIDENCE = {sure: "Zeker", likely: "Waarschijnlijk", uncertain: "Twijfel"};
@@ -187,15 +186,21 @@ async function post(path, body, key) {
   }
 }
 
+// Nintendo numbers updates in steps of 65536: v720896 is update 11.
+function upd(version) {
+  if (!version) return "geen update";
+  return version % 65536 === 0 ? "update " + version / 65536 : "v" + version;
+}
 function versions(item) {
   if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
-  const local = "v" + item.local_version + (item.local_display ? " (" + item.local_display + ")" : "");
-  return local + " → v" + item.latest_version + (item.latest_date ? " van " + item.latest_date : "");
+  const local = upd(item.local_version) + (item.local_display ? " (v" + item.local_display + ")" : "");
+  return "je hebt " + local + " → nieuwste is " + upd(item.latest_version) + (item.latest_date ? " van " + item.latest_date : "");
 }
 
 function candidate(item, c, first) {
-  const version = [c.internal_version != null ? "v" + c.internal_version : null, c.display_version ? "v" + c.display_version : null]
-    .filter(Boolean).join(" / ");
+  const version = [c.display_version ? "v" + c.display_version : null,
+    c.internal_version != null ? upd(c.internal_version) + " (v" + c.internal_version + ")" : null,
+    c.estimated_version ? "waarschijnlijk " + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
   const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
   const safe = /^https?:\/\//.test(c.infoUrl || "");
   return h("div", {class: "cand" + (first ? " first" : "")},
@@ -222,7 +227,7 @@ function itemCard(item) {
         h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
           item.last_search ? " · gezocht " + ago(item.last_search) : "")),
       h("span", {class: "badge " + item.status}, label),
-      h("button", {disabled: searching || state.status.running,
+      h("button", {disabled: searching,
                    onclick: () => post("/api/search", {key: item.key}, "s" + item.key).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
         searching ? "Zoeken…" : "Zoek nu"),
       h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
@@ -246,13 +251,14 @@ function render() {
   $("statusline").textContent = st.running ? "Bezig: " + (st.phase || "…")
     : "Laatste ronde " + ago(st.last_run) + (st.next_run ? " · volgende over " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
   $("sync").disabled = st.running || !state.configured;
-  put($("views"), ...[["updates", "Updates"], ["config", "Configuratie"]].map(([name, text]) =>
+  put($("views"), ...[["updates", "Updates"], ["log", "Logboek"], ["config", "Configuratie"]].map(([name, text]) =>
     h("button", {class: view === name ? "on" : "", onclick: () => show(name)}, text)));
 
   put($("chips"), ...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
     h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
     h("span", {class: "chip"}, "Automatisch downloaden " + AUTO[state.settings.auto]),
-    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")));
+    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")),
+    h("span", {class: "chip"}, "Zoekt elke " + state.settings.search_hours + " uur"));
   const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
   put($("notice"), 
     !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is nog niet ingesteld. Vul de tab Configuratie in.") : null,
@@ -273,8 +279,9 @@ function render() {
                 oninput: e => { filter = e.target.value; renderList(); }}));
   renderList();
 
-  put($("log"), ...state.events.map(e =>
-    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString("nl-NL", {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text))));
+  put($("log"), state.events.length ? state.events.map(e =>
+    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString("nl-NL", {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text)))
+    : h("div", {class: "line"}, "Nog niets gebeurd."));
 }
 
 function renderList() {
@@ -289,14 +296,14 @@ function renderList() {
 
 // ---------------------------------------------------------------- Configuratie
 const GROUPS = [
-  {title: "Bibliotheek (Switch-library-manager-web)", fields: [
+  {title: "Bibliotheek (Switch-library-manager-web)", test: "slm", fields: [
     {name: "SLM_URL", label: "Adres", placeholder: "http://192.168.1.10:3000"},
     {name: "SLM_API_KEY", label: "API key", secret: true,
      help: "Maak hem in Switch-library-manager-web onder My account > API keys > Make a key, met het recht Read only. De key begint met slm_ en wordt maar één keer getoond. Staat inloggen daar uit, laat dit veld dan leeg."}]},
-  {title: "Prowlarr", fields: [
+  {title: "Prowlarr", test: "prowlarr", fields: [
     {name: "PROWLARR_URL", label: "Adres", placeholder: "http://192.168.1.10:9696"},
     {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "Staat in Prowlarr onder Settings > General > API Key."}]},
-  {title: "Downloadclient", fields: [
+  {title: "Downloadclient", test: "downloader", fields: [
     {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "De downloadclient van Prowlarr"]]},
     {name: "DOWNLOAD_CATEGORY", label: "Categorie", placeholder: "games", unless: "prowlarr",
      help: "De categorie die de download in je client krijgt."},
@@ -309,6 +316,9 @@ const GROUPS = [
     {name: "AUTO_DOWNLOAD", label: "Automatisch downloaden", options: [
       ["off", "Uit: ik kies zelf"], ["sure", "Zekere releases gaan vanzelf"], ["likely", "Zekere en waarschijnlijke releases gaan vanzelf"]],
      help: "Twijfelgevallen en tussenversies wachten altijd op je keuze."},
+    {name: "SEARCH_INTERVAL_HOURS", label: "Automatisch zoeken", options: [
+      ["6", "Elke 6 uur"], ["12", "Elke 12 uur"], ["24", "Elke 24 uur"], ["48", "Elke 48 uur"]],
+     help: "Zo vaak wordt elke game die iets mist op naam gezocht. Dat kost per game één API-call per indexer; kies 24 of 48 uur als een indexer een daglimiet heeft."},
     {name: "INCLUDE_DLC", label: "Ook ontbrekende DLC zoeken", checkbox: true}]},
   {title: "Paneel", fields: [
     {name: "PANEL_USER", label: "Gebruikersnaam"},
@@ -321,7 +331,7 @@ function fieldRow(f, client) {
   let control;
   if (f.options) {
     control = h("select", {id, name: f.name, onchange: f.name === "DOWNLOAD_CLIENT" ? e => renderConfig(e.target.value) : null},
-      f.options.map(([value, text]) => h("option", {value, selected: settings.values[f.name] === value}, text)));
+      f.options.map(([value, text]) => h("option", {value, selected: String(settings.values[f.name]) === value}, text)));
   } else if (f.checkbox) {
     control = h("input", {id, name: f.name, type: "checkbox", checked: settings.values[f.name] === true});
   } else if (f.secret) {
@@ -336,6 +346,28 @@ function fieldRow(f, client) {
   }
   return h("div", {class: "field", hidden},
     h("label", {for: id}, f.label), control, f.help ? h("div", {class: "help"}, f.help) : null);
+}
+
+// A Test button tries one service with what is in the form now, saved or not.
+function testRow(service) {
+  const t = tests[service];
+  return h("div", {class: "field"}, h("span", {}),
+    h("div", {class: "row"},
+      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Testen…" : "Test"),
+      t && !t.busy ? h("span", {class: "testresult " + (t.ok ? "ok" : "bad")}, (t.ok ? "✓ " : "✕ ") + t.text) : null));
+}
+async function runTest(service) {
+  const values = typed();
+  tests[service] = {busy: true}; renderConfig();
+  try {
+    const r = await fetch("/api/test", {method: "POST", headers: {"Content-Type": "application/json"},
+                                       body: JSON.stringify({service, values, clear: [...clearing]})});
+    const data = await r.json();
+    tests[service] = {ok: data.ok === true, text: data.text || "Mislukt"};
+  } catch (e) {
+    tests[service] = {ok: false, text: "Geen verbinding met NSWHunter"};
+  }
+  renderConfig();
 }
 
 // Typed but not yet saved values survive a rebuild of the form (switching client, "Wis").
@@ -353,7 +385,9 @@ function renderConfig(client) {
   for (const [name, value] of Object.entries(keep)) if (name in settings.values) settings.values[name] = value;
   if (client) settings.values.DOWNLOAD_CLIENT = client;
   put($("config"), 
-    ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title), g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)))),
+    ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title),
+      g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)),
+      g.test ? testRow(g.test) : null)),
     h("div", {class: "savebar"},
       h("button", {class: "primary", type: "submit", id: "save"}, "Opslaan en verbindingen testen"),
       h("span", {class: "line"}, "Opgeslagen instellingen staan in /data/settings.json en gaan voor op de waarden in je compose.")),
@@ -369,7 +403,7 @@ async function openConfig() {
     const r = await fetch("/api/settings");
     if (!r.ok) throw new Error();
     settings = await r.json();
-    clearing.clear();
+    clearing.clear(); tests = {};
     put($("config"), );
     renderConfig();
   } catch (e) {
@@ -380,6 +414,7 @@ async function openConfig() {
 function show(name) {
   view = name;
   $("view-updates").hidden = name !== "updates";
+  $("view-log").hidden = name !== "log";
   $("view-config").hidden = name !== "config";
   if (name === "config") openConfig();
   render();

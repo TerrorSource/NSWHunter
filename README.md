@@ -43,9 +43,10 @@ Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
 | Prowlarr: adres en API key | Prowlarr > Settings > General > API Key |
 | Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
 | Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
+| Automatisch zoeken | Elke 6, 12, 24 of 48 uur, zie [Zoeken en API-limieten](#zoeken-en-api-limieten) |
 | Paneel | Gebruikersnaam en wachtwoord. Zonder wachtwoord heeft het paneel geen inlog. |
 
-**Opslaan en verbindingen testen** bewaart de instellingen, probeert elke service en start een ronde. De instellingen staan in `/data/settings.json`, alleen leesbaar voor de app-gebruiker. Keys en wachtwoorden gaan nooit terug naar de browser: een leeg veld betekent "houden wat er staat", met **Wis** maak je er een leeg.
+Elke service heeft een **Test**-knop die de verbinding probeert met wat er in het formulier staat, ook als het nog niet is opgeslagen. **Opslaan en verbindingen testen** bewaart de instellingen, probeert elke service en start een ronde. De instellingen staan in `/data/settings.json`, alleen leesbaar voor de app-gebruiker. Keys en wachtwoorden gaan nooit terug naar de browser: een leeg veld betekent "houden wat er staat", met **Wis** maak je er een leeg.
 
 Dezelfde instellingen kunnen ook als omgevingsvariabele in de compose staan (`SLM_URL`, `PROWLARR_API_KEY`, …). Dat is dan de beginwaarde; een opgeslagen waarde gaat voor. De overige instellingen (tempo, indexers, meldingen) staan alleen in de compose, zie [.env.example](.env.example).
 
@@ -54,7 +55,7 @@ Dezelfde instellingen kunnen ook als omgevingsvariabele in de compose staan (`SL
 Releasenamen hebben geen vast format, dus NSWHunter zoekt drie dingen ergens in de titel:
 
 - **Welke game.** Een title ID (`0100623017A58800`) is doorslaggevend. Anders moet de gamenaam er als geheel in staan. Staat er een vervolgnummer achter (`Hades II`), dan is het een andere game. Staan er andere extra woorden bij, dan is het een twijfelgeval.
-- **Welke versie.** Een intern nummer (`v131072`) wordt direct vergeleken met `localUpdate` en `latestUpdate` uit de export. Een zichtbare versie (`v1.0.4`) is niet om te rekenen naar een intern nummer. Daarvoor gebruikt NSWHunter de releasedatums van titledb: een release die is geplaatst nadat de nieuwste update uitkwam, bevat waarschijnlijk die update. Staan beide versies ooit samen in één titel, dan onthoudt NSWHunter die vertaling.
+- **Welke versie.** Een intern nummer (`v131072`) wordt direct vergeleken met `localUpdate` en `latestUpdate` uit de export. Een zichtbare versie (`v1.7.1`) is niet om te rekenen naar een intern nummer. Daarvoor gebruikt NSWHunter de releasedatums van titledb: een release bevat de update die op de dag van plaatsen de nieuwste was. Kwam update 11 uit op 29 september en is `Update v1.7.1` op 30 september geplaatst, dan is dat waarschijnlijk update 11. Staan beide versies ooit samen in één titel, dan onthoudt NSWHunter die vertaling.
 - **Wat het is.** Alleen DLC, het basisspel (`v0`, `1.0.0`) en versies die je al hebt vallen af. Een bundel (basisspel + update) blijft kandidaat, maar staat lager.
 
 Dat geeft drie niveaus:
@@ -81,12 +82,9 @@ Een verstuurde release die na `GRAB_WAIT_HOURS` (48 uur) nog niet in je biblioth
 
 ## Zoeken en API-limieten
 
-Elke ronde (`SYNC_INTERVAL_MINUTES`, standaard 60) doet NSWHunter:
+Elk uur (`SYNC_INTERVAL_MINUTES`) haalt NSWHunter de bibliotheek op en doet het één zoekactie zonder zoekterm: de nieuwste posts van al je usenet-indexers, vergeleken met alles wat ontbreekt.
 
-- één zoekactie zonder zoekterm: de nieuwste posts van al je usenet-indexers, vergeleken met alle ontbrekende updates;
-- een zoekactie op naam voor hooguit `BACKLOG_PER_RUN` (10) games. Elke game komt eens per `BACKLOG_DAYS` (7) aan de beurt.
-
-Op naam zoeken kost per game één API-call per indexer. Heb je veel ontbrekende updates en een indexer met een daglimiet, verlaag dan `BACKLOG_PER_RUN`. Met **Zoek nu** in het paneel zoek je één game direct.
+Daarnaast wordt elke game die iets mist op naam gezocht. Hoe vaak stel je in op de tab Configuratie onder **Automatisch zoeken**: elke 6, 12, 24 of 48 uur. Dat kost per game één API-call per indexer. Met 40 games en 3 indexers is dat bij 6 uur 160 calls per indexer per dag; kies 24 of 48 uur als een indexer een daglimiet heeft. Met **Zoek nu** in het paneel zoek je één game direct.
 
 ## DLC
 
