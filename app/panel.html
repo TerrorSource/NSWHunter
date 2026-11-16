@@ -51,8 +51,10 @@
   .stat span { color: var(--soft); font-size: 13px; }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; align-items: center; }
   .tabs button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
-  .tabs input { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
-                background: var(--card); color: var(--text); min-width: 160px; }
+  .tabs input, .tabs select { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
+                background: var(--card); color: var(--text); }
+  .tabs input { min-width: 160px; }
+  .tabs label { color: var(--soft); font-size: 13px; }
   .item { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
   .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; }
   .head > .grow { min-width: 230px; }
@@ -192,9 +194,35 @@ function games() {
     if (!byGame.has(item.game_id)) byGame.set(item.game_id, {id: item.game_id, name: item.name, items: []});
     byGame.get(item.game_id).items.push(item);
   }
-  const order = g => g.items.some(i => i.status === "review") ? 0 : g.items.some(i => i.status === "sent") ? 1 : 2;
-  return [...byGame.values()].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+  const value = SORTS[sortBy] || SORTS.score, way = (value.down ? -1 : 1) * (flipped ? -1 : 1);
+  const byName = (a, b) => a.name.localeCompare(b.name, "nl", {sensitivity: "base"});
+  return [...byGame.values()].sort((a, b) => {
+    const x = value.of(a), y = value.of(b);
+    return (typeof x === "string" ? x.localeCompare(y, "nl", {sensitivity: "base"}) : x - y) * way || byName(a, b);
+  });
 }
+
+// What the overview can be sorted on. `down`: the natural order is highest first.
+const releases = g => g.items.filter(i => !i.ignored).flatMap(i => i.candidates);
+const SORTS = {
+  score: {text: "Score", down: true, of: g => Math.max(0, ...releases(g).map(c => c.score || 0))},
+  name: {text: "Naam", down: false, of: g => g.name},
+  newest: {text: "Nieuwste release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
+  count: {text: "Aantal releases", down: true, of: g => releases(g).length},
+  behind: {text: "Updates achter", down: true, of: g => {
+    const u = g.items.find(i => i.type === "update");
+    return u ? Math.round((u.latest_version - u.local_version) / 65536) : 0; }},
+  missing: {text: "Aantal ontbrekende DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
+  searched: {text: "Laatst gezocht", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
+};
+// The choice is kept in this browser; without storage it is simply the default again.
+function remembered(key, fallback) {
+  try { return localStorage.getItem("nswhunter-" + key) || fallback; } catch (e) { return fallback; }
+}
+function remember(key, value) {
+  try { localStorage.setItem("nswhunter-" + key, value); } catch (e) { /* private window */ }
+}
+let sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
 function inTab(game, name) {
   const has = status => game.items.some(i => i.status === status);
   if (name === "all") return true;
@@ -352,6 +380,13 @@ function render() {
   put($("tabs"), ...TABS.map(([name, text]) =>
     h("button", {class: tab === name ? "on" : "", onclick: () => { tab = name; render(); }}, text + " (" + count(name) + ")")),
     h("span", {class: "grow"}),
+    h("label", {for: "sort"}, "Sorteer op"),
+    h("select", {id: "sort", onchange: e => { sortBy = e.target.value; flipped = false; remember("sort", sortBy); remember("flipped", ""); render(); }},
+      Object.entries(SORTS).map(([key, v]) => h("option", {value: key, selected: key === sortBy}, v.text))),
+    h("button", {id: "flip", title: "Volgorde omkeren",
+                 "aria-label": "Volgorde omkeren, nu " + ((SORTS[sortBy] || SORTS.score).down !== flipped ? "aflopend" : "oplopend"),
+                 onclick: () => { flipped = !flipped; remember("flipped", flipped ? "1" : ""); render(); }},
+      (SORTS[sortBy] || SORTS.score).down !== flipped ? "↓" : "↑"),
     h("input", {type: "search", placeholder: "Filter op naam", value: filter, id: "filter",
                 oninput: e => { filter = e.target.value; renderList(); }}));
   renderList();
@@ -532,8 +567,8 @@ async function load() {
     state = await r.json();
     // First visit without settings: go straight to where they are filled in.
     if (!opened) { opened = true; if (!state.configured) { show("config"); return; } }
-    // Keep typing in the filter box: only rebuild around it when it has no focus.
-    if (document.activeElement && document.activeElement.id === "filter") renderList(); else render();
+    // Keep typing in the filter box and keep the sort list open: only rebuild around them.
+    if (["filter", "sort"].includes(document.activeElement && document.activeElement.id)) renderList(); else render();
   } catch (e) {
     $("statusline").textContent = "Geen verbinding met NSWHunter";
   }

@@ -2,6 +2,16 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.6.0] - 2026-11-16
+
+### Toegevoegd
+
+- **Sorteren** in het overzicht: op score, naam, nieuwste release, aantal releases, aantal updates achter, aantal ontbrekende DLC en laatst gezocht. De pijl ernaast keert de volgorde om. De keuze wordt in je browser onthouden.
+
+### Gewijzigd
+
+- Het overzicht staat standaard op score (hoogste eerst) in plaats van op naam.
+
 ## [1.5.1] - 2026-11-16
 
 ### Opgelost
