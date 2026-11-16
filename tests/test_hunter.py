@@ -31,7 +31,8 @@ def run(test, **settings):
             "DOWNLOAD_CATEGORY": "games", "TITLEDB_VERSIONS_URL": base + "/versions.json",
             "AUTO_DOWNLOAD": "off", "AUTO_BUNDLES": False, "INCLUDE_DLC": False,
             "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 0, "SEARCH_INTERVAL_HOURS": 24,
-            "SEARCH_BY_TITLE_ID": False, **settings}
+            "SEARCH_BY_TITLE_ID": False, "GRAB_WAIT_MINUTES": 60, "WATCH_SECONDS": 120,
+            "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "", "TELEGRAM_API_URL": base, **settings}
         saved = {k: getattr(config, k) for k in values}
         for path in (config.STATE_FILE, config.VERSIONS_FILE):
             if os.path.exists(path):
@@ -169,7 +170,7 @@ def test_every_game_is_searched_once_per_interval():
 def test_test_buttons_use_the_values_of_the_form():
     async def test(hunter, fakes):
         good = config.overlay({})
-        assert await hunter.test("slm", good) == "7 games in de bibliotheek"
+        assert await hunter.test("slm", good) == "8 games in de bibliotheek"
         assert await hunter.test("prowlarr", good) == "Prowlarr 2.0.0, 1 usenet-indexer"
         assert await hunter.test("downloader", good) == "NZBGet 24.5"
         assert await hunter.test("downloader", config.overlay({"DOWNLOAD_CLIENT": "prowlarr"})) == "via Prowlarr: NZBGet"
@@ -274,17 +275,140 @@ def test_grab_through_prowlarr():
     run(test, DOWNLOAD_CLIENT="prowlarr")
 
 
-def test_release_that_never_arrives_is_skipped_next_time():
+async def send_best(hunter, key=ALAN):
+    await hunter.round()
+    guid = hunter.state["items"][key]["candidates"][0]["guid"]
+    await hunter.grab(key, guid)
+    return guid
+
+
+def test_release_the_client_does_not_know_counts_as_not_arrived_after_the_wait():
     async def test(hunter, fakes):
-        await hunter.round()
-        first = hunter.state["items"][ALAN]["candidates"][0]["guid"]
-        await hunter.grab(ALAN, first)
-        hunter.state["items"][ALAN]["grab"]["at"] = time.time() - 72 * 3600
-        hunter.state["searched"].clear()
-        await hunter.round()
+        first = await send_best(hunter)
+        fakes["downloads"].clear()  # removed from the download client by hand
+        await hunter.watch()
+        assert hunter.state["items"][ALAN]["grab"] is not None  # the hour is not over
+        hunter.state["items"][ALAN]["grab"]["at"] = time.time() - 61 * 60
+        await hunter.watch()
         item = hunter.state["items"][ALAN]
         assert item["grab"] is None and first in item["blocked"]
         assert first not in [c["guid"] for c in item["candidates"]]
+        assert any(e["text"].startswith("Niet aangekomen na 60 minuten") for e in hunter.state["events"])
+    run(test)
+
+
+def test_failed_download_gives_the_next_release_its_turn_at_once():
+    async def test(hunter, fakes):
+        first = await send_best(hunter)
+        assert hunter.state["items"][ALAN]["grab"]["client_id"] == "1"
+        fakes["downloads"]["1"] = "FAILURE/PAR"
+        config.AUTO_DOWNLOAD = "7"
+        for key, item in hunter.state["items"].items():
+            item["ignored"] = key != ALAN  # only this game, to keep the test about one thing
+        await hunter.watch()
+        item = hunter.state["items"][ALAN]
+        # Score 10 failed; the next best (7) is sent by itself because 7 is the threshold.
+        assert first in item["blocked"] and item["grab"]["title"] == "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM"
+        assert item["grab"]["auto"] is True and len(fakes["sent"]) == 2
+        # The first message is from the round: "4 updates of DLC wachten op je keuze".
+        assert fakes["telegram"][1].startswith("NSWHunter\nDownload mislukt: Alan Wake Remastered [0100623017A58800]")
+        assert any("Vanzelf verstuurd: Alan_Wake" in text for text in fakes["telegram"])
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42")
+
+
+def test_download_that_is_busy_is_never_given_up():
+    async def test(hunter, fakes):
+        await send_best(hunter)
+        hunter.state["items"][ALAN]["grab"]["at"] = time.time() - 5 * 3600
+        await hunter.watch()
+        grab = hunter.state["items"][ALAN]["grab"]
+        assert grab["state"] == "downloading" and hunter.state["items"][ALAN]["blocked"] == []
+    run(test)
+
+
+def test_downloaded_then_in_the_library():
+    async def test(hunter, fakes):
+        await send_best(hunter)
+        fakes["downloads"]["1"] = "SUCCESS/ALL"
+        await hunter.watch()
+        assert hunter.state["items"][ALAN]["grab"]["state"] == "done"
+        assert len(fakes["rescans"]) == 1  # the library was asked to scan
+        # The library has scanned: the update is there. The next look sees it without a round.
+        fakes["library"][0].update(localUpdate=196608, updateMissing=False)
+        hunter.state["library"]["fetched"] = 0
+        await hunter.watch()
+        assert ALAN not in hunter.state["items"]
+        assert fakes["telegram"][1:] == ["NSWHunter\nBinnen: Alan Wake Remastered (update) staat nu in de bibliotheek"]
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42")
+
+
+def test_downloaded_but_never_in_the_library_is_reported_not_retried():
+    """Something between the download client and the library is not connected: sending the
+    next release would only download more that never arrives."""
+    async def test(hunter, fakes):
+        first = await send_best(hunter)
+        fakes["downloads"]["1"] = "SUCCESS/ALL"
+        config.AUTO_DOWNLOAD = "7"
+        await hunter.watch()
+        hunter.state["items"][ALAN]["grab"]["done_at"] = time.time() - 61 * 60
+        await hunter.watch()
+        item = hunter.state["items"][ALAN]
+        assert item["grab"]["state"] == "stuck" and item["blocked"] == [] and len(fakes["sent"]) == 1
+        assert first in [c["guid"] for c in item["candidates"]]
+        assert "niet in je bibliotheek" in fakes["telegram"][-1]
+        await hunter.watch()
+        assert sum("niet in je bibliotheek" in text for text in fakes["telegram"]) == 1  # told once
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42")
+
+
+def test_what_fell_off_is_kept_with_the_reason_and_can_still_be_sent():
+    async def test(hunter, fakes):
+        await hunter.round()
+        fell = {r["title"]: r["reason"] for r in hunter.state["items"][NARUTO]["rejected"]}
+        assert fell["NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.0 NSW-SUXXORS"] == \
+            "v1.7.0 is niet nieuwer dan je eigen versie"
+        hades = hunter.state["items"][HADES]["rejected"]
+        assert [r["reason"] for r in hades] == ["voor een ander platform (PS4), niet voor de Switch"]
+        # Releases of other games are not listed as fallen off.
+        assert not any("Alan Wake 2" in r["title"] for r in hunter.state["items"][ALAN]["rejected"])
+        shown = next(i for i in hunter.view()["items"] if i["key"] == HADES)
+        assert shown["rejected"][0]["title"] == "Hades.v1.38.incl.DLC.PS4-CUSA34119"
+        assert "downloadUrl" not in shown["rejected"][0]
+        await hunter.grab(HADES, hades[0]["guid"])  # the user knows better
+        assert fakes["sent"][-1][0] == "Hades.v1.38.incl.DLC.PS4-CUSA34119.nzb"
+    run(test)
+
+
+def test_switch_2_titles_are_left_alone():
+    async def test(hunter, fakes):
+        await hunter.round()
+        assert not any(key.startswith("04") for key in hunter.state["items"])
+        assert fakes["queries"].count("hades") == 1  # searched once, for the Switch game
+    run(test)
+
+
+def test_dlc_pack_is_listed_once_per_game():
+    async def test(hunter, fakes):
+        await hunter.round()
+        pack = hunter.state["items"][ALAN + ":pack"]
+        assert pack["type"] == "dlcpack" and titles(hunter, ALAN + ":pack") == [
+            "Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]"]
+        assert "Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]" not in titles(hunter, ALAN_DLC)
+        assert hunter.state["library"]["dlc"] == 3  # packs are not counted as missing DLC
+    run(test, INCLUDE_DLC=True)
+
+
+def test_telegram_test_button():
+    async def test(hunter, fakes):
+        good = config.overlay({"TELEGRAM_BOT_TOKEN": "TESTTOKEN", "TELEGRAM_CHAT_ID": "42"})
+        assert await hunter.test("telegram", good) == "Testbericht verstuurd"
+        assert fakes["telegram"] == ["NSWHunter\nDit is een testbericht."]
+        for values, expected in (({"TELEGRAM_BOT_TOKEN": "WRONGTOKEN", "TELEGRAM_CHAT_ID": "42"}, "bot-token klopt niet"),
+                                 ({"TELEGRAM_BOT_TOKEN": "TESTTOKEN", "TELEGRAM_CHAT_ID": "7"}, "chat not found"),
+                                 ({"TELEGRAM_BOT_TOKEN": "TESTTOKEN"}, "vul het bot-token en het chat-ID in")):
+            with pytest.raises(hunter_module.clients.ServiceError) as error:
+                await hunter.test("telegram", config.overlay(values))
+            assert expected in str(error.value) and "TOKEN" not in str(error.value)
     run(test)
 
 

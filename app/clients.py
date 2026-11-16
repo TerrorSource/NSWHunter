@@ -276,10 +276,11 @@ async def downloader_status(session, cfg=config):
 
 
 async def send(session, release):
-    """Hand one release to the download client."""
+    """Hand one release to the download client. Returns the client's own id for the download,
+    to ask later how it is doing; None if the client gives none."""
     if config.DOWNLOAD_CLIENT == "prowlarr":
         await prowlarr_grab(session, release)
-        return
+        return None
     nzb = await prowlarr_nzb(session, release)
     name = nzb_filename(release["title"])
     if config.DOWNLOAD_CLIENT == "nzbget":
@@ -288,6 +289,63 @@ async def send(session, release):
             0, False, False, "", 0, "SCORE", []])
         if not result or result <= 0:
             raise ServiceError("NZBGet heeft de NZB geweigerd")
-    else:
-        await _sabnzbd(session, {"mode": "addfile", "cat": config.DOWNLOAD_CATEGORY,
-                                 "nzbname": name[:-4]}, nzb=(name, nzb))
+        return str(result)
+    answer = await _sabnzbd(session, {"mode": "addfile", "cat": config.DOWNLOAD_CATEGORY,
+                                      "nzbname": name[:-4]}, nzb=(name, nzb))
+    ids = answer.get("nzo_ids") or []
+    return str(ids[0]) if ids else None
+
+
+async def download_states(session):
+    """{client id: "downloading" | "done" | "failed"} of what the download client has in its
+    queue and its history. Empty when downloads go through Prowlarr: it tells nothing back."""
+    states = {}
+    if config.DOWNLOAD_CLIENT == "nzbget":
+        for entry in await _nzbget(session, "history", [False]) or []:
+            status = str(entry.get("Status", ""))
+            # SUCCESS/ALL, WARNING/HEALTH: the files are there. FAILURE/PAR, DELETED/MANUAL: not.
+            states[str(entry.get("NZBID"))] = "done" if status.startswith(("SUCCESS", "WARNING")) else "failed"
+        for entry in await _nzbget(session, "listgroups", [0]) or []:
+            states[str(entry.get("NZBID"))] = "downloading"
+    elif config.DOWNLOAD_CLIENT == "sabnzbd":
+        history = await _sabnzbd(session, {"mode": "history", "limit": "300"})
+        for slot in (history.get("history") or {}).get("slots") or []:
+            status = str(slot.get("status", ""))
+            states[str(slot.get("nzo_id"))] = (
+                "done" if status == "Completed" else "failed" if status == "Failed" else "downloading")
+        queue = await _sabnzbd(session, {"mode": "queue"})
+        for slot in (queue.get("queue") or {}).get("slots") or []:
+            states[str(slot.get("nzo_id"))] = "downloading"
+    return states
+
+
+async def library_rescan(session):
+    """Ask switch-library-manager-web to scan its folders again. True if it will. A key with
+    only "Read only" is refused; then the library is seen at its own next scan."""
+    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY else {}
+    try:
+        async with session.post(f"{config.SLM_URL}/sync", headers=headers, timeout=SHORT) as r:
+            return r.status < 300
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def telegram(session, text, cfg=config):
+    """Send a message through the user's own Telegram bot."""
+    if not cfg.TELEGRAM_BOT_TOKEN or not cfg.TELEGRAM_CHAT_ID:
+        raise ServiceError("Telegram: vul het bot-token en het chat-ID in")
+    # The address holds the token: no error may ever show it.
+    address = f"{config.TELEGRAM_API_URL}/bot{cfg.TELEGRAM_BOT_TOKEN}/sendMessage"
+    body = {"chat_id": cfg.TELEGRAM_CHAT_ID, "text": text[:3900], "disable_web_page_preview": True}
+    try:
+        async with session.post(address, json=body, timeout=SHORT) as r:
+            status = r.status
+            answer = await r.json(content_type=None) if status != 200 else {}
+    except Exception as e:  # noqa: BLE001
+        raise ServiceError("Telegram: geen verbinding met Telegram") from e
+    if status in (401, 404):
+        raise ServiceError("Telegram: het bot-token klopt niet")
+    if status != 200:
+        why = str((answer or {}).get("description", f"HTTP {status}"))[:120]
+        raise ServiceError(f"Telegram weigert het bericht: {why}. Klopt het chat-ID, en heb je de bot al een bericht gestuurd?")
+    return "Testbericht verstuurd"

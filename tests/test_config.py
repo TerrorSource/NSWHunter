@@ -147,3 +147,28 @@ def test_panel_password_works_at_once_and_can_be_removed():
         r = await client.post("/api/settings", json={"values": {}, "clear": ["PANEL_PASSWORD"]}, headers=login)
         assert r.status == 200 and (await client.get("/api/settings")).status == 200
     api(test)
+
+
+def test_panel_password_is_kept_as_a_hash():
+    config.update({"PANEL_PASSWORD": "hunter2"})
+    assert config.PANEL_PASSWORD.startswith("scrypt$") and "hunter2" not in open(config.SETTINGS_FILE).read()
+    assert config.check_password("hunter2") and not config.check_password("hunter3")
+    config.update({}, clear=["PANEL_PASSWORD"])
+    assert config.PANEL_PASSWORD == "" and not config.check_password("")
+
+
+def test_password_saved_by_an_older_version_is_hashed_at_start():
+    config.write({"PANEL_USER": "hunter", "PANEL_PASSWORD": "plain-old"})
+    config.load_saved()
+    assert config.check_password("plain-old")
+    assert "plain-old" not in open(config.SETTINGS_FILE).read()
+
+
+def test_telegram_and_wait_settings():
+    config.update({"TELEGRAM_BOT_TOKEN": "TESTTOKEN", "TELEGRAM_CHAT_ID": "-100123", "GRAB_WAIT_MINUTES": "120"})
+    assert (config.TELEGRAM_CHAT_ID, config.GRAB_WAIT_MINUTES) == ("-100123", 120)
+    shown = config.editable()
+    assert shown["secrets"]["TELEGRAM_BOT_TOKEN"] is True and "TESTTOKEN" not in str(shown)
+    for wrong in ({"TELEGRAM_CHAT_ID": "mijn chat"}, {"GRAB_WAIT_MINUTES": "45"}):
+        with pytest.raises(ValueError):
+            config.update(wrong)

@@ -2,6 +2,24 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.7.0] - 2026-11-16
+
+### Toegevoegd
+
+- **Meldingen via Telegram**, in te stellen op de tab Configuratie (bot-token, chat-ID, knop **Stuur testbericht**). Je krijgt een bericht als er iets vanzelf is verstuurd, iets op je keuze wacht, een download mislukt of iets binnen is.
+- **Downloads volgen.** NSWHunter vraagt NZBGet of SABnzbd elke twee minuten naar de status. Mislukt een download, dan is de volgende release meteen aan de beurt. Is hij gedownload, dan krijgt switch-library-manager-web het verzoek om te scannen. Het paneel toont de status ("wordt gedownload", "gedownload, wacht op de bibliotheek").
+- **Wachten op de bibliotheek** instelbaar (30 minuten tot 24 uur, standaard 60 minuten) in plaats van vast 48 uur.
+- **Afgevallen releases** per game, met de reden, en een knop **Toch downloaden**.
+- **Grootte telt mee in de score:** een "update" zo groot als het hele spel, of meer dan vijf keer zo groot of zo klein als je eigen update, scoort lager.
+- **DLC-pakket:** releases die geen DLC bij naam noemen ("DLC Unlocker", "DLC Pack") staan één keer per game in plaats van onder elke ontbrekende DLC.
+
+### Gewijzigd
+
+- **Geen Switch 2.** Titels met een Switch 2-ID (`04…`) uit de bibliotheek worden overgeslagen, en releases met `Switch 2`, `NSW2` of een Switch 2-title ID vallen af.
+- Van het paneelwachtwoord wordt alleen nog een hash bewaard. Een wachtwoord dat een oudere versie leesbaar opsloeg, wordt bij de start omgezet.
+- Is een download gelukt maar staat hij na de wachttijd niet in de bibliotheek, dan gaat er geen volgende release uit; je krijgt een melding.
+- `GRAB_WAIT_HOURS` is vervangen door `GRAB_WAIT_MINUTES`.
+
 ## [1.6.0] - 2026-11-16
 
 ### Toegevoegd

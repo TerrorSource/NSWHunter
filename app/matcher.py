@@ -19,7 +19,10 @@ from dataclasses import asdict, dataclass, field
 # product of three chances: that it is this game, that it is the newest update, and that it is
 # an update and nothing else.
 IDENTITY = {"tid": 1.0, "exact": 0.9, "extras": 0.5, "fuzzy": 0.35}
-KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0}
+KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0, "dlcpack": 1.0}
+WHOLE_GAME = 0.75  # an "update" as big as the game itself: the game is probably in it
+ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the library
+PACK = 0.55  # a pack of DLC that does not say which DLC
 CRACK = 0.9  # an update with a crack holds changed files
 NAMED = 0.6  # the share of a DLC's own words that must be in a title to call it named
 
@@ -28,7 +31,9 @@ DATE_SLACK = datetime.timedelta(days=3)
 # How late the date of a new update can be in the databases (seen: three weeks).
 LATE_SLACK = datetime.timedelta(days=45)
 
-TID_RE = re.compile(r"(?<![0-9a-z])(01[0-9a-f]{14})(?![0-9a-z])")
+# 01...: Switch. 04...: Switch 2, recognised only to tell that a release is not for the Switch.
+TID_RE = re.compile(r"(?<![0-9a-z])(0[14][0-9a-f]{14})(?![0-9a-z])")
+SWITCH2_RE = re.compile(r"(?<![0-9a-z])(switch|nsw|ns)[ ._-]?2(?![0-9a-z])")
 # v65536, v.131072, "v 196608": five or more digits is always an internal version number.
 INTERNAL_RE = re.compile(r"(?<![0-9a-z])v\.?\s?(\d{5,10})(?![0-9a-z])")
 BRACKET_INTERNAL_RE = re.compile(r"[\[(](\d{5,10})[\])]")
@@ -76,6 +81,8 @@ class Game:
     dates: dict = field(default_factory=dict)  # internal version -> datetime.date of release
     missing_dlc: list = field(default_factory=list)  # [{"id": ..., "name": ...}]
     dlc: list = field(default_factory=list)  # every DLC of the game, owned or not: [{"id", "name"}]
+    update_size: int = 0  # bytes of the newest update in the library, 0 if there is none
+    base_size: int = 0  # bytes of the game itself
 
 
 @dataclass
@@ -103,6 +110,7 @@ def mark(identity, version, kind, crack=False):
 @dataclass
 class Rejection:
     reason: str
+    known: bool = False  # it is a release of this game, and it fell off for another reason
 
 
 def clean(text):
@@ -316,8 +324,28 @@ def observe(game, title):
     return result if isinstance(result, str) else None
 
 
+NOT_THIS_GAME = ("title ID van een andere game", "naam komt niet overeen")
+
+
 def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, seen=None,
-             only_version=False):
+             only_version=False, size=0):
+    """Judge one release for one game: a Candidate, or a Rejection with the reason.
+
+    want: "update"; "dlc" with `dlc` = {"id": ..., "name": ...} of the missing DLC; or
+    "dlcpack" for a pack of the game's DLC that names none of them.
+    size: bytes of the release, if known.
+    """
+    result = _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size)
+    if isinstance(result, Rejection):
+        result.known = not (result.reason in NOT_THIS_GAME or result.reason.startswith("andere game"))
+    return result
+
+
+def size_text(size):
+    return f"{size / 2**30:.1f} GB" if size >= 2**30 else f"{size / 2**20:.0f} MB"
+
+
+def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size):
     """Judge one release for one game.
 
     published: datetime.date the release was posted, if known.
@@ -386,6 +414,9 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         other = sorted(outside & OTHER_PLATFORMS) or [m.group() for m in [OTHER_CODE_RE.search(text)] if m]
         if other:
             return Rejection(f"voor een ander platform ({other[0].upper()}), niet voor de Switch")
+        # Switch 2 releases are left alone on purpose: only the first Switch.
+        if SWITCH2_RE.search(rest) or any(i.startswith("04") for i in ids):
+            return Rejection("voor de Switch 2, niet voor de Switch")
 
     # ---- what it is
     has_update = bool(words & UPDATE_WORDS) or any(re.fullmatch(r"upd\d+", w) for w in words)
@@ -405,9 +436,9 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     else:
         kind = "unknown"
 
-    if want == "dlc":
+    if want in ("dlc", "dlcpack"):
         return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
-                             bool(outside & SWITCH_WORDS))
+                             bool(outside & SWITCH_WORDS), pack=want == "dlcpack")
     if kind == "dlc":
         return Rejection("alleen DLC, geen update")
     if kind == "base":
@@ -506,6 +537,13 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         reasons.append("het platform staat niet in de titel")
     if kind == "bundle":
         reasons.append("bundel: bevat ook het basisspel of DLC")
+    elif size and game.base_size and size >= 0.8 * game.base_size and size > 3 * game.update_size:
+        chance *= WHOLE_GAME
+        reasons.append(f"zo groot als het hele spel ({size_text(size)}): waarschijnlijk zit het basisspel erbij")
+    elif size and game.update_size and not 0.15 <= size / game.update_size <= 5:
+        chance *= ODD_SIZE
+        reasons.append(f"de grootte wijkt sterk af van je eigen update ({size_text(size)} tegenover "
+                       f"{size_text(game.update_size)})")
     if crack:
         reasons.append("met crack: de bestanden zijn aangepast")
     identity = "tid" if name_match == "tid" else "fuzzy" if name_match == "fuzzy" else "extras" if extras else "exact"
@@ -541,9 +579,11 @@ def _named(words, own):
     return (len(hits) / len(own), len(hits)) if own else (0.0, 0)
 
 
-def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, switch=True):
+def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, switch=True, pack=False):
     """A missing DLC: only its own title ID makes it certain; a name is a guess."""
     dlc_id = (dlc or {}).get("id", "").upper()
+    if own_ids and pack:
+        return Rejection("heeft de title ID van één DLC: staat bij die DLC")
     if own_ids:
         if dlc_id in own_ids:
             return Candidate(10, "dlc", "tid", None, None, None, ["title ID van deze DLC komt overeen"])
@@ -553,12 +593,12 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
     if name_match == "fuzzy":
         return Rejection("naam komt niet overeen")
     words = {t for t, _, _ in tokens(text)}
-    own = _dlc_words(game, (dlc or {}).get("name", ""))
+    own = [] if pack else _dlc_words(game, (dlc or {}).get("name", ""))
     mine = _named(words, own)
     # A game can have twenty DLCs with almost the same name ("Commentary - Dutch", "... -
     # Spanish"). A release that names another one better is that other one.
     others = [(_named(words, _dlc_words(game, other.get("name", ""))), other.get("name", ""))
-              for other in game.dlc if str(other.get("id", "")).upper() != dlc_id]
+              for other in game.dlc if pack or str(other.get("id", "")).upper() != dlc_id]
     rival = max(others, default=((0.0, 0), ""))
     if rival[0][0] >= NAMED and rival[0] > mine:
         return Rejection(f"is een andere DLC van deze game: {rival[1]}")
@@ -566,16 +606,21 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
     whole = _dlc_words(game, (dlc or {}).get("name", ""), telling=False)
     left = [e for e in extras if e not in whole]
     reasons = ["extra woorden in de titel: " + " ".join(left)] if left else ["naam komt overeen"]
-    if mine[0] >= NAMED:
+    if pack:
+        # "DLC Unlocker", "DLC Pack": listed once per game, not under every missing DLC.
+        if mine[0] >= NAMED or rival[0][0] >= NAMED:
+            return Rejection("noemt één DLC: staat bij die DLC")
+        chance = PACK
+        reasons.append("pakket met DLC van deze game; niet te zien welke erin zitten")
+    elif mine[0] >= NAMED:
         only = rival[0] < mine
         chance = 0.85 if only else 0.6
         reasons.append("naam van de DLC staat in de titel" + ("" if only else "; past ook bij een andere DLC"))
     else:
-        chance = 0.3
-        reasons.append("DLC van deze game, maar niet te zien welke")
+        return Rejection("noemt geen DLC: staat bij het DLC-pakket van deze game")
     if not switch:
         chance *= UNMARKED
         reasons.append("het platform staat niet in de titel")
-    kind = "dlc" if kind == "dlc" else "bundle"
-    return Candidate(mark("extras" if left else "exact", chance, kind), "dlc", name_match,
-                     None, None, None, reasons)
+    kind = "bundle" if kind == "bundle" else "dlcpack" if pack else "dlc"
+    return Candidate(mark("extras" if left else "exact", chance, kind), "dlcpack" if pack else "dlc",
+                     name_match, None, None, None, reasons)

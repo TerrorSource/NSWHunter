@@ -10,6 +10,13 @@ import config
 import matcher
 
 MAX_CANDIDATES = 15
+MAX_REJECTED = 25
+# What the panel needs of a release that fell off; the judgement is made again when it counts.
+RELEASE_FIELDS = ("guid", "title", "size", "indexer", "indexerId", "published", "downloadUrl",
+                  "infoUrl", "grabs", "priority")
+# A release that belongs under another item of the same game did not fall off: it is there.
+ELSEWHERE = ("is een andere DLC", "noemt geen DLC", "noemt één DLC", "heeft de title ID van één DLC",
+             "geen DLC", "alleen DLC", "title ID van een ander onderdeel")
 MAX_EVENTS = 200
 DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
 
@@ -143,7 +150,8 @@ class Hunter:
         games, wanted = {}, {}
         for title in titles:
             game_id = str(title.get("id", "")).upper()
-            if len(game_id) != 16:
+            # 04...: a Switch 2 title. Left alone on purpose: only the first Switch.
+            if len(game_id) != 16 or game_id.startswith("04"):
                 continue
             name = title.get("name") or ""
             if name == "Unknown title":
@@ -159,7 +167,8 @@ class Hunter:
                 local_version=int(title.get("localUpdate") or 0),
                 latest_version=int(title.get("latestUpdate") or 0),
                 local_display=title.get("version") or None,
-                dates=self.dates_for(game_id), missing_dlc=missing_dlc, dlc=all_dlc)
+                dates=self.dates_for(game_id), missing_dlc=missing_dlc, dlc=all_dlc,
+                **self.sizes(title))
             games[game_id] = game
             shown = name or game_id
             if update:
@@ -174,11 +183,16 @@ class Hunter:
                     "type": "dlc", "game_id": game_id, "name": shown,
                     "dlc_id": dlc["id"], "dlc_name": dlc["name"],
                 }
+            if missing_dlc:
+                # "DLC Unlocker", "DLC Pack": releases that name no DLC, once per game.
+                wanted[game_id + ":pack"] = {
+                    "type": "dlcpack", "game_id": game_id, "name": shown, "dlc_missing": len(missing_dlc)}
         items = self.state["items"]
+        arrived = []
         for key in [k for k in items if k not in wanted]:
             gone = items.pop(key)
-            if gone.get("grab"):
-                self.event(f"Binnen: {self.label(gone)} staat nu in de bibliotheek")
+            if gone.get("grab") and gone["type"] != "dlcpack":
+                arrived.append(f"Binnen: {self.label(gone)} staat nu in de bibliotheek")
         for key, facts in wanted.items():
             item = items.setdefault(key, {
                 "key": key, "candidates": [], "blocked": [], "ignored": False,
@@ -186,7 +200,10 @@ class Hunter:
             grab = item.get("grab")
             if grab and facts.get("local_version", 0) > grab.get("local_version", facts.get("local_version", 0)):
                 # What was sent arrived, but it was not the newest update: choose again.
-                self.event(f"Binnen: {grab['title']}. Er is nog een nieuwere update.")
+                arrived.append(f"Binnen: {grab['title']}. Er is nog een nieuwere update.")
+                item["grab"] = None
+            elif grab and facts.get("dlc_missing", 0) < grab.get("dlc_missing", 0):
+                arrived.append(f"Binnen: {grab['title']}. Er ontbreken nog {facts['dlc_missing']} DLC.")
                 item["grab"] = None
             item.update(facts)
         self.games = games
@@ -197,12 +214,27 @@ class Hunter:
         }
         self.service("slm", True, f"{len(titles)} games")
         self.reevaluate()
+        for text in arrived:
+            self.event(text, "grab")
+            await self.tell(text)
         return True
+
+    @staticmethod
+    def sizes(title):
+        """The size of the game and of the newest update in the library, to weigh a release by."""
+        files = [f for f in title.get("files") or [] if isinstance(f, dict)]
+        updates = [f for f in files if f.get("type") == "UPD"]
+        base = [f for f in files if f.get("type") not in ("UPD", "DLC")]
+        newest = max(updates, key=lambda f: f.get("version") or 0, default={})
+        return {"update_size": int(newest.get("size") or 0),
+                "base_size": int(base[0].get("size") or 0) if base else 0}
 
     @staticmethod
     def label(item):
         if item["type"] == "dlc":
             return f"{item['name']} (DLC: {item.get('dlc_name') or item['key']})"
+        if item["type"] == "dlcpack":
+            return f"{item['name']} (DLC-pakket)"
         return f"{item['name']} (update)"
 
     def items_of(self, game_id):
@@ -211,18 +243,20 @@ class Hunter:
     # ------------------------------------------------------------ judging
 
     def judge(self, item, release):
+        """A candidate (dict), or the matcher.Rejection that says why not."""
         game = self.games.get(item["game_id"])
         if game is None:
-            return None
+            return matcher.Rejection("game staat niet meer in de lijst")
         dlc = {"id": item.get("dlc_id", ""), "name": item.get("dlc_name", "")}
         vermap = self.state["vermap"].setdefault(game.id, {})
         result = matcher.evaluate(game, release["title"], published_date(release), vermap,
-                                  want=item["type"], dlc=dlc, seen=self.seen(game.id))
+                                  want=item["type"], dlc=dlc, seen=self.seen(game.id),
+                                  size=int(release.get("size") or 0))
         if not self.state["vermap"][game.id]:
             del self.state["vermap"][game.id]
         if isinstance(result, matcher.Rejection):
-            return None
-        return {**release, **result.to_dict()}
+            return result
+        return {**{k: release.get(k) for k in RELEASE_FIELDS}, **result.to_dict()}
 
     def seen(self, game_id):
         """{display version: date first posted} of everything seen for a game."""
@@ -248,35 +282,49 @@ class Hunter:
         return True
 
     def offer(self, item, release):
-        """Add a release to an item's candidates if it is one. True if it is new."""
+        """Judge a release for an item and file it: with the candidates, or with what fell off.
+        True if it is a new candidate."""
         if release["guid"] in item["blocked"]:
             return False
         release = {**release, "priority": self.priorities.get(release.get("indexerId"), DEFAULT_PRIORITY)}
         if any(c["guid"] == release["guid"] for c in item["candidates"]):
             return False
-        # The same release on several indexers: keep the one from the indexer that goes first.
+        return self.place(item, release)
+
+    def place(self, item, release):
         same = matcher.same_release(release["title"])
-        twin = next((c for c in item["candidates"] if matcher.same_release(c["title"]) == same), None)
-        if twin and twin.get("priority", DEFAULT_PRIORITY) <= release["priority"]:
+        rejected = item.setdefault("rejected", [])
+        result = self.judge(item, release)
+        if isinstance(result, matcher.Rejection):
+            # Shown in the panel, so a wrong rejection can be seen and overruled. Not what is of
+            # another game, and not what simply belongs under another item of this game.
+            if result.known and not result.reason.startswith(ELSEWHERE) \
+                    and not any(matcher.same_release(r["title"]) == same for r in rejected):
+                rejected.append({**{k: release.get(k) for k in RELEASE_FIELDS}, "reason": result.reason})
+                rejected.sort(key=published_ordinal, reverse=True)
+                del rejected[MAX_REJECTED:]
             return False
-        candidate = self.judge(item, release)
-        if candidate is None:
+        # The same release on several indexers: keep the one from the indexer that goes first.
+        twin = next((c for c in item["candidates"] if matcher.same_release(c["title"]) == same), None)
+        if twin and twin.get("priority", DEFAULT_PRIORITY) <= result.get("priority", DEFAULT_PRIORITY):
             return False
         if twin:
             item["candidates"].remove(twin)
-        item["candidates"].append(candidate)
+        rejected[:] = [r for r in rejected if matcher.same_release(r["title"]) != same]
+        item["candidates"].append(result)
         item["candidates"].sort(key=best_first)
         del item["candidates"][MAX_CANDIDATES:]
-        return candidate in item["candidates"] and not twin
+        return result in item["candidates"] and not twin
 
     def reevaluate(self):
-        """The library changed (new local version, newer update out): judge everything again."""
+        """The library changed (new local version, newer update out) or more became known about
+        the versions: judge everything again, also what fell off before."""
         for item in self.state["items"].values():
-            fresh = sorted((c for c in (self.judge(item, c) for c in item["candidates"]) if c), key=best_first)
-            kept = {}
-            for candidate in sorted(fresh, key=lambda c: c.get("priority", DEFAULT_PRIORITY)):
-                kept.setdefault(matcher.same_release(candidate["title"]), candidate)
-            item["candidates"] = [c for c in fresh if c in kept.values()]
+            pool = item["candidates"] + item.get("rejected", [])
+            item["candidates"], item["rejected"] = [], []
+            for release in sorted(pool, key=lambda r: r.get("priority", DEFAULT_PRIORITY)):
+                if release["guid"] not in item["blocked"]:
+                    self.place(item, release)
 
     def ladder_text(self, game_id):
         """For the panel: which display version is which update, from the library's own up."""
@@ -380,16 +428,89 @@ class Hunter:
 
     # ------------------------------------------------------------ sending
 
-    def expire_grabs(self):
-        """Sent, but still missing after the waiting time: that release did not work out."""
-        limit = time.time() - config.GRAB_WAIT_HOURS * 3600
-        for item in self.state["items"].values():
-            grab = item.get("grab")
-            if grab and grab["at"] < limit:
-                item["blocked"].append(grab["guid"])
-                item["candidates"] = [c for c in item["candidates"] if c["guid"] != grab["guid"]]
-                item["grab"] = None
-                self.event(f"Niet aangekomen: {grab['title']}. Deze release wordt overgeslagen.", "warn")
+    def drop(self, item, text):
+        """What was sent did not work out: skip that release from now on."""
+        grab = item["grab"]
+        item["blocked"].append(grab["guid"])
+        item["candidates"] = [c for c in item["candidates"] if c["guid"] != grab["guid"]]
+        item["grab"] = None
+        self.event(text, "warn")
+        return text
+
+    async def follow_grabs(self):
+        """Ask the download client how the sent releases are doing.
+
+        Failed: the next release gets its turn at once. Downloaded: the library is asked to
+        scan and is read again; if the update is still not there after the waiting time, the
+        download is left as it is and the user is told (no next release: something between the
+        download client and the library is not connected). Unknown to the client: after the
+        waiting time it counts as not arrived."""
+        pending = [i for i in self.state["items"].values() if i.get("grab")]
+        if not pending:
+            return
+        try:
+            states = await clients.download_states(self.session)
+        except clients.ServiceError as e:
+            self.service("downloader", False, str(e))
+            states = {}
+        now, wait = time.time(), config.GRAB_WAIT_MINUTES * 60
+        waited = f"{config.GRAB_WAIT_MINUTES} minuten" if wait < 7200 else f"{config.GRAB_WAIT_MINUTES // 60} uur"
+        tell, dropped, finished = [], False, False
+        for item in pending:
+            grab = item["grab"]
+            state = states.get(grab.get("client_id")) if grab.get("client_id") else None
+            if state == "failed":
+                tell.append(self.drop(item, f"Download mislukt: {grab['title']}. De volgende release is aan de beurt."))
+                dropped = True
+            elif state == "downloading":
+                grab["state"] = "downloading"
+            elif state == "done":
+                if grab.get("state") not in ("done", "stuck"):
+                    grab.update(state="done", done_at=int(now))
+                    finished = True
+                    self.event(f"Gedownload: {grab['title']}. Wacht op de bibliotheek.")
+                elif grab["state"] == "done" and now - grab["done_at"] > wait:
+                    grab["state"] = "stuck"
+                    text = (f"Gedownload, maar na {waited} niet in je bibliotheek: {grab['title']}. "
+                            "Scant Switch-library-manager-web de map van je downloadclient?")
+                    self.event(text, "warn")
+                    tell.append(text)
+            elif grab.get("state") not in ("done", "stuck") and now - grab["at"] > wait:
+                tell.append(self.drop(item, f"Niet aangekomen na {waited}: {grab['title']}. De volgende release is aan de beurt."))
+                dropped = True
+        if finished and not await clients.library_rescan(self.session) and not self.state.get("rescan_hint"):
+            self.state["rescan_hint"] = True
+            self.event("Switch-library-manager-web wil niet scannen op verzoek. Geef de API key het recht "
+                       "Editor, dan staat een download sneller in je bibliotheek.", "warn")
+        waiting = any((i.get("grab") or {}).get("state") == "done" for i in self.state["items"].values())
+        if waiting and now - (self.state["library"].get("fetched") or 0) > config.WATCH_SECONDS:
+            await self.sync_library()
+        for text in tell:
+            await self.tell(text)
+        if dropped and self.state["services"].get("downloader", {}).get("ok", True):
+            await self.auto_grab()
+
+    async def watch(self):
+        """Between rounds: follow the downloads. Skipped while a round runs; that does it too."""
+        if self.lock.locked() or config.problems():
+            return
+        if not any(i.get("grab") for i in self.state["items"].values()):
+            return
+        async with self.lock:
+            await self.follow_grabs()
+            self.save()
+
+    async def tell(self, text):
+        """A notification: Telegram if it is set up, and whatever else is configured."""
+        if config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID:
+            try:
+                await clients.telegram(self.session, "NSWHunter\n" + text)
+                self.service("telegram", True, "laatste bericht verstuurd")
+            except clients.ServiceError as e:
+                self.service("telegram", False, str(e))
+        else:
+            self.state["services"].pop("telegram", None)
+        await self.notify("NSWHunter", text)
 
     def automatic(self, item):
         """The candidate that may go out without a click, or None."""
@@ -405,19 +526,22 @@ class Hunter:
 
     async def grab(self, key, guid, auto=False):
         item = self.state["items"].get(key)
-        candidate = next((c for c in (item or {}).get("candidates", []) if c["guid"] == guid), None)
+        # Also what fell off can be sent: the user may know better.
+        listed = (item or {}).get("candidates", []) + (item or {}).get("rejected", [])
+        candidate = next((c for c in listed if c["guid"] == guid), None)
         if candidate is None:
             raise clients.ServiceError("Deze release staat niet meer in de lijst")
         try:
-            await clients.send(self.session, candidate)
+            client_id = await clients.send(self.session, candidate)
         except clients.ServiceError:
             if config.DOWNLOAD_CLIENT != "prowlarr":
                 raise
             # Prowlarr only grabs what it found in the last half hour: search again, try once more.
             await self.search_game(item["game_id"])
-            await clients.send(self.session, candidate)
+            client_id = await clients.send(self.session, candidate)
         item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto,
-                        "local_version": item.get("local_version", 0)}
+                        "local_version": item.get("local_version", 0),
+                        "dlc_missing": item.get("dlc_missing", 0), "client_id": client_id, "state": "sent"}
         item.setdefault("sent", [])
         if guid not in item["sent"]:
             item["sent"].append(guid)
@@ -425,7 +549,7 @@ class Hunter:
         self.event(f"{how}: {candidate['title']}", "grab")
         self.save()
         if auto:
-            await self.notify("NSWHunter: update verstuurd", candidate["title"])
+            await self.tell(f"Vanzelf verstuurd: {candidate['title']}")
 
     async def auto_grab(self):
         sent = 0
@@ -500,7 +624,8 @@ class Hunter:
                     self.status["phase"] = "nieuwe posts bekijken"
                     await self.feed()
                     await self.backlog()
-                self.expire_grabs()
+                self.status["phase"] = "downloads volgen"
+                await self.follow_grabs()
                 if self.state["services"]["downloader"]["ok"]:
                     self.status["phase"] = "versturen"
                     await self.auto_grab()
@@ -508,7 +633,7 @@ class Hunter:
                     1 for i in self.state["items"].values()
                     if i["candidates"] and not i["grab"] and not i["ignored"])
                 if now_waiting > waiting:
-                    await self.notify("NSWHunter", f"{now_waiting} update(s) wachten op je keuze")
+                    await self.tell(f"{now_waiting} updates of DLC wachten op je keuze")
             finally:
                 self.status.update(running=False, phase=None, last_run=int(time.time()))
                 self.save()
@@ -530,6 +655,8 @@ class Hunter:
             return await clients.prowlarr_status(self.session, cfg)
         if service == "downloader":
             return await clients.downloader_status(self.session, cfg)
+        if service == "telegram":
+            return await clients.telegram(self.session, "NSWHunter\nDit is een testbericht.", cfg)
         raise clients.ServiceError("Onbekende service")
 
     # ------------------------------------------------------------ for the panel
@@ -538,10 +665,10 @@ class Hunter:
         """Everything the panel shows. Download links stay inside: they hold the Prowlarr key."""
         items = []
         for item in self.state["items"].values():
-            shown = {k: v for k, v in item.items() if k not in ("candidates", "blocked")}
-            shown["candidates"] = [
-                {k: v for k, v in c.items() if k not in ("downloadUrl", "rank", "confidence", "indexerId")}
-                for c in item["candidates"]]
+            shown = {k: v for k, v in item.items() if k not in ("candidates", "blocked", "rejected")}
+            hidden = ("downloadUrl", "rank", "confidence", "indexerId")
+            shown["candidates"] = [{k: v for k, v in c.items() if k not in hidden} for c in item["candidates"]]
+            shown["rejected"] = [{k: v for k, v in r.items() if k not in hidden} for r in item.get("rejected", [])]
             if item["type"] == "update":
                 shown["ladder"] = self.ladder_text(item["game_id"])
             auto = self.automatic(item)
@@ -569,6 +696,7 @@ class Hunter:
                 "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
                 "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
+                "wait_minutes": config.GRAB_WAIT_MINUTES,
             },
             "configured": not config.problems(),
         }

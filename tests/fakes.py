@@ -10,21 +10,26 @@ from aiohttp import web
 NZB = b'<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>'
 
 
-def title(game_id, name, local, latest, version=None, dlc=()):
+def title(game_id, name, local, latest, version=None, dlc=(), files=()):
     return {
         "id": game_id, "name": name, "version": version, "localUpdate": local, "latestUpdate": latest,
         "updateMissing": local < latest, "dlcOwned": 0,
-        "dlcMissing": sum(1 for d in dlc if d["status"] == "missing"), "size": 1, "files": [], "dlc": list(dlc),
+        "dlcMissing": sum(1 for d in dlc if d["status"] == "missing"), "size": 1, "files": list(files),
+        "dlc": list(dlc),
     }
 
 
 LIBRARY = [
     title("0100623017A58000", "Alan Wake Remastered", 65536, 196608, "1.0.1",
-          dlc=[{"id": "0100623017A59001", "name": "Alan Wake Remastered - Bonus Pack", "status": "missing"}]),
+          dlc=[{"id": "0100623017A59001", "name": "Alan Wake Remastered - Bonus Pack", "status": "missing"}],
+          files=[{"type": "NSP", "path": "/mnt/roms/a.nsp", "size": 12_000_000_000, "version": 0},
+                 {"type": "UPD", "path": "/mnt/roms/a-upd.nsp", "size": 380_000_000, "version": 65536}]),
     title("0100AAAA0000A000", "Hades", 0, 131072, "1.0.0"),
     title("0100BBBB0000B000", "Pokémon™ Scarlet", 196608, 262144, "2.0.1"),
     title("0100CCCC0000C000", "Stardew Valley", 131072, 131072, "1.6.9"),
     title("0100DDDD0000D000", "Hollow Knight", 65536, 131072, "1.4.3"),
+    # A Switch 2 title (ID starts with 04): never searched, never downloaded.
+    title("0400AAAA0000A000", "Hades", 0, 131072, "1.0.0"),
     title("0100EEEE0000E000", "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS", 655360, 720896, "1.7.0"),
     # Up to date, but with DLCs that differ in one word, as in the user's library.
     title("0100FFFF0000F000", "EA SPORTS FC™ 25", 65536, 65536, "1.0.1", dlc=[
@@ -72,6 +77,9 @@ def make_fakes():
     app["sent"] = []  # what reached the download client: (filename, category, nzb bytes)
     app["grabbed"] = []  # what Prowlarr was asked to grab itself
     app["queries"] = []
+    app["downloads"] = {}  # NZBGet: id -> "queue", or a history status like "SUCCESS/ALL"
+    app["rescans"] = []  # one entry for every time the library was asked to scan
+    app["telegram"] = []  # messages the bot sent
     app["indexer_ids"] = []
 
     async def export(request):
@@ -137,9 +145,30 @@ def make_fakes():
         body = await request.json()
         if body["method"] == "version":
             return web.json_response({"result": "24.5"})
+        if body["method"] == "history":
+            return web.json_response({"result": [
+                {"NZBID": int(i), "Status": s} for i, s in app["downloads"].items() if s != "queue"]})
+        if body["method"] == "listgroups":
+            return web.json_response({"result": [
+                {"NZBID": int(i), "Status": "DOWNLOADING"} for i, s in app["downloads"].items() if s == "queue"]})
         name, content, category = body["params"][:3]
         app["sent"].append((name, category, base64.b64decode(content)))
+        app["downloads"][str(len(app["sent"]))] = "queue"
         return web.json_response({"result": len(app["sent"])})
+
+    async def rescan(request):
+        app["rescans"].append(1)
+        return web.Response(status=202)
+
+    async def telegram(request):
+        # Like Telegram: an unknown token is 401, an unknown chat is 400 with a description.
+        if request.match_info["token"] != "TESTTOKEN":
+            return web.json_response({"ok": False, "description": "Unauthorized"}, status=401)
+        body = await request.json()
+        if str(body.get("chat_id")) != "42":
+            return web.json_response({"ok": False, "description": "Bad Request: chat not found"}, status=400)
+        app["telegram"].append(body["text"])
+        return web.json_response({"ok": True})
 
     async def versions(request):
         return web.json_response({
@@ -158,6 +187,8 @@ def make_fakes():
         web.post("/api/v1/search", keyed(grab)),
         web.get("/1/download", download),
         web.post("/jsonrpc", nzbget),
+        web.post("/sync", rescan),
+        web.post("/bot{token}/sendMessage", telegram),
         web.get("/versions.json", versions),
     ])
     return app

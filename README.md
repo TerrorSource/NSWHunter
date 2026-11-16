@@ -45,7 +45,9 @@ Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
 | Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
 | Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
 | Automatisch zoeken | Elke 6, 12, 24 of 48 uur, zie [Zoeken en API-limieten](#zoeken-en-api-limieten) |
-| Paneel | Gebruikersnaam en wachtwoord. Zonder wachtwoord heeft het paneel geen inlog. |
+| Wachten op de bibliotheek | Hoe lang een verstuurde release mag doen over het verschijnen in je bibliotheek, zie [Na het versturen](#na-het-versturen) |
+| Meldingen (Telegram) | Bot-token van @BotFather en je chat-ID (van @userinfobot). Stuur je bot eerst zelf één bericht. Je krijgt een bericht als er iets vanzelf is verstuurd, iets op je keuze wacht, een download mislukt of iets binnen is. |
+| Paneel | Gebruikersnaam en wachtwoord. Zonder wachtwoord heeft het paneel geen inlog. Van het wachtwoord wordt alleen een hash bewaard. |
 
 Elke service heeft een **Test**-knop die de verbinding probeert met wat er in het formulier staat, ook als het nog niet is opgeslagen. **Opslaan en verbindingen testen** bewaart de instellingen, probeert elke service en start een ronde. De instellingen staan in `/data/settings.json`, alleen leesbaar voor de app-gebruiker. Keys en wachtwoorden gaan nooit terug naar de browser: een leeg veld betekent "houden wat er staat", met **Wis** maak je er een leeg.
 
@@ -81,7 +83,9 @@ Elke release krijgt een score van 1 tot 10: de kans dat de download de juiste is
 | 4-6 | Een tussenversie, een bundel, een update met crack, extra woorden in de naam, of niet te zien welke versie het is |
 | 1-3 | De naam lijkt er alleen op, of er staat geen versie in |
 
-Wat de score verlaagt: een bundel met het basisspel (×0,75), een crack (×0,9), extra woorden in de naam (×0,5 in plaats van ×0,9). In het paneel staat bij elke release waarom.
+Wat de score verlaagt: een bundel met het basisspel (×0,75), een crack (×0,9), extra woorden in de naam (×0,5 in plaats van ×0,9), een titel zonder platform (×0,85) en een afwijkende grootte. Is een "update" zo groot als het hele spel, dan zit het basisspel er waarschijnlijk bij (×0,75); is hij meer dan vijf keer zo groot of zo klein als je eigen update, dan telt dat ook (×0,8). In het paneel staat bij elke release waarom.
+
+Onder de releases van een game staat **afgevallen**: de releases van die game die niet meedoen, met de reden (ander platform, niet nieuwer dan je eigen versie, basisspel). Met **Toch downloaden** stuur je er een alsnog.
 
 Binnen een game staan de releases op score, dan op leeftijd (nieuwste post eerst), dan op de prioriteit van de indexer in Prowlarr. Staat dezelfde release op meerdere indexers, dan blijft die van de indexer met de hoogste prioriteit over.
 
@@ -93,7 +97,19 @@ Bundels gaan alleen vanzelf met `AUTO_BUNDLES=true`. Per ronde gaan er hooguit `
 
 Begin met uit en kijk een paar dagen of de scores kloppen met hoe updates op jouw indexers heten. Vanaf 9 is voorzichtig; vanaf 7 neemt ook releases mee waarvan de versie is afgeleid.
 
-Een verstuurde release die na `GRAB_WAIT_HOURS` (48 uur) nog niet in je bibliotheek staat, geldt als mislukt. NSWHunter slaat hem daarna over en biedt de volgende kandidaat aan.
+## Na het versturen
+
+NSWHunter vraagt de downloadclient elke twee minuten hoe het met een verstuurde release gaat. Dat werkt met NZBGet en SABnzbd; gaat de download via Prowlarr, dan is er geen status en telt alleen de tijd.
+
+| Wat de downloadclient zegt | Wat NSWHunter doet |
+|---|---|
+| Bezig of in de wachtrij | Wachten, hoe lang het ook duurt |
+| Mislukt | De release wordt overgeslagen en de volgende is meteen aan de beurt |
+| Gedownload | Switch-library-manager-web krijgt het verzoek om te scannen, en de bibliotheek wordt opnieuw gelezen |
+| Gedownload, maar na de wachttijd niet in de bibliotheek | Je krijgt een melding. Er gaat geen volgende release uit: de map van je downloadclient komt dan kennelijk niet bij de bibliotheek aan |
+| Kent de release niet | Na de wachttijd geldt hij als niet aangekomen en is de volgende aan de beurt |
+
+De wachttijd stel je in op de tab Configuratie (**Wachten op de bibliotheek**, standaard 60 minuten). Scannen op verzoek lukt alleen als de API key van Switch-library-manager-web het recht Editor heeft; met "Read only" wacht NSWHunter op de eigen scan van de bibliotheek.
 
 ## Zoeken en API-limieten
 
@@ -107,7 +123,7 @@ Met **Ook ontbrekende DLC zoeken** op de tab Configuratie worden ook de DLC's ge
 
 - Een release met de title ID van de DLC krijgt score 10.
 - Staat de naam van de DLC in de titel, dan is de score 8. Heeft een game meerdere DLC's met bijna dezelfde naam ("In-Game Commentary - Dutch", "... - Spanish"), dan hoort een release bij de DLC die hij het best noemt en valt hij bij de andere af.
-- Een release die alleen zegt dat het DLC van de game is ("DLC Unlocker", "DLC Pack") krijgt score 3 en staat bij elke ontbrekende DLC van die game.
+- Een release die geen DLC bij naam noemt ("DLC Unlocker", "DLC Pack") staat één keer per game, onder **DLC-pakket**, met score 5.
 
 ## Ontwikkelen en testen
 

@@ -78,6 +78,8 @@
   .cand + .cand { border-top: 1px solid var(--line); }
   .cand.first { background: color-mix(in srgb, var(--good-bg) 35%, transparent); }
   .cand .name { overflow-wrap: anywhere; }
+  .cand.fell { grid-template-columns: 96px 1fr auto; opacity: .85; }
+  .rest button.quiet { padding: 2px 4px; }
   .cand a { color: inherit; }
   .cand .acts { display: flex; gap: 4px; }
   .part { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
@@ -157,7 +159,7 @@ const $ = id => document.getElementById(id);
 function put(el, ...children) {
   el.replaceChildren(...children.flat().filter(c => c !== null && c !== undefined && c !== false));
 }
-let state = null, tab = "review", filter = "", busy = new Set(), expanded = new Set();
+let state = null, tab = "review", filter = "", busy = new Set(), expanded = new Set(), fallen = new Set();
 let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {};
 
 const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
@@ -166,8 +168,11 @@ function score(value, title) {
   const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
   return h("span", {class: "score " + level, title: title || "Kans dat deze download de juiste is"}, String(value || "?"), h("small", {}, "/10"));
 }
-const KIND = {update: "update", bundle: "bundel", dlc: "DLC", unknown: ""};
-const SERVICES = {slm: "Bibliotheek", prowlarr: "Prowlarr", downloader: "Downloadclient", titledb: "titledb", config: "Instellingen"};
+const KIND = {update: "update", bundle: "bundel", dlc: "DLC", dlcpack: "DLC-pakket", unknown: ""};
+const SERVICES = {slm: "Bibliotheek", prowlarr: "Prowlarr", downloader: "Downloadclient", titledb: "Versielijst", telegram: "Telegram", config: "Instellingen"};
+// How a sent release is doing, as the download client tells it.
+const SENT = {sent: "verstuurd", downloading: "wordt gedownload", done: "gedownload, wacht op de bibliotheek",
+              stuck: "gedownload, maar niet in je bibliotheek gezien"};
 function autoText(min) { return min ? "vanaf score " + min : "uit: alles wacht op je keuze"; }
 
 function toast(text) {
@@ -282,7 +287,8 @@ function candidate(item, c, first) {
 
 // One missing thing of a game (the update, or one DLC) with its releases.
 function part(item) {
-  const what = item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id) : "Update";
+  const what = item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id)
+    : item.type === "dlcpack" ? "DLC-pakket (voor alle ontbrekende DLC van deze game)" : "Update";
   const rows = [h("div", {class: "part"},
     h("span", {class: "grow"}, h("b", {}, what),
       item.type === "update" && item.ladder && item.ladder.length > 1
@@ -293,13 +299,36 @@ function part(item) {
       item.ignored ? "Niet meer negeren" : "Negeer"))];
   if (item.grab) {
     rows.push(h("div", {class: "sent-row"},
-      h("span", {class: "badge sent"}, item.grab.auto ? "automatisch verstuurd" : "verstuurd"),
+      h("span", {class: "badge " + (item.grab.state === "stuck" ? "review" : "sent")},
+        (item.grab.auto ? "vanzelf " : "") + (SENT[item.grab.state] || "verstuurd")),
       h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
       h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is, zodat het weer bij Te beoordelen staat",
                    onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Niet verstuurd")));
   }
   // The other releases stay in view after one was sent: another can still be chosen.
   if (!item.ignored) rows.push(...item.candidates.map((c, i) => candidate(item, c, i === 0 && !item.grab)));
+  // What fell off, and why: to see that nothing good was thrown away, and to overrule it.
+  const rejected = item.rejected || [];
+  if (rejected.length && !item.ignored) {
+    const open = fallen.has(item.key);
+    rows.push(h("div", {class: "rest"},
+      h("button", {class: "quiet", "aria-expanded": open ? "true" : "false",
+                   onclick: () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderList(); }},
+        (open ? "▾ " : "▸ ") + rejected.length + " afgevallen " + (rejected.length === 1 ? "release" : "releases"))));
+    if (open) rows.push(...rejected.map(r => {
+      const safe = /^https?:\/\//.test(r.infoUrl || "");
+      return h("div", {class: "cand fell"},
+        h("div", {}, h("span", {class: "badge"}, "afgevallen")),
+        h("div", {},
+          h("div", {class: "name"}, safe ? h("a", {href: r.infoUrl, target: "_blank", rel: "noopener noreferrer"}, r.title) : r.title),
+          h("div", {class: "sub"}, [size(r.size), r.indexer, day(r.published)].filter(Boolean).join(" · ")),
+          h("div", {class: "sub"}, r.reason)),
+        h("div", {class: "acts"},
+          h("button", {disabled: busy.has(r.guid), title: "Deze release toch naar de downloadclient sturen",
+                       onclick: () => post("/api/grab", {key: item.key, guid: r.guid}, r.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))},
+            "Toch downloaden")));
+    }));
+  }
   return rows;
 }
 
@@ -309,8 +338,9 @@ function gameCard(game) {
   const review = live.filter(i => i.status === "review"), sent = live.filter(i => i.status === "sent");
   const count = review.reduce((n, i) => n + i.candidates.length, 0);
   const best = Math.max(0, ...review.flatMap(i => i.candidates.map(c => c.score || 0)));
-  const withSomething = game.items.filter(i => i.candidates.length || i.grab);
-  const empty = game.items.filter(i => !i.candidates.length && !i.grab);
+  const something = i => i.candidates.length || i.grab || (i.rejected || []).length;
+  const withSomething = game.items.filter(something);
+  const empty = game.items.filter(i => !something(i) && i.type !== "dlcpack");
   const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
   const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
@@ -434,7 +464,15 @@ const GROUPS = [
     {name: "SEARCH_INTERVAL_HOURS", label: "Automatisch zoeken", options: [
       ["6", "Elke 6 uur"], ["12", "Elke 12 uur"], ["24", "Elke 24 uur"], ["48", "Elke 48 uur"]],
      help: "Zo vaak wordt elke game die iets mist op naam gezocht. Dat kost per game één API-call per indexer; kies 24 of 48 uur als een indexer een daglimiet heeft."},
-    {name: "INCLUDE_DLC", label: "Ook ontbrekende DLC zoeken", checkbox: true}]},
+    {name: "INCLUDE_DLC", label: "Ook ontbrekende DLC zoeken", checkbox: true},
+    {name: "GRAB_WAIT_MINUTES", label: "Wachten op de bibliotheek", options: [
+      ["30", "30 minuten"], ["60", "60 minuten"], ["120", "2 uur"], ["360", "6 uur"], ["1440", "24 uur"]],
+     help: "Zo lang mag het duren voordat een verstuurde release in je bibliotheek staat. Mislukt de download, dan is de volgende release meteen aan de beurt. Zolang de downloadclient nog bezig is, loopt de tijd niet."}]},
+  {title: "Meldingen (Telegram)", test: "telegram", testText: "Stuur testbericht", fields: [
+    {name: "TELEGRAM_BOT_TOKEN", label: "Bot-token", secret: true,
+     help: "Maak een bot bij @BotFather in Telegram; die geeft het token. Stuur je bot daarna zelf één bericht, anders mag hij jou niets sturen."},
+    {name: "TELEGRAM_CHAT_ID", label: "Chat-ID", placeholder: "123456789",
+     help: "Je eigen ID krijg je van @userinfobot. Voor een groep is het een getal met een min ervoor. Je krijgt een bericht als er iets vanzelf is verstuurd, iets op je keuze wacht, een download mislukt of iets binnen is."}]},
   {title: "Paneel", fields: [
     {name: "PANEL_USER", label: "Gebruikersnaam"},
     {name: "PANEL_PASSWORD", label: "Wachtwoord", secret: true,
@@ -464,11 +502,11 @@ function fieldRow(f, client) {
 }
 
 // A Test button tries one service with what is in the form now, saved or not.
-function testRow(service) {
+function testRow(service, text) {
   const t = tests[service];
   return h("div", {class: "field"}, h("span", {}),
     h("div", {class: "row"},
-      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Testen…" : "Test"),
+      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Bezig…" : (text || "Test")),
       t && !t.busy ? h("span", {class: "testresult " + (t.ok ? "ok" : "bad")}, (t.ok ? "✓ " : "✕ ") + t.text) : null));
 }
 async function runTest(service) {
@@ -502,7 +540,7 @@ function renderConfig(client) {
   put($("config"), 
     ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title),
       g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)),
-      g.test ? testRow(g.test) : null)),
+      g.test ? testRow(g.test, g.testText) : null)),
     h("div", {class: "savebar"},
       h("button", {class: "primary", type: "submit", id: "save"}, "Opslaan en verbindingen testen"),
       h("span", {class: "line"}, "Opgeslagen instellingen staan in /data/settings.json en gaan voor op de waarden in je compose.")),

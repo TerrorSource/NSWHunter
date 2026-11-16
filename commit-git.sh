@@ -146,6 +146,7 @@ done <<< "${STAGED}"
 #       • compose  : een ingevulde ..._API_KEY= of ..._PASSWORD= (hoort leeg te zijn;
 #                    invullen doe je op de NAS of in Portainer, niet in deze map)
 #       • JWT      : volledige 3-delige token met lange payload
+#       • Telegram : een bot-token (cijfers, dubbele punt, 30 of meer tekens)
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   case "$f" in *.png|*.jpg|*.zip|*.ico) continue ;; esac
@@ -158,6 +159,9 @@ while IFS= read -r f; do
         BLOCKED="${BLOCKED}\n  • $f (bevat een ingevulde API key of wachtwoord)"
       fi ;;
   esac
+  if grep -qE '(^|[^0-9])[0-9]{8,10}:[A-Za-z0-9_-]{30,}' "$f" 2>/dev/null; then
+    BLOCKED="${BLOCKED}\n  • $f (bevat een Telegram-bottoken)"
+  fi
   if grep -qE 'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{60,}\.[A-Za-z0-9_-]{20,}' "$f" 2>/dev/null; then
     BLOCKED="${BLOCKED}\n  • $f (bevat een echt JWT-token)"
   fi

@@ -1,6 +1,8 @@
 """Web panel and scheduler of NSWHunter."""
 import asyncio
 import base64
+import binascii
+import hashlib
 import hmac
 import os
 import time
@@ -62,14 +64,35 @@ async def scheduler(app):
 # ---------------------------------------------------------------- web
 
 
+logged_in = {}  # the last login that was right, so the slow password check runs once
+
+
+def allowed(header):
+    """Is this Authorization header the panel's user and password?"""
+    # The check of a password is slow on purpose. A browser sends the same header with every
+    # request: remember the one that was right, for as long as the password stays the same.
+    mark = (hashlib.sha256(header.encode()).hexdigest(), config.PANEL_USER, config.PANEL_PASSWORD)
+    if logged_in.get("mark") == mark:
+        return True
+    try:
+        kind, _, encoded = header.partition(" ")
+        user, _, password = base64.b64decode(encoded, validate=True).decode().partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    if kind.lower() != "basic" or not hmac.compare_digest(user.encode(), config.PANEL_USER.encode()):
+        return False
+    if not config.check_password(password):
+        return False
+    logged_in["mark"] = mark
+    return True
+
+
 @web.middleware
 async def guard(request, handler):
     if request.path == "/health":
         return await handler(request)
     if config.PANEL_PASSWORD:
-        expected = base64.b64encode(f"{config.PANEL_USER}:{config.PANEL_PASSWORD}".encode()).decode()
-        given = request.headers.get("Authorization", "")
-        if not hmac.compare_digest(given.encode(), f"Basic {expected}".encode()):
+        if not allowed(request.headers.get("Authorization", "")):
             return web.Response(status=401, text="Inloggen vereist",
                                 headers={"WWW-Authenticate": 'Basic realm="NSWHunter"'})
     # A page on another site cannot send JSON here without the browser asking first.
@@ -176,11 +199,22 @@ async def api_test(request):
     return web.json_response({"ok": True, "text": text})
 
 
+async def watcher(app):
+    """Between rounds: follow what was sent to the download client."""
+    while True:
+        await asyncio.sleep(config.WATCH_SECONDS)
+        try:
+            await app["hunter"].watch()
+        except Exception as e:  # noqa: BLE001
+            app["hunter"].event(f"Downloads volgen mislukt: {e!r}", "error")
+
+
 async def start(app):
     app["session"] = aiohttp.ClientSession(headers={"User-Agent": f"NSWHunter/{__version__}"})
     app["hunter"] = Hunter(app["session"], notify)
     app["wake"] = asyncio.Event()
     spawn(scheduler(app))
+    spawn(watcher(app))
 
 
 async def stop(app):

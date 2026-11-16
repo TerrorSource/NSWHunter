@@ -1,8 +1,11 @@
 """Settings. The ones in EDITABLE can be changed on the Configuratie tab of the panel and are
 then kept in /data/settings.json; a saved value wins from the environment variable of the same
 name. Everything else comes from environment variables only (see .env.example)."""
+import hashlib
+import hmac
 import json
 import os
+import secrets
 
 
 def env(name, default=""):
@@ -78,7 +81,18 @@ BACKLOG_PER_RUN = int(number("BACKLOG_PER_RUN", 0))
 SEARCH_DELAY_SECONDS = number("SEARCH_DELAY_SECONDS", 3)
 SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # A sent release that has not arrived in the library after this long counts as failed.
-GRAB_WAIT_HOURS = number("GRAB_WAIT_HOURS", 48)
+# How long a sent release may take to show up in the library. Longer than that it counts as
+# failed and the next release gets its turn. While the download client is still downloading,
+# the clock does not run.
+WAITS = (30, 60, 120, 360, 1440)
+try:
+    GRAB_WAIT_MINUTES = int(env("GRAB_WAIT_MINUTES", "60"))
+except ValueError:
+    GRAB_WAIT_MINUTES = 60
+if GRAB_WAIT_MINUTES not in WAITS:
+    GRAB_WAIT_MINUTES = 60
+# How often the download client is asked how the sent releases are doing.
+WATCH_SECONDS = max(5, number("WATCH_SECONDS", 120))
 
 # Every update of every game with its date, used to tell which update a release is. Several
 # addresses, comma separated: the first that answers. The list of switch-library-manager-web
@@ -88,8 +102,31 @@ TITLEDB_VERSIONS_URL = env(
     "https://github.com/DeLFuS77/switch-library-manager-web/releases/download/data/versions.json,"
     "https://raw.githubusercontent.com/blawar/titledb/master/versions.json")
 
+def hash_password(password):
+    """A password as it is kept: scrypt with its own salt, never the password itself."""
+    if not password or password.startswith("scrypt$"):
+        return password
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def check_password(password):
+    """Is this the panel password? PANEL_PASSWORD holds the hash."""
+    try:
+        _, salt, digest = PANEL_PASSWORD.split("$")
+        given = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=2**14, r=8, p=1, dklen=32)
+    except ValueError:
+        return False
+    return hmac.compare_digest(given.hex(), digest)
+
+
 PANEL_USER = env("PANEL_USER", "admin")
-PANEL_PASSWORD = env("PANEL_PASSWORD")
+PANEL_PASSWORD = hash_password(env("PANEL_PASSWORD"))
+# Notifications: Telegram from the Configuratie tab, and Apprise URLs for anything else.
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
+TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
 NOTIFY_URLS = env("NOTIFY_URLS")
 
 
@@ -104,6 +141,8 @@ EDITABLE = {
     "NZBGET_URL": "url", "NZBGET_USER": "text", "NZBGET_PASSWORD": "secret",
     "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
+    "GRAB_WAIT_MINUTES": WAITS,
+    "TELEGRAM_BOT_TOKEN": "secret", "TELEGRAM_CHAT_ID": "text",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
@@ -144,6 +183,10 @@ def normalize(name, value):
             raise ValueError(f"{name}: kies uit {', '.join(kind)}")
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: vul een naam in, zonder dubbele punt")
+    elif name == "PANEL_PASSWORD":
+        value = hash_password(value)
+    elif name == "TELEGRAM_CHAT_ID" and value and not (value.lstrip("-").isdigit() or value.startswith("@")):
+        raise ValueError("TELEGRAM_CHAT_ID: een chat-ID is een getal (voor een groep met een min ervoor) of @kanaalnaam")
     return value
 
 
@@ -156,13 +199,26 @@ def saved():
     return {k: v for k, v in data.items() if k in EDITABLE} if isinstance(data, dict) else {}
 
 
+def write(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    # Keys and passwords: readable for the app user only.
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+
+
 def load_saved():
     """Put the saved settings on top of the environment. Called once at start."""
-    for name, value in saved().items():
+    data = saved()
+    kept = dict(data)
+    for name, value in data.items():
         try:
-            globals()[name] = normalize(name, value)
+            globals()[name] = kept[name] = normalize(name, value)
         except ValueError:
             continue
+    if kept != data:
+        write(kept)  # a password saved by an older version: keep only its hash from now on
 
 
 def update(values, clear=()):
@@ -181,13 +237,7 @@ def update(values, clear=()):
         if name not in SECRETS:
             raise ValueError(f"Onbekende instelling: {name}")
         new[name] = ""
-    data = {**saved(), **new}
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    # Keys and passwords: readable for the app user only.
-    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, SETTINGS_FILE)
+    write({**saved(), **new})
     changed = sorted(name for name, value in new.items() if globals()[name] != value)
     globals().update(new)
     return changed

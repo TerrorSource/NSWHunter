@@ -61,6 +61,9 @@ def test_candidates(title, score, kind, is_latest):
     "Alan Wake Remastered v1.03 incl DLC PS4-CUSA34119",
     "Alan Wake Remastered Update v1.0.3 CUSA34119",          # a PlayStation product code
     "Alan Wake Remastered Update v1.0.3 XBOX360",
+    "Alan Wake Remastered Update v1.0.3 NSW2-GRP",           # Switch 2: left alone on purpose
+    "Alan Wake Remastered Nintendo Switch 2 Edition Update v1.0.3",
+    "Alan Wake Remastered [0400623017A58800][v196608]",
     "Control Ultimate Edition Update v1.0.3",
 ])
 def test_rejections(title):
@@ -272,8 +275,10 @@ def test_dlc_by_title_id():
 def test_dlc_by_name():
     named = evaluate(alan(), "Alan_Wake_Remastered_Bonus_Pack_DLC_NSW-GRP", want="dlc", dlc=DLC)
     assert named.score == 8
-    vague = evaluate(alan(), "Alan Wake Remastered DLC Pack NSW", want="dlc", dlc=DLC)
-    assert vague.score == 3
+    # A release that names no DLC is a pack: listed once per game, not under each DLC.
+    assert isinstance(evaluate(alan(), "Alan Wake Remastered DLC Pack NSW", want="dlc", dlc=DLC), Rejection)
+    vague = evaluate(alan(), "Alan Wake Remastered DLC Pack NSW", want="dlcpack")
+    assert (vague.score, vague.kind) == (5, "dlcpack")
     update = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW", want="dlc", dlc=DLC)
     assert isinstance(update, Rejection)
 
@@ -287,8 +292,13 @@ def test_dlc_named_without_the_abbreviation_of_the_game():
     dlc = {"id": "01006560184E7005", "name": "MK1: MKII Movie Skins"}
     named = evaluate(game, "Mortal Kombat 1 MKII Movie Skins DLC NSW-VENOM", want="dlc", dlc=dlc)
     assert named.score == 8
-    pack = evaluate(game, "Mortal Kombat 1 v1.28.0 DLC Unlocker NSW-VENOM-FTP", want="dlc", dlc=dlc)
-    assert pack.score == 3
+    assert isinstance(evaluate(game, "Mortal Kombat 1 v1.28.0 DLC Unlocker NSW-VENOM-FTP", want="dlc", dlc=dlc),
+                      Rejection)
+    game.dlc = [dlc]
+    pack = evaluate(game, "Mortal Kombat 1 v1.28.0 DLC Unlocker NSW-VENOM-FTP", want="dlcpack")
+    assert pack.score == 5
+    # A release that names a DLC is not a pack.
+    assert isinstance(evaluate(game, "Mortal Kombat 1 MKII Movie Skins DLC NSW-VENOM", want="dlcpack"), Rejection)
 
 
 def fc25():
@@ -311,7 +321,7 @@ def fc25_release(language):
     (3, "Dutch", None),
     (1, "Latin American Spanish", None),     # "Spanish" is in it, but the other names it better
     (2, "Spanish", None),
-    (0, "Japanese", 3),                      # names none of the known DLCs: cannot tell
+    (0, "Japanese", None),                   # names none of the known DLCs: goes to the pack
 ])
 def test_release_belongs_to_the_dlc_it_names_best(wanted, release, score):
     game = fc25()
@@ -349,3 +359,40 @@ def test_title_without_any_platform_scores_lower():
     assert "het platform staat niet in de titel" in bare.reasons
     # An internal version number is a Switch thing: no doubt about the platform.
     assert evaluate(alan(), "Alan Wake Remastered Update v196608").score == 9
+
+
+def test_rejection_says_whether_it_was_this_game():
+    """Only releases of this game are shown as fallen off; the rest is simply not ours."""
+    ours = evaluate(alan(), "Alan Wake Remastered [v65536] NSW", AFTER_LATEST)
+    assert isinstance(ours, Rejection) and ours.known
+    ps4 = evaluate(alan(), "Alan.Wake.Remastered.Update.v1.0.3.PS4-GRP", AFTER_LATEST)
+    assert ps4.known and "PS4" in ps4.reason
+    for title in ("Some Other Game Update v196608 NSW", "Alan Wake 2 Update v1.0.5",
+                  "Alan Wake Remastered II Update v196608", "Alan Wake Remastered [0100AAAA00000800][v196608]"):
+        other = evaluate(alan(), title, AFTER_LATEST)
+        assert isinstance(other, Rejection) and not other.known, title
+
+
+def sized(update_size=380_000_000, base_size=12_000_000_000):
+    game = alan()
+    game.update_size, game.base_size = update_size, base_size
+    return game
+
+
+@pytest.mark.parametrize("size, score, said", [
+    (400_000_000, 9, None),                              # about the size of the update in the library
+    (1_500_000_000, 9, None),                            # four times: still fine (compression, extra files)
+    (2_400_000_000, 7, "wijkt sterk af"),                # six times
+    (30_000_000, 7, "wijkt sterk af"),                   # a twelfth
+    (12_900_000_000, 7, "zo groot als het hele spel"),   # the game itself is in it
+    (0, 9, None),                                        # size unknown
+])
+def test_size_weighs_in(size, score, said):
+    result = evaluate(sized(), "Alan.Wake.Remastered.Update.v196608.NSW-GRP", AFTER_LATEST, size=size)
+    assert result.score == score
+    assert (said is None) == (not any("groot" in r for r in result.reasons)), result.reasons
+
+
+def test_size_says_nothing_without_an_update_in_the_library():
+    result = evaluate(sized(update_size=0, base_size=0), "Alan.Wake.Remastered.Update.v196608.NSW-GRP", size=99_000_000_000)
+    assert result.score == 9
