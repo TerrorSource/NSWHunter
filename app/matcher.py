@@ -7,7 +7,7 @@ three things, each found anywhere in the title:
 * which version it is: an internal number (v131072) or a display version (v1.0.4)
 * what it is: an update, DLC, the base game, or a bundle of those
 
-The result is a Candidate with a confidence, or a Rejection with the reason.
+The result is a Candidate with a score from 1 to 10, or a Rejection with the reason.
 """
 import datetime
 import difflib
@@ -15,8 +15,12 @@ import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
 
-SURE, LIKELY, UNCERTAIN = "sure", "likely", "uncertain"
-CONFIDENCE_RANK = {SURE: 2, LIKELY: 1, UNCERTAIN: 0}
+# The score is the chance that a download is the right one, as a mark from 1 to 10. It is the
+# product of three chances: that it is this game, that it is the newest update, and that it is
+# an update and nothing else.
+IDENTITY = {"tid": 1.0, "exact": 0.9, "extras": 0.5, "fuzzy": 0.35}
+KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0}
+CRACK = 0.9  # an update with a crack holds changed files
 
 # A release may be posted a little before the official date in titledb (time zones, early dumps).
 DATE_SLACK = datetime.timedelta(days=3)
@@ -36,6 +40,8 @@ EXTENSION_RE = re.compile(r"\.(nsp|nsz|xci|xcz|rar|zip|7z|nzb|par2)$")
 TOKEN_RE = re.compile(r"[0-9a-z]+")
 
 UPDATE_WORDS = {"update", "updates", "upd", "updt", "patch"}
+INCLUDE_WORDS = {"incl", "including", "includes"}
+CRACK_WORDS = {"crack", "cracked"}
 DLC_WORDS = {"dlc", "dlcs", "addon", "addons"}
 BUNDLE_WORDS = {"base", "incl", "including", "includes", "plus", "with", "and"}
 # Words that say nothing about which game it is: platform, format, region, language, scene tags.
@@ -45,7 +51,7 @@ NOISE = UPDATE_WORDS | DLC_WORDS | BUNDLE_WORDS | {
     "multi", "multilang", "multilanguage", "repack", "proper", "read", "nfo", "internal", "rev", "cfw",
     "full", "unlocker", "en", "fr", "de", "es", "it", "nl", "pt", "ru", "ja", "ko", "zh", "pl",
     "v", "ver", "version", "build", "retail", "digital", "rip", "scene", "p2p", "pack",
-}
+} | CRACK_WORDS
 ROMAN = {"ii", "iii", "iv", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii"}
 
 
@@ -62,22 +68,24 @@ class Game:
 
 @dataclass
 class Candidate:
-    confidence: str
+    score: int  # 1-10: how likely it is that this download is the right one
     kind: str  # update | bundle | dlc | unknown
     name_match: str  # tid | exact | fuzzy
     internal_version: int | None
     display_version: str | None
     is_latest: bool | None  # None: cannot tell from the title
     reasons: list
-    rank: tuple = ()
     estimated_version: int | None = None  # what a display version was translated to (see ladder)
     deduced: bool = False  # that translation rests on exact pairs, not on dates
 
     def to_dict(self):
-        d = asdict(self)
-        # Lists all the way down, so a rank compares the same before and after a trip through JSON.
-        d["rank"] = [list(x) if isinstance(x, tuple) else x for x in self.rank]
-        return d
+        return asdict(self)
+
+
+def mark(identity, version, kind, crack=False):
+    """The score from 1 to 10 of a release (see IDENTITY)."""
+    chance = IDENTITY[identity] * version * KIND[kind] * (CRACK if crack else 1)
+    return max(1, min(10, int(chance * 10 + 0.5)))
 
 
 @dataclass
@@ -125,6 +133,14 @@ def _is_noise(token):
         token in NOISE
         or re.fullmatch(r"multi\d+|v\d+|(19|20)\d\d|upd\d+|rev\d+", token) is not None
     )
+
+
+def _includes_update(toks):
+    """"Game incl Update" is the game with an update; "Update incl Crack" is just an update."""
+    order = [t for t, _, _ in toks]
+    includes = [i for i, t in enumerate(order) if t in INCLUDE_WORDS]
+    updates = [i for i, t in enumerate(order) if t in UPDATE_WORDS]
+    return bool(includes and updates) and includes[0] < updates[0]
 
 
 def _find_name(release_tokens, name_tokens):
@@ -187,7 +203,7 @@ def _versions(text, rest):
 class Step:
     """What a display version is, on the ladder of one game's updates."""
     version: int | None  # internal version; None = higher than every update that is known
-    how: str  # exact: seen together or the library's own pair; date: by posting date; order: by its place
+    how: str  # exact: a known pair; pattern: the version counts the update; date: by posting date; order: by its place
     solid: bool  # rests on exact pairs only, no dates
     after: str | None = None  # the display version one step lower
     floor: int | None = None  # ... and its internal version
@@ -208,6 +224,24 @@ def _before_any_newer(game, day):
     return bool(newer) and day is not None and day < min(newer) - LATE_SLACK
 
 
+def _pattern(game, display, known):
+    """Some games count the update in the version itself: 1.0.31.0 is update 31, so 1.0.35.0
+    is update 35. Believed only when the library's own pair shows it, the count is not a small
+    number that fits by chance, and that update exists."""
+    number = game.local_version // 65536
+    if not game.local_display or game.local_version % 65536 or number < 3:
+        return None
+    try:
+        own, new = version_tuple(game.local_display), version_tuple(display)
+    except ValueError:
+        return None
+    differ = [i for i, (a, b) in enumerate(zip(own, new)) if a != b]
+    if len(own) != len(new) or len(differ) != 1 or own[differ[0]] != number:
+        return None
+    version = new[differ[0]] * 65536
+    return version if version in known else None
+
+
 def ladder(game, seen, vermap=None):
     """Translate display versions (1.7.1) to internal ones (720896 = update 11).
 
@@ -218,6 +252,7 @@ def ladder(game, seen, vermap=None):
     one that was posted when a newer update was out is that update (date), and one that is
     higher than the previous but not newer by date is the next update (order). The dates of
     the newest updates are often weeks late in the databases; the order does not need them.
+    Before both comes the pattern: a version that counts the update itself (see _pattern).
 
     Returns {display: Step}.
     """
@@ -241,7 +276,10 @@ def ladder(game, seen, vermap=None):
             step = Step(exact[display], "exact", True, after, floor)
         else:
             by_date = _newest_on(game, seen.get(display))
-            if by_date is not None and (floor is None or by_date > floor):
+            counted = _pattern(game, display, known)
+            if counted is not None and (floor is None or counted > floor):
+                step = Step(counted, "pattern", False, after, floor)
+            elif by_date is not None and (floor is None or by_date > floor):
                 step = Step(by_date, "date", False, after, floor)
             elif floor is not None:
                 later = [v for v in known if v > floor]
@@ -332,7 +370,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         kind = parts.pop() if len(parts) == 1 else "bundle"
         if kind == "base":
             kind = "bundle" if has_update else "base"
-    elif has_update and (has_dlc or "+" in rest or words & {"base", "incl", "including", "includes"}):
+    elif has_update and (has_dlc or "+" in rest or "base" in words or _includes_update(toks)):
         kind = "bundle"
     elif has_update:
         kind = "update"
@@ -363,6 +401,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     is_latest = None
     estimated = None  # the internal version this release is taken to be when its title has none
     deduced = False  # ... and whether that rests on exact pairs only
+    chance = 0.3  # that this is the newest update
     local, latest = game.local_version, game.latest_version
     if internal is not None:
         if internal == 0:
@@ -370,6 +409,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         if internal <= local:
             return Rejection(f"v{internal} is niet nieuwer dan je eigen versie")
         is_latest = bool(latest) and internal >= latest
+        chance = 1.0 if is_latest else 0.5
         reasons.append("is de nieuwste versie" if is_latest else
                        f"nieuwer dan je eigen versie, maar niet de nieuwste ({update_name(latest)})")
     elif display:
@@ -384,21 +424,30 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
                 newer_than_own = True
             except ValueError:
                 pass
+        chance = 0.45 if newer_than_own else 0.3
         days = [d for d in ((seen or {}).get(display), published) if d]
         first = min(days) if days else None
         step = ladder(game, {**(seen or {}), display: first}, vermap).get(display)
         if step and step.version is None:
             is_latest, deduced = True, step.solid
+            chance = 0.9 if deduced else 0.8
             reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), de nieuwste update die bekend is")
         elif step and step.version > local:
             estimated, deduced = step.version, step.solid
             if step.how == "order":
                 # The next update at least; more only if a version was never posted.
                 is_latest = True if latest and estimated >= latest else None
+                chance = (0.97 if deduced else 0.78) if is_latest else 0.45
                 reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), dus "
                                + ("" if is_latest else "minstens ") + update_name(estimated))
+            elif step.how == "pattern":
+                is_latest = bool(latest) and estimated >= latest
+                chance = 0.85 if is_latest else 0.4
+                reasons.append(f"deze game telt de update in de versie: je eigen v{game.local_display} is "
+                               f"{update_name(local)}, dus v{display} is {update_name(estimated)}")
             else:
                 is_latest = bool(latest) and estimated >= latest
+                chance = (0.97 if deduced else 0.78) if is_latest else 0.4
                 reasons.append(f"v{display} is voor het eerst geplaatst toen {update_name(estimated)} de nieuwste was")
         elif step and not newer_than_own:
             if step.version < local or _before_any_newer(game, first):
@@ -408,10 +457,12 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         return Rejection("geen versie en geen 'update' in de titel")
     else:
         # No version at all: only the posting date says something.
+        chance = 0.25
         by_date = _newest_on(game, published)
         if by_date is not None and by_date > local:
             estimated = by_date
             is_latest = bool(latest) and estimated >= latest
+            chance = 0.6 if is_latest else 0.3
             reasons.append(f"geplaatst toen {update_name(estimated)} de nieuwste was")
         elif by_date is not None and (by_date < local or _before_any_newer(game, published)):
             return Rejection("geplaatst voordat er een nieuwere update bestond")
@@ -420,27 +471,15 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     elif internal is None and estimated and not is_latest:
         reasons.append(f"de nieuwste is {update_name(latest)}")
 
-    # ---- how sure
-    if clean_name and (internal is not None or (deduced and is_latest)):
-        confidence = SURE
-    elif clean_name and display and is_latest:
-        confidence = LIKELY
-    else:
-        confidence = UNCERTAIN
+    # ---- the score
+    crack = bool(words & CRACK_WORDS)
     if kind == "bundle":
         reasons.append("bundel: bevat ook het basisspel of DLC")
-
-    kind_rank = {"update": 2, "unknown": 1, "bundle": 0}[kind]
-    rank = (
-        CONFIDENCE_RANK[confidence],
-        {True: 2, None: 1, False: 0}[is_latest],
-        kind_rank,
-        internal or estimated or 0,
-        version_tuple(display) if display else (),
-        published.toordinal() if published else 0,
-    )
-    return Candidate(confidence, kind, name_match, internal, display, is_latest, reasons, rank,
-                     estimated, deduced)
+    if crack:
+        reasons.append("met crack: de bestanden zijn aangepast")
+    identity = "tid" if name_match == "tid" else "fuzzy" if name_match == "fuzzy" else "extras" if extras else "exact"
+    return Candidate(mark(identity, chance, kind, crack), kind, name_match, internal, display, is_latest,
+                     reasons, estimated, deduced)
 
 
 def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
@@ -448,8 +487,7 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
     dlc_id = (dlc or {}).get("id", "").upper()
     if own_ids:
         if dlc_id in own_ids:
-            return Candidate(SURE, "dlc", "tid", None, None, None,
-                             ["title ID van deze DLC komt overeen"], (2, 1, 2, 0, (), 0))
+            return Candidate(10, "dlc", "tid", None, None, None, ["title ID van deze DLC komt overeen"])
         return Rejection("title ID van een ander onderdeel van deze game")
     if kind not in ("dlc", "bundle"):
         return Rejection("geen DLC")
@@ -459,11 +497,14 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
     game_tokens = {t for t, _, _ in tokens(clean(game.name))}
     own = [t for t in dlc_tokens if t not in game_tokens and not _is_noise(t)]
     words = {t for t, _, _ in tokens(text)}
-    if own and all(t in words for t in own):
+    left = [e for e in extras if e not in dlc_tokens]
+    named = [t for t in own if t in words]
+    if own and len(named) >= max(1, round(len(own) * 0.6)):
         reasons.append("naam van de DLC staat in de titel")
-        confidence = UNCERTAIN if [e for e in extras if e not in dlc_tokens] else LIKELY
+        chance = 0.7  # that it is this DLC
     else:
         reasons.append("DLC van deze game, maar niet te zien welke")
-        confidence = UNCERTAIN
-    return Candidate(confidence, "dlc", name_match, None, None, None, reasons,
-                     (CONFIDENCE_RANK[confidence], 1, 2 if kind == "dlc" else 0, 0, (), 0))
+        chance = 0.3
+    kind = "dlc" if kind == "dlc" else "bundle"
+    return Candidate(mark("extras" if left else "exact", chance, kind), "dlc", name_match,
+                     None, None, None, reasons)

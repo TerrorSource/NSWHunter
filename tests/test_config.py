@@ -28,7 +28,9 @@ def test_update_saves_and_applies():
     assert changed == ["AUTO_DOWNLOAD", "INCLUDE_DLC", "SLM_API_KEY", "SLM_URL"]
     # Saving the same form again changes nothing.
     assert config.update({"SLM_URL": "http://nas:3000", "AUTO_DOWNLOAD": "sure", "SLM_API_KEY": ""}) == []
-    assert (config.SLM_URL, config.AUTO_DOWNLOAD, config.INCLUDE_DLC) == ("http://nas:3000", "sure", True)
+    # "sure" and "likely" are the names from before the scores: 9 and 7.
+    assert (config.SLM_URL, config.AUTO_DOWNLOAD, config.INCLUDE_DLC) == ("http://nas:3000", "9", True)
+    assert config.auto_min_score() == 9
     # Only the app user can read the file with keys.
     assert stat.S_IMODE(os.stat(config.SETTINGS_FILE).st_mode) == 0o600
 
@@ -56,6 +58,9 @@ def test_empty_secret_keeps_the_old_one_and_clear_removes_it():
     {"PANEL_USER": "a:b"},
     {"PANEL_USER": ""},
     {"SEARCH_INTERVAL_HOURS": "7"},          # only 6, 12, 24 and 48
+    {"PROWLARR_CATEGORIES": "console"},      # numbers only
+    {"PROWLARR_CATEGORIES": ""},
+    {"AUTO_DOWNLOAD": "11"},
     {"TZ": "UTC"},                           # not a setting of the Configuratie tab
     {"SLM_URL": "http://ok", "AUTO_DOWNLOAD": "nee"},
 ])
@@ -64,6 +69,16 @@ def test_wrong_values_change_nothing(values):
     with pytest.raises(ValueError):
         config.update(values)
     assert config.SLM_URL == before and not os.path.exists(config.SETTINGS_FILE)
+
+
+def test_categories_are_a_list_of_numbers():
+    import clients
+    config.update({"PROWLARR_CATEGORIES": "1000, 4050"})
+    assert config.PROWLARR_CATEGORIES == ["1000", "4050"]
+    assert config.editable()["values"]["PROWLARR_CATEGORIES"] == "1000,4050"
+    # A main category covers its subcategories; a subcategory only itself.
+    assert [clients.in_categories(c) for c in (1000, 1090, 1990, 2000, 4050, 4000, 100123)] == [
+        True, True, True, False, True, False, False]
 
 
 def test_search_interval_is_a_number_of_hours():
@@ -102,8 +117,8 @@ def test_api_saves_and_reports_without_secrets():
         text = await r.text()
         data = await r.json()
         assert r.status == 200 and data["ok"] and "slm_abc" not in text
-        assert data["values"]["AUTO_DOWNLOAD"] == "likely" and data["secrets"]["SLM_API_KEY"] is True
-        assert config.AUTO_DOWNLOAD == "likely"
+        assert data["values"]["AUTO_DOWNLOAD"] == "7" and data["secrets"]["SLM_API_KEY"] is True
+        assert config.AUTO_DOWNLOAD == "7"
         # Still incomplete: said so, and nothing was contacted.
         assert data["services"]["config"]["ok"] is False
         assert "slm_abc" not in await (await client.get("/api/settings")).text()

@@ -113,6 +113,10 @@ async def prowlarr_search(session, query):
     for item in data if isinstance(data, list) else []:
         if str(item.get("protocol", "usenet")).lower() != "usenet" or not item.get("guid") or not item.get("title"):
             continue
+        categories = [c.get("id") for c in item.get("categories") or [] if isinstance(c, dict)]
+        # Prowlarr already searches in the chosen categories only; this holds it to that.
+        if categories and not any(in_categories(c) for c in categories):
+            continue
         releases.append({
             "guid": item["guid"],
             "title": item["title"],
@@ -125,6 +129,28 @@ async def prowlarr_search(session, query):
             "grabs": item.get("grabs") or 0,
         })
     return releases
+
+
+def in_categories(category):
+    """Is a Newznab category one of the configured ones? A main category (1000 = Console)
+    covers its subcategories (1010-1990)."""
+    for wanted in config.PROWLARR_CATEGORIES:
+        wanted = int(wanted)
+        if category == wanted or (wanted % 1000 == 0 and wanted < category < wanted + 1000):
+            return True
+    return False
+
+
+async def prowlarr_priorities(session):
+    """{indexer id: priority} as set in Prowlarr; a lower number goes first."""
+    try:
+        async with session.get(f"{config.PROWLARR_URL}/api/v1/indexer",
+                               headers=_prowlarr_headers(), timeout=SHORT) as r:
+            await _check(r, "Prowlarr")
+            indexers = await r.json(content_type=None)
+    except Exception as e:
+        raise _wrap("Prowlarr", e) from e
+    return {i["id"]: int(i.get("priority") or 25) for i in indexers if isinstance(i, dict) and "id" in i}
 
 
 def _via_prowlarr(download_url):

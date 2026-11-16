@@ -58,14 +58,17 @@ def test_round_finds_and_ranks_candidates():
         # Only games that miss an update; Stardew Valley is up to date.
         assert set(items) == {ALAN, HADES, SCARLET, HOLLOW, NARUTO}
         assert all(s["ok"] for s in hunter.state["services"].values())
-        assert titles(hunter, ALAN) == [
-            "Alan Wake Remastered [0100623017A58800][v196608].nsz",
-            "[NSW] Alan Wake Remastered (Update v131072) (EUR)",
-            "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM",
-            "Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]",
+        # Highest score first; of equal scores the newest post first.
+        assert [(c["score"], c["title"]) for c in items[ALAN]["candidates"]] == [
+            (10, "Alan Wake Remastered [0100623017A58800][v196608].nsz"),
+            (7, "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM"),
+            (5, "Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]"),
+            (5, "[NSW] Alan Wake Remastered (Update v131072) (EUR)"),
         ]
+        assert all(c["priority"] == 10 for c in items[ALAN]["candidates"])
+        # The PC release with the same name is outside the Console categories.
         assert titles(hunter, HADES) == ["Hades_Update_v1.0.2_NSW-GRP"]
-        assert hunter.state["items"][HADES]["candidates"][0]["confidence"] == "likely"
+        assert hunter.state["items"][HADES]["candidates"][0]["score"] == 7
         # The exact name wins from the title with extra words.
         assert titles(hunter, SCARLET) == [
             "Pokemon.Scarlet.Update.v3.0.1.NSW-BigBlueBox",
@@ -111,7 +114,7 @@ def test_auto_sure_sends_only_certain_latest_updates():
         # A second round does not send them again.
         await hunter.round()
         assert len(fakes["sent"]) == 2
-    run(test, AUTO_DOWNLOAD="sure")
+    run(test, AUTO_DOWNLOAD="9")
 
 
 def test_auto_likely_also_sends_display_versions_posted_after_the_latest_update():
@@ -122,7 +125,7 @@ def test_auto_likely_also_sends_display_versions_posted_after_the_latest_update(
             "Hades_Update_v1.0.2_NSW-GRP.nzb",
             "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS.nzb",
             "Pokemon.Scarlet.Update.v3.0.1.NSW-BigBlueBox.nzb"]
-    run(test, AUTO_DOWNLOAD="likely")
+    run(test, AUTO_DOWNLOAD="7")
 
 
 def test_display_version_is_matched_to_the_update_by_its_place():
@@ -136,8 +139,8 @@ def test_display_version_is_matched_to_the_update_by_its_place():
             "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS",
             "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS",
             "NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS"]
-        assert {(c["confidence"], c["is_latest"], c["estimated_version"], c["deduced"]) for c in found} == {
-            ("sure", True, 720896, True)}
+        assert {(c["score"], c["is_latest"], c["estimated_version"], c["deduced"]) for c in found} == {
+            (9, True, 720896, True)}
         assert any("update 11" in reason for reason in found[0]["reasons"])
         # Also the version that is not wanted was noticed: it is a step of the ladder.
         assert hunter.state["seen"][NARUTO] == {"1.7.0": "2026-08-20", "1.7.1": "2026-09-30"}
@@ -178,13 +181,39 @@ def test_test_buttons_use_the_values_of_the_form():
     run(test)
 
 
+def test_order_is_score_then_age_then_indexer_priority():
+    def release(score, published, priority, grabs=0):
+        return {"score": score, "published": published + "T10:00:00Z", "priority": priority, "grabs": grabs}
+    best = release(9, "2026-01-01", 30)
+    newer = release(7, "2026-09-30", 25)
+    first_indexer = release(7, "2026-09-01", 1)
+    second_indexer = release(7, "2026-09-01", 25, grabs=50)
+    popular = release(7, "2026-09-01", 25, grabs=90)
+    shuffled = [second_indexer, popular, first_indexer, newer, best]
+    assert sorted(shuffled, key=hunter_module.best_first) == [best, newer, first_indexer, popular, second_indexer]
+
+
+def test_same_release_on_two_indexers_keeps_the_one_that_goes_first():
+    async def test(hunter, fakes):
+        await hunter.round()
+        item = hunter.state["items"][HADES]
+        kept = item["candidates"][0]
+        hunter.priorities = {1: 10, 7: 3, 8: 40}
+        twin = {**kept, "guid": "other-indexer", "indexerId": 7, "indexer": "Better"}
+        assert hunter.offer(item, twin) is False  # not a new candidate, it replaces its twin
+        assert [(c["guid"], c["priority"]) for c in item["candidates"]] == [("other-indexer", 3)]
+        hunter.offer(item, {**kept, "guid": "worse-indexer", "indexerId": 8})
+        assert [c["guid"] for c in item["candidates"]] == ["other-indexer"]
+    run(test)
+
+
 def test_dlc_is_its_own_item():
     async def test(hunter, fakes):
         await hunter.round()
         item = hunter.state["items"][ALAN_DLC]
         assert item["type"] == "dlc" and item["game_id"] == ALAN
         assert titles(hunter, ALAN_DLC)[0] == "Alan Wake Remastered [0100623017A59001][v0] DLC"
-        assert item["candidates"][0]["confidence"] == "sure"
+        assert item["candidates"][0]["score"] == 10
         # The DLC release is not offered as the update.
         assert "Alan Wake Remastered [0100623017A59001][v0] DLC" not in titles(hunter, ALAN)
     run(test, INCLUDE_DLC=True)

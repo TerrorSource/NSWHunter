@@ -59,8 +59,20 @@
   .title { font-weight: 600; }
   .sub { color: var(--soft); font-size: 13px; font-variant-numeric: tabular-nums; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .score { display: inline-flex; align-items: baseline; justify-content: center; min-width: 54px; padding: 3px 9px;
+           border-radius: 8px; font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums;
+           background: var(--mute-bg); color: var(--soft); }
+  .score small { font-weight: 400; font-size: 11px; opacity: .8; margin-left: 1px; }
+  .score.high { background: var(--good-bg); color: var(--good); }
+  .score.good { background: var(--info-bg); color: var(--info); }
+  .score.mid { background: var(--warn-bg); color: var(--warn); }
+  .toggle { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; flex: 1; min-width: 230px; }
+  .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .toggle .arrow { color: var(--soft); width: 14px; flex: none; transition: transform .12s; margin-top: 2px; }
+  .toggle[aria-expanded=true] .arrow { transform: rotate(90deg); }
+  .toggle:hover .title { text-decoration: underline; }
   .cands { border-top: 1px solid var(--line); }
-  .cand { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; padding: 9px 14px; align-items: start; }
+  .cand { display: grid; grid-template-columns: 64px 1fr auto; gap: 4px 12px; padding: 9px 14px; align-items: start; }
   .cand + .cand { border-top: 1px solid var(--line); }
   .cand.first { background: color-mix(in srgb, var(--good-bg) 35%, transparent); }
   .cand .name { overflow-wrap: anywhere; }
@@ -139,14 +151,18 @@ const $ = id => document.getElementById(id);
 function put(el, ...children) {
   el.replaceChildren(...children.flat().filter(c => c !== null && c !== undefined && c !== false));
 }
-let state = null, tab = "review", filter = "", busy = new Set();
+let state = null, tab = "review", filter = "", busy = new Set(), expanded = new Set();
 let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {};
 
 const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
-const CONFIDENCE = {sure: "Zeker", likely: "Waarschijnlijk", uncertain: "Twijfel"};
+// The score is the chance that a download is the right one, from 1 to 10.
+function score(value, title) {
+  const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
+  return h("span", {class: "score " + level, title: title || "Kans dat deze download de juiste is"}, String(value || "?"), h("small", {}, "/10"));
+}
 const KIND = {update: "update", bundle: "bundel", dlc: "DLC", unknown: ""};
 const SERVICES = {slm: "Bibliotheek", prowlarr: "Prowlarr", downloader: "Downloadclient", titledb: "titledb", config: "Instellingen"};
-const AUTO = {off: "uit: alles wacht op je keuze", sure: "aan voor zekere releases", likely: "aan voor zekere en waarschijnlijke releases"};
+function autoText(min) { return min ? "vanaf score " + min : "uit: alles wacht op je keuze"; }
 
 function toast(text) {
   const t = $("toast"); t.textContent = text; t.classList.add("show");
@@ -204,8 +220,8 @@ function candidate(item, c, first) {
   const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
   const safe = /^https?:\/\//.test(c.infoUrl || "");
   return h("div", {class: "cand" + (first ? " first" : "")},
-    h("div", {}, h("span", {class: "badge " + c.confidence}, CONFIDENCE[c.confidence]),
-      c.guid === item.auto_guid ? h("div", {class: "sub"}, "gaat automatisch") : null),
+    h("div", {}, score(c.score),
+      c.guid === item.auto_guid ? h("div", {class: "sub"}, "gaat vanzelf") : null),
     h("div", {},
       h("div", {class: "name"}, safe ? h("a", {href: c.infoUrl, target: "_blank", rel: "noopener noreferrer"}, c.title) : c.title),
       h("div", {class: "sub"}, meta),
@@ -220,15 +236,23 @@ function candidate(item, c, first) {
 function itemCard(item) {
   const label = {review: "te beoordelen", sent: "verstuurd", none: "niets gevonden", new: "nog niet gezocht", ignored: "genegeerd"}[item.status];
   const searching = busy.has("s" + item.key);
+  const count = item.candidates.length, best = count ? item.candidates[0].score : 0;
+  const has = count > 0 && !item.grab && !item.ignored, shown = has && expanded.has(item.key);
+  const names = h("div", {},
+    h("div", {class: "title"}, item.name),
+    h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
+      item.last_search ? " · gezocht " + ago(item.last_search) : ""),
+    shown && item.ladder && item.ladder.length > 1 ? h("div", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
+      item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null);
   const card = h("div", {class: "item"},
     h("div", {class: "head"},
-      h("div", {class: "grow"},
-        h("div", {class: "title"}, item.name),
-        h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
-          item.last_search ? " · gezocht " + ago(item.last_search) : ""),
-        item.ladder && item.ladder.length > 1 ? h("div", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
-          item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null),
-      h("span", {class: "badge " + item.status}, label),
+      // Collapsed by default: a click on the name shows the releases.
+      has ? h("button", {class: "toggle", "aria-expanded": shown ? "true" : "false",
+                         onclick: () => { shown ? expanded.delete(item.key) : expanded.add(item.key); renderList(); }},
+              h("span", {class: "arrow"}, "▸"), names)
+          : h("div", {class: "grow"}, names),
+      has ? h("span", {class: "sub"}, count + (count === 1 ? " release" : " releases")) : null,
+      has ? score(best, "Hoogste score van de gevonden releases") : h("span", {class: "badge " + item.status}, label),
       h("button", {disabled: searching,
                    onclick: () => post("/api/search", {key: item.key}, "s" + item.key).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
         searching ? "Zoeken…" : "Zoek nu"),
@@ -240,7 +264,7 @@ function itemCard(item) {
       h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
       h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is en kies opnieuw",
                    onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Opnieuw kiezen")));
-  } else if (item.candidates.length && !item.ignored) {
+  } else if (shown) {
     card.append(h("div", {class: "cands"}, item.candidates.map((c, i) => candidate(item, c, i === 0))));
   }
   return card;
@@ -258,7 +282,7 @@ function render() {
 
   put($("chips"), ...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
     h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
-    h("span", {class: "chip"}, "Automatisch downloaden " + AUTO[state.settings.auto]),
+    h("span", {class: "chip"}, "Automatisch downloaden " + autoText(state.settings.auto)),
     h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")),
     h("span", {class: "chip"}, "Zoekt elke " + state.settings.search_hours + " uur"));
   const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
@@ -304,7 +328,9 @@ const GROUPS = [
      help: "Maak hem in Switch-library-manager-web onder My account > API keys > Make a key, met het recht Read only. De key begint met slm_ en wordt maar één keer getoond. Staat inloggen daar uit, laat dit veld dan leeg."}]},
   {title: "Prowlarr", test: "prowlarr", fields: [
     {name: "PROWLARR_URL", label: "Adres", placeholder: "http://192.168.1.10:9696"},
-    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "Staat in Prowlarr onder Settings > General > API Key."}]},
+    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "Staat in Prowlarr onder Settings > General > API Key."},
+    {name: "PROWLARR_CATEGORIES", label: "Categorieën", placeholder: "1000",
+     help: "Alleen in deze categorieën wordt gezocht. 1000 is Console met alle subcategorieën; meerdere nummers scheid je met een komma, bijvoorbeeld 1090 voor alleen Console/Other."}]},
   {title: "Downloadclient", test: "downloader", fields: [
     {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "De downloadclient van Prowlarr"]]},
     {name: "DOWNLOAD_CATEGORY", label: "Categorie", placeholder: "games", unless: "prowlarr",
@@ -316,8 +342,9 @@ const GROUPS = [
     {name: "SABNZBD_API_KEY", label: "API key", secret: true, only: "sabnzbd", help: "Staat in SABnzbd onder Config > General > API Key."}]},
   {title: "Gedrag", fields: [
     {name: "AUTO_DOWNLOAD", label: "Automatisch downloaden", options: [
-      ["off", "Uit: ik kies zelf"], ["sure", "Zekere releases gaan vanzelf"], ["likely", "Zekere en waarschijnlijke releases gaan vanzelf"]],
-     help: "Twijfelgevallen en tussenversies wachten altijd op je keuze."},
+      ["off", "Uit: ik kies zelf"], ["10", "Alleen score 10"], ["9", "Vanaf score 9"], ["8", "Vanaf score 8"],
+      ["7", "Vanaf score 7"], ["6", "Vanaf score 6"], ["5", "Vanaf score 5"]],
+     help: "De score is de kans dat een download de juiste is, van 1 tot 10. Per game gaat de beste release vanzelf als zijn score minstens zo hoog is. 10: title ID en versienummer kloppen. 9: naam en versie kloppen zeker. 7-8: de versie is afgeleid van datums of van de nummering."},
     {name: "SEARCH_INTERVAL_HOURS", label: "Automatisch zoeken", options: [
       ["6", "Elke 6 uur"], ["12", "Elke 12 uur"], ["24", "Elke 24 uur"], ["48", "Elke 48 uur"]],
      help: "Zo vaak wordt elke game die iets mist op naam gezocht. Dat kost per game één API-call per indexer; kies 24 of 48 uur als een indexer een daglimiet heeft."},

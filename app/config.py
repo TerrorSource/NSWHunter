@@ -51,11 +51,13 @@ NZBGET_PASSWORD = env("NZBGET_PASSWORD")
 SABNZBD_URL = url("SABNZBD_URL")
 SABNZBD_API_KEY = env("SABNZBD_API_KEY")
 
-# off: everything waits for your click. sure: releases with the right game and the newest
-# internal version number go out by themselves. likely: also releases with only a display
-# version (v1.0.4) that were posted after the newest update came out.
+# off: everything waits for your click. A number: the best release of a game goes out by
+# itself when its score (1-10, the chance that the download is right) is at least that.
+AUTO_LEVELS = ("off", "10", "9", "8", "7", "6", "5")
+LEGACY_LEVELS = {"sure": "9", "likely": "7"}  # the names before there were scores
 AUTO_DOWNLOAD = env("AUTO_DOWNLOAD", "off").lower()
-if AUTO_DOWNLOAD not in ("off", "sure", "likely"):
+AUTO_DOWNLOAD = LEGACY_LEVELS.get(AUTO_DOWNLOAD, AUTO_DOWNLOAD)
+if AUTO_DOWNLOAD not in AUTO_LEVELS:
     AUTO_DOWNLOAD = "off"
 AUTO_BUNDLES = flag("AUTO_BUNDLES")  # also send base+update bundles automatically
 MAX_GRABS_PER_RUN = int(number("MAX_GRABS_PER_RUN", 10))
@@ -94,11 +96,10 @@ NOTIFY_URLS = env("NOTIFY_URLS")
 # ---------------------------------------------------------------- the Configuratie tab
 
 CLIENTS = ("nzbget", "sabnzbd", "prowlarr")
-AUTO_LEVELS = ("off", "sure", "likely")
 # name -> kind: "url", "text", "secret", "bool", or the tuple of allowed values.
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
-    "PROWLARR_URL": "url", "PROWLARR_API_KEY": "secret",
+    "PROWLARR_URL": "url", "PROWLARR_API_KEY": "secret", "PROWLARR_CATEGORIES": "numbers",
     "DOWNLOAD_CLIENT": CLIENTS, "DOWNLOAD_CATEGORY": "text",
     "NZBGET_URL": "url", "NZBGET_USER": "text", "NZBGET_PASSWORD": "secret",
     "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
@@ -122,7 +123,15 @@ def normalize(name, value):
         if number_value not in kind:
             raise ValueError(f"{name}: kies uit {', '.join(map(str, kind))}")
         return number_value
+    if kind == "numbers":
+        parts = value if isinstance(value, list) else str(value or "").replace(" ", "").split(",")
+        parts = [str(p) for p in parts if str(p)]
+        if not parts or not all(p.isdigit() and len(p) <= 6 for p in parts):
+            raise ValueError(f"{name}: vul nummers in, gescheiden door komma's (1000 = Console)")
+        return parts
     value = str(value if value is not None else "").strip()
+    if name == "AUTO_DOWNLOAD":
+        value = LEGACY_LEVELS.get(value.lower(), value)
     if len(value) > 500 or any(ord(c) < 32 for c in value):
         raise ValueError(f"{name}: ongeldige waarde")
     if kind == "url":
@@ -204,9 +213,15 @@ def overlay(values, clear=()):
 def editable():
     """What the Configuratie tab shows: values, and for secrets only whether one is set."""
     return {
-        "values": {n: globals()[n] for n in EDITABLE if n not in SECRETS},
+        "values": {n: ",".join(globals()[n]) if EDITABLE[n] == "numbers" else globals()[n]
+                   for n in EDITABLE if n not in SECRETS},
         "secrets": {n: bool(globals()[n]) for n in SECRETS},
     }
+
+
+def auto_min_score():
+    """The score from which a release goes out by itself; 0 = never."""
+    return 0 if AUTO_DOWNLOAD == "off" else int(AUTO_DOWNLOAD)
 
 
 def problems():

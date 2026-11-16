@@ -4,7 +4,7 @@ import datetime
 import pytest
 
 import matcher
-from matcher import LIKELY, SURE, UNCERTAIN, Candidate, Game, Rejection, evaluate
+from matcher import Candidate, Game, Rejection, evaluate
 
 
 def day(text):
@@ -21,23 +21,28 @@ def alan():
 AFTER_LATEST = day("2023-06-05")
 
 
-@pytest.mark.parametrize("title, confidence, kind, is_latest", [
-    ("Alan Wake Remastered [0100623017A58800][v196608].nsz", SURE, "update", True),
-    ("Alan Wake Remastered v196608 NSW", SURE, "unknown", True),
-    ("[NSW] Alan Wake Remastered (Update v131072) (EUR)", SURE, "update", False),
-    ("Alan.Wake.Remastered.Update.v196608.NSW-GRP", SURE, "update", True),
-    ("alan wake remastered [0100623017a58800] [v131072] (upd)", SURE, "update", False),
-    ("Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", LIKELY, "update", True),
-    ("Alan.Wake.Remastered.Update.v1.0.3.NSW-SUXXORS", LIKELY, "update", True),
-    ("Alan Wake Remastered Update 1.0.3 [NSW]", LIKELY, "update", True),
-    ("Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]", LIKELY, "bundle", True),
-    ("Alan Wake Remastered Collectors Edition Update v196608", UNCERTAIN, "update", True),
-    ("Alan Wake Remasterd Update v196608", UNCERTAIN, "update", True),
+# The score is the chance that the download is right: title ID and version number 10, name and
+# version number 9, a version worked out from dates 7, something in between or beside it 5 or less.
+@pytest.mark.parametrize("title, score, kind, is_latest", [
+    ("Alan Wake Remastered [0100623017A58800][v196608].nsz", 10, "update", True),
+    ("Alan.Wake.Remastered.Update.v196608.NSW-GRP", 9, "update", True),
+    ("Alan Wake Remastered v196608 NSW", 8, "unknown", True),
+    ("Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", 7, "update", True),
+    ("Alan.Wake.Remastered.Update.v1.0.3.NSW-SUXXORS", 7, "update", True),
+    ("Alan Wake Remastered Update 1.0.3 [NSW]", 7, "update", True),
+    ("Alan.Wake.Remastered.Update.v1.0.3.incl.Offline.Crack.NSW-VENOM", 6, "update", True),
+    ("[NSW] Alan Wake Remastered (Update v131072) (EUR)", 5, "update", False),
+    ("alan wake remastered [0100623017a58800] [v131072] (upd)", 5, "update", False),
+    ("Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]", 5, "bundle", True),
+    ("Alan Wake Remastered incl Update v1.0.3 NSW", 5, "bundle", True),
+    ("Alan Wake Remastered Collectors Edition Update v196608", 5, "update", True),
+    ("Alan Wake Remastered Update NSW", 5, "update", True),
+    ("Alan Wake Remasterd Update v196608", 4, "update", True),
 ])
-def test_candidates(title, confidence, kind, is_latest):
+def test_candidates(title, score, kind, is_latest):
     result = evaluate(alan(), title, AFTER_LATEST)
     assert isinstance(result, Candidate), getattr(result, "reason", None)
-    assert (result.confidence, result.kind, result.is_latest) == (confidence, kind, is_latest)
+    assert (result.score, result.kind, result.is_latest) == (score, kind, is_latest)
 
 
 @pytest.mark.parametrize("title", [
@@ -60,7 +65,7 @@ def test_rejections(title):
 
 def test_display_version_posted_before_latest_update_is_not_latest():
     result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", day("2023-03-01"))
-    assert (result.confidence, result.is_latest) == (UNCERTAIN, False)
+    assert (result.score, result.is_latest) == (4, False)
 
 
 def test_release_posted_before_any_newer_update_existed():
@@ -79,7 +84,7 @@ def test_a_newer_display_version_is_not_rejected_on_dates_alone():
     """Higher than the library's own version, so at least the next update, whatever the dates say."""
     result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", day("2022-12-01"))
     assert isinstance(result, Candidate)
-    assert (result.confidence, result.estimated_version, result.is_latest) == (UNCERTAIN, 131072, None)
+    assert (result.score, result.estimated_version, result.is_latest) == (4, 131072, None)
 
 
 # The user's real case, with the dates as the databases have them: update 11 is listed on
@@ -100,11 +105,11 @@ def naruto(local=655360, display="1.7.0"):
 def test_ladder_own_version_is_the_anchor():
     """The library has 1.7.0 = update 10; v1.7.1 is higher, and only update 11 is newer."""
     result = evaluate(naruto(), V171, day("2026-09-30"), seen=NARUTO_SEEN)
-    assert (result.confidence, result.estimated_version, result.is_latest, result.deduced) == (
-        SURE, 720896, True, True)
+    assert (result.score, result.estimated_version, result.is_latest, result.deduced) == (
+        9, 720896, True, True)
     assert isinstance(evaluate(naruto(), V170, day("2026-08-20"), seen=NARUTO_SEEN), Rejection)
     # The same without the other releases: the library's own pair is enough.
-    assert evaluate(naruto(), V171, day("2026-09-30")).confidence == SURE
+    assert evaluate(naruto(), V171, day("2026-09-30")).score == 9
 
 
 def test_ladder_without_the_librarys_display_version():
@@ -114,7 +119,7 @@ def test_ladder_without_the_librarys_display_version():
     assert (steps["1.7.0"].version, steps["1.7.0"].how) == (655360, "date")
     assert (steps["1.7.1"].version, steps["1.7.1"].how, steps["1.7.1"].solid) == (720896, "order", False)
     result = evaluate(game, V171, day("2026-09-30"), seen=NARUTO_SEEN)
-    assert (result.confidence, result.estimated_version, result.is_latest) == (LIKELY, 720896, True)
+    assert (result.score, result.estimated_version, result.is_latest) == (7, 720896, True)
     assert isinstance(evaluate(game, V170, day("2026-08-20"), seen=NARUTO_SEEN), Rejection)
 
 
@@ -122,7 +127,7 @@ def test_ladder_alone_and_dated_late_is_a_doubt_not_a_rejection():
     """Only v1.7.1 seen, nothing from the library: by date it is update 10, but update 11 is
     listed only three weeks later, so it can be that one."""
     result = evaluate(naruto(display=None), V171, day("2026-09-30"))
-    assert isinstance(result, Candidate) and (result.confidence, result.is_latest) == (UNCERTAIN, None)
+    assert isinstance(result, Candidate) and (result.score, result.is_latest) == (3, None)
 
 
 def test_ladder_two_updates_behind():
@@ -131,7 +136,7 @@ def test_ladder_two_updates_behind():
     between = evaluate(game, V170, day("2026-08-20"), seen=NARUTO_SEEN)
     assert (between.estimated_version, between.is_latest) == (655360, False)
     newest = evaluate(game, V171, day("2026-09-30"), seen=NARUTO_SEEN)
-    assert (newest.confidence, newest.estimated_version, newest.is_latest) == (LIKELY, 720896, True)
+    assert (newest.score, newest.estimated_version, newest.is_latest) == (7, 720896, True)
 
 
 def test_ladder_higher_than_everything_known():
@@ -154,7 +159,7 @@ def test_without_dates_a_display_version_stays_uncertain():
     game = alan()
     game.dates = {}
     result = evaluate(game, "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", AFTER_LATEST)
-    assert (result.confidence, result.is_latest) == (UNCERTAIN, None)
+    assert (result.score, result.is_latest) == (4, None)
 
 
 def test_display_version_is_translated_once_seen_next_to_an_internal_one():
@@ -162,12 +167,12 @@ def test_display_version_is_translated_once_seen_next_to_an_internal_one():
     evaluate(alan(), "Alan Wake Remastered v1.0.2 [0100623017A58800][v131072]", None, vermap)
     assert vermap == {"1.0.2": 131072}
     result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", None, vermap)
-    assert (result.confidence, result.internal_version, result.is_latest) == (SURE, 131072, False)
+    assert (result.score, result.internal_version, result.is_latest) == (5, 131072, False)
 
 
 def test_title_id_alone_is_enough():
     result = evaluate(alan(), "aW5kZXhlcg [0100623017A58800][v196608]", None)
-    assert (result.confidence, result.name_match) == (SURE, "tid")
+    assert (result.score, result.name_match) == (10, "tid")
 
 
 @pytest.mark.parametrize("name, title", [
@@ -180,7 +185,7 @@ def test_title_id_alone_is_enough():
 def test_names_with_signs_and_punctuation(name, title):
     game = Game(id="0100AAAA0000A000", name=name, local_version=0, latest_version=65536)
     result = evaluate(game, title)
-    assert isinstance(result, Candidate) and result.confidence == SURE, getattr(result, "reason", None)
+    assert isinstance(result, Candidate) and result.score == 9, getattr(result, "reason", None)
 
 
 @pytest.mark.parametrize("name, title", [
@@ -199,32 +204,55 @@ def test_shortened_name_is_a_doubt_not_a_match():
     """A release that drops the end of a long name may be the same game: the user decides."""
     game = Game(id="0100AAAA0000A000", name="Mario Kart 8 Deluxe", local_version=0, latest_version=65536)
     result = evaluate(game, "Mario Kart 8 Update v65536")
-    assert (result.confidence, result.name_match) == (UNCERTAIN, "fuzzy")
+    assert (result.score, result.name_match) == (4, "fuzzy")
 
 
 def test_short_name_exact():
     game = Game(id="0100AAAA0000A000", name="Hades", local_version=0, latest_version=65536)
-    assert evaluate(game, "Hades Update v65536 NSW-GRP").confidence == SURE
+    assert evaluate(game, "Hades Update v65536 NSW-GRP").score == 9
 
 
 def test_unknown_title_needs_a_title_id():
     game = Game(id="0100AAAA0000A000", name="", local_version=0, latest_version=65536)
     assert isinstance(evaluate(game, "Whatever Update v65536"), Rejection)
-    assert evaluate(game, "Whatever [0100AAAA0000A800][v65536]").confidence == SURE
+    assert evaluate(game, "Whatever [0100AAAA0000A800][v65536]").score == 10
 
 
-def test_best_candidate_ranks_first():
-    titles = [
-        "Alan Wake Remastered Collectors Edition Update v196608",
-        "Alan Wake Remastered [NSP] [Base + Update 1.0.3 + DLC]",
-        "[NSW] Alan Wake Remastered (Update v131072) (EUR)",
-        "Alan Wake Remastered [0100623017A58800][v196608].nsz",
-        "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM",
-    ]
-    ranked = sorted(titles, key=lambda t: evaluate(alan(), t, AFTER_LATEST).to_dict()["rank"], reverse=True)
-    assert ranked[0] == "Alan Wake Remastered [0100623017A58800][v196608].nsz"
-    assert ranked[1] == "[NSW] Alan Wake Remastered (Update v131072) (EUR)"
-    assert ranked[-1] == "Alan Wake Remastered Collectors Edition Update v196608"
+DIABLO = "Diablo.II.Resurrected.Update.v1.0.35.0.incl.Offline.Crack.NSW-VENOM"
+
+
+def diablo():
+    """The user's real case: the library has 1.0.31.0 = update 31, the newest is update 35, and
+    the databases list update 35 after the release was posted."""
+    return Game(
+        id="0100726014352000", name="Diablo® II: Resurrected™",
+        local_version=31 * 65536, latest_version=35 * 65536, local_display="1.0.31.0",
+        dates={31 * 65536: day("2026-03-01"), 33 * 65536: day("2026-06-01"),
+               34 * 65536: day("2026-09-01"), 35 * 65536: day("2026-11-20")})
+
+
+def test_version_that_counts_the_update():
+    """1.0.31.0 is update 31, so 1.0.35.0 is update 35, whatever the dates say."""
+    result = evaluate(diablo(), DIABLO, day("2026-11-12"))
+    assert (result.estimated_version, result.is_latest, result.kind) == (35 * 65536, True, "update")
+    assert result.score == 7  # 8 without the crack
+    assert evaluate(diablo(), DIABLO.replace(".incl.Offline.Crack", ""), day("2026-11-12")).score == 8
+    older = evaluate(diablo(), "Diablo.II.Resurrected.Update.v1.0.34.0.NSW-VENOM", day("2026-09-02"))
+    assert (older.estimated_version, older.is_latest, older.score) == (34 * 65536, False, 4)
+
+
+def test_pattern_needs_the_librarys_own_pair_to_show_it():
+    game = diablo()
+    game.local_display = "1.0.9.0"  # update 31 is not in this version: no pattern
+    result = evaluate(game, DIABLO, day("2026-11-12"))
+    assert result.estimated_version == 34 * 65536  # by date
+
+
+def test_mark():
+    assert matcher.mark("tid", 1.0, "update") == 10
+    assert matcher.mark("fuzzy", 0.25, "bundle") == 1
+    assert all(1 <= matcher.mark(i, c, k, crack) <= 10 for i in matcher.IDENTITY for k in matcher.KIND
+               for c in (0.0, 0.3, 1.0) for crack in (True, False))
 
 
 DLC = {"id": "0100623017A59001", "name": "Alan Wake Remastered - Bonus Pack"}
@@ -232,19 +260,28 @@ DLC = {"id": "0100623017A59001", "name": "Alan Wake Remastered - Bonus Pack"}
 
 def test_dlc_by_title_id():
     result = evaluate(alan(), "Alan Wake Remastered [0100623017A59001][v0] DLC", want="dlc", dlc=DLC)
-    assert result.confidence == SURE
+    assert result.score == 10
     other = evaluate(alan(), "Alan Wake Remastered [0100623017A59002][v0] DLC", want="dlc", dlc=DLC)
     assert isinstance(other, Rejection)
 
 
 def test_dlc_by_name():
     named = evaluate(alan(), "Alan_Wake_Remastered_Bonus_Pack_DLC_NSW-GRP", want="dlc", dlc=DLC)
-    assert named.confidence == LIKELY
+    assert named.score == 6
     vague = evaluate(alan(), "Alan Wake Remastered DLC Pack NSW", want="dlc", dlc=DLC)
-    assert vague.confidence == UNCERTAIN
+    assert vague.score == 3
     update = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW", want="dlc", dlc=DLC)
     assert isinstance(update, Rejection)
 
 
 def test_search_term():
     assert matcher.search_term("Pokémon™ Scarlet: The Hidden Treasure") == "pokemon scarlet the hidden treasure"
+
+
+def test_dlc_named_without_the_abbreviation_of_the_game():
+    game = Game(id="01006560184E6000", name="Mortal Kombat™ 1")
+    dlc = {"id": "01006560184E7005", "name": "MK1: MKII Movie Skins"}
+    named = evaluate(game, "Mortal Kombat 1 MKII Movie Skins DLC NSW-VENOM", want="dlc", dlc=dlc)
+    assert named.score == 6
+    pack = evaluate(game, "Mortal Kombat 1 v1.28.0 DLC Unlocker NSW-VENOM-FTP", want="dlc", dlc=dlc)
+    assert pack.score == 3

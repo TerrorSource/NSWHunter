@@ -11,7 +11,7 @@ import matcher
 
 MAX_CANDIDATES = 15
 MAX_EVENTS = 200
-RANK = {matcher.SURE: 2, matcher.LIKELY: 1, matcher.UNCERTAIN: 0}
+DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
 
 
 def log(*args):
@@ -30,8 +30,15 @@ async def no_notify(title, body):
 
 
 def best_first(candidate):
-    """Sort key: the judgement first; of equal releases the one most people took."""
-    return (candidate["rank"], candidate.get("grabs") or 0)
+    """Sort key: the highest score first, then the newest post, then the indexer with the
+    highest priority in Prowlarr (the lowest number), then the one most people took."""
+    return (-candidate.get("score", 0), -published_ordinal(candidate),
+            candidate.get("priority", DEFAULT_PRIORITY), -(candidate.get("grabs") or 0))
+
+
+def published_ordinal(release):
+    day = published_date(release)
+    return day.toordinal() if day else 0
 
 
 class Hunter:
@@ -41,6 +48,7 @@ class Hunter:
         self.lock = asyncio.Lock()  # one round or search at a time
         self.games = {}  # game id -> matcher.Game, only games that miss something
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
+        self.priorities = {}  # Prowlarr indexer id -> priority
         self.status = {"running": False, "phase": None, "last_run": None, "next_run": None}
         self.state = {
             "items": {},  # key -> one missing update or DLC, with its candidates
@@ -62,6 +70,9 @@ class Hunter:
             with open(config.STATE_FILE) as f:
                 saved = json.load(f)
             self.state.update(saved)
+            for item in self.state["items"].values():
+                for candidate in item.get("candidates", []):
+                    candidate.setdefault("score", 0)  # judged again in the first round
             if "seen" not in saved:
                 # State from before the version ladder: search every game once more, so the
                 # display versions in the release names are noticed.
@@ -236,22 +247,28 @@ class Hunter:
         """Add a release to an item's candidates if it is one. True if it is new."""
         if release["guid"] in item["blocked"]:
             return False
-        if any(c["guid"] == release["guid"] or c["title"].lower() == release["title"].lower()
-               for c in item["candidates"]):
+        release = {**release, "priority": self.priorities.get(release.get("indexerId"), DEFAULT_PRIORITY)}
+        if any(c["guid"] == release["guid"] for c in item["candidates"]):
+            return False
+        # The same release on several indexers: keep the one from the indexer that goes first.
+        twin = next((c for c in item["candidates"] if c["title"].lower() == release["title"].lower()), None)
+        if twin and twin.get("priority", DEFAULT_PRIORITY) <= release["priority"]:
             return False
         candidate = self.judge(item, release)
         if candidate is None:
             return False
+        if twin:
+            item["candidates"].remove(twin)
         item["candidates"].append(candidate)
-        item["candidates"].sort(key=best_first, reverse=True)
+        item["candidates"].sort(key=best_first)
         del item["candidates"][MAX_CANDIDATES:]
-        return candidate in item["candidates"]
+        return candidate in item["candidates"] and not twin
 
     def reevaluate(self):
         """The library changed (new local version, newer update out): judge everything again."""
         for item in self.state["items"].values():
             fresh = [self.judge(item, c) for c in item["candidates"]]
-            item["candidates"] = sorted((c for c in fresh if c), key=best_first, reverse=True)
+            item["candidates"] = sorted((c for c in fresh if c), key=best_first)
 
     def ladder_text(self, game_id):
         """For the panel: which display version is which update, from the library's own up."""
@@ -368,12 +385,11 @@ class Hunter:
 
     def automatic(self, item):
         """The candidate that may go out without a click, or None."""
-        if config.AUTO_DOWNLOAD == "off" or item["ignored"] or item["grab"] or not item["candidates"]:
+        threshold = config.auto_min_score()
+        if not threshold or item["ignored"] or item["grab"] or not item["candidates"]:
             return None
         best = item["candidates"][0]
-        if RANK[best["confidence"]] < RANK[config.AUTO_DOWNLOAD]:
-            return None
-        if item["type"] == "update" and best["is_latest"] is not True:
+        if best.get("score", 0) < threshold:
             return None
         if best["kind"] == "bundle" and not config.AUTO_BUNDLES:
             return None
@@ -423,6 +439,11 @@ class Hunter:
                 self.service(name, True, str(await test(self.session)))
             except clients.ServiceError as e:
                 self.service(name, False, str(e))
+        if self.state["services"]["prowlarr"]["ok"]:
+            try:
+                self.priorities = await clients.prowlarr_priorities(self.session)
+            except clients.ServiceError:
+                pass  # sorting then falls back to equal priorities
 
     async def test_connections(self):
         """Try every service with the current settings, right after they were saved."""
@@ -507,7 +528,7 @@ class Hunter:
         for item in self.state["items"].values():
             shown = {k: v for k, v in item.items() if k not in ("candidates", "blocked")}
             shown["candidates"] = [
-                {k: v for k, v in c.items() if k not in ("downloadUrl", "rank", "indexerId")}
+                {k: v for k, v in c.items() if k not in ("downloadUrl", "rank", "confidence", "indexerId")}
                 for c in item["candidates"]]
             if item["type"] == "update":
                 shown["ladder"] = self.ladder_text(item["game_id"])
@@ -533,7 +554,7 @@ class Hunter:
             "events": self.state["events"][:60],
             "items": items,
             "settings": {
-                "auto": config.AUTO_DOWNLOAD, "dlc": config.INCLUDE_DLC,
+                "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
                 "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
             },

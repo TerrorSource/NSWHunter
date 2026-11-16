@@ -41,6 +41,8 @@ RELEASES = [
     ("Pokemon Scarlet The Hidden Treasure Update v262144", "2023-12-14", 2900000000),
     ("Stardew Valley Update v131072", "2024-11-05", 90000000),
     ("Some Unrelated Game Update v65536 NSW", "2024-01-01", 1),
+    # The same name as the Switch update, but posted in PC > Games (4050): not for the Switch.
+    ("Hades.Update.v131072-PCGROUP", "2021-03-02", 150000000, 4050),
     # Real names from the user's Prowlarr: three language variants per update.
     ("NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS", "2026-09-30", 4290000000),
     ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS", "2026-09-30", 4190000000),
@@ -85,10 +87,12 @@ def make_fakes():
             return web.json_response([])
         words = query.split()
         found = []
-        for n, (name, published, size) in enumerate(RELEASES):
+        for n, (name, published, size, *category) in enumerate(RELEASES):
             text = name.lower().replace(".", " ").replace("_", " ")
             if all(w in text for w in words):
                 found.append({
+                    "categories": [{"id": 4000, "name": "PC"}, {"id": 4050, "name": "PC/Games"}] if category
+                    else [{"id": 1000, "name": "Console"}, {"id": 1090, "name": "Console/Other"}],
                     "guid": f"guid-{n}", "title": name, "size": size, "indexer": "FakeIndexer",
                     "indexerId": 1, "publishDate": published + "T10:00:00Z", "protocol": "usenet",
                     "downloadUrl": f"http://elsewhere.invalid/1/download?apikey=secret&link={n}",
@@ -99,7 +103,7 @@ def make_fakes():
 
     async def indexers(request):
         return web.json_response([
-            {"id": 1, "name": "FakeIndexer", "protocol": "usenet", "enable": True},
+            {"id": 1, "name": "FakeIndexer", "protocol": "usenet", "enable": True, "priority": 10},
             {"id": 2, "name": "Off", "protocol": "usenet", "enable": False},
             {"id": 3, "name": "Tracker", "protocol": "torrent", "enable": True}])
 

@@ -2,6 +2,22 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.4.0] - 2026-11-16
+
+### Toegevoegd
+
+- **Score van 1 tot 10** in plaats van Zeker, Waarschijnlijk en Twijfel: de kans dat een download de juiste is. Het paneel toont de score per release en de hoogste score per game.
+- **Automatisch downloaden vanaf een score** (uit, of vanaf 10 tot en met 5). De oude waarden `sure` en `likely` gelden als 9 en 7.
+- **Categorieën** instelbaar op de tab Configuratie (standaard `1000`, Console met alle subcategorieën). Resultaten buiten die categorieën vallen af, ook als Prowlarr ze toch teruggeeft.
+- Versies die de update zelf tellen worden herkend: is je eigen 1.0.31.0 update 31, dan is 1.0.35.0 update 35.
+
+### Gewijzigd
+
+- **Sortering** binnen een game: score, dan leeftijd (nieuwste post eerst), dan de prioriteit van de indexer in Prowlarr. Van dezelfde release op meerdere indexers blijft die van de indexer met de hoogste prioriteit over.
+- **Games staan ingeklapt.** Een klik op de naam toont de releases.
+- "Update incl. Crack" is geen bundel meer; alleen "game incl. update" is dat. Een crack verlaagt de score en staat bij de reden.
+- Een DLC telt als genoemd in de titel als het grootste deel van zijn naam erin staat.
+
 ## [1.3.0] - 2026-11-16
 
 ### Toegevoegd

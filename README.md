@@ -41,6 +41,7 @@ Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
 |---|---|
 | Bibliotheek: adres en API key | Switch-library-manager-web > My account > API keys > Make a key, met het recht Read only. De key begint met `slm_` en wordt één keer getoond. Staat inloggen daar uit, dan is er geen key nodig. |
 | Prowlarr: adres en API key | Prowlarr > Settings > General > API Key |
+| Prowlarr: categorieën | `1000` is Console met alle subcategorieën. Alleen daarin wordt gezocht. |
 | Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
 | Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
 | Automatisch zoeken | Elke 6, 12, 24 of 48 uur, zie [Zoeken en API-limieten](#zoeken-en-api-limieten) |
@@ -68,25 +69,29 @@ Geen enkele bron heeft van een update zowel het zichtbare als het interne versie
 
 De volgorde is betrouwbaarder dan de datum: de lijsten met updates zetten een nieuwe update er vaak weken te laat in. Daarom onthoudt NSWHunter elke versie die in releasenamen voorkomt, ook van releases die afvallen. Het paneel toont de ladder per game: "v1.7.0 = update 10 · v1.7.1 = update 11".
 
-Dat geeft drie niveaus:
+### De score
 
-| Niveau | Betekenis |
+Elke release krijgt een score van 1 tot 10: de kans dat de download de juiste is. De score is het product van drie kansen: dat het deze game is, dat het de nieuwste update is, en dat het een update is en niets anders.
+
+| Score | Wat het meestal is |
 |---|---|
-| Zeker | Juiste game (title ID of exacte naam) en een intern versienummer dat nieuwer is dan het jouwe, of een zichtbare versie die via je eigen versie als nieuwste update is afgeleid |
-| Waarschijnlijk | Exacte naam en een zichtbare versie die de nieuwste update is, deels afgeleid van plaatsingsdatums |
-| Twijfel | Naam wijkt af, of niet te zien welke versie het is |
+| 10 | Title ID van de game en het interne versienummer van de nieuwste update |
+| 9 | Exacte naam met het interne versienummer, of een zichtbare versie die via je eigen versie als nieuwste update is afgeleid |
+| 7-8 | Exacte naam; de versie is afgeleid van plaatsingsdatums of van de nummering (1.0.35.0 = update 35) |
+| 4-6 | Een tussenversie, een bundel, een update met crack, extra woorden in de naam, of niet te zien welke versie het is |
+| 1-3 | De naam lijkt er alleen op, of er staat geen versie in |
+
+Wat de score verlaagt: een bundel met het basisspel (×0,75), een crack (×0,9), extra woorden in de naam (×0,5 in plaats van ×0,9). In het paneel staat bij elke release waarom.
+
+Binnen een game staan de releases op score, dan op leeftijd (nieuwste post eerst), dan op de prioriteit van de indexer in Prowlarr. Staat dezelfde release op meerdere indexers, dan blijft die van de indexer met de hoogste prioriteit over.
 
 ## Automatisch downloaden
 
-`AUTO_DOWNLOAD` bepaalt wat er zonder klik gebeurt:
+Op de tab Configuratie kies je vanaf welke score de beste release van een game vanzelf gaat: uit (standaard), of vanaf 10, 9, 8, 7, 6 of 5.
 
-- `off` (standaard): niets. Alles wacht in het paneel.
-- `sure`: zekere releases die de nieuwste update zijn, gaan vanzelf.
-- `likely`: ook waarschijnlijke releases gaan vanzelf.
+Bundels gaan alleen vanzelf met `AUTO_BUNDLES=true`. Per ronde gaan er hooguit `MAX_GRABS_PER_RUN` releases uit.
 
-Twijfelgevallen en tussenversies gaan nooit vanzelf. Bundels alleen met `AUTO_BUNDLES=true`. Per ronde gaan er hooguit `MAX_GRABS_PER_RUN` releases uit.
-
-Begin met `off` en kijk een paar dagen of de beoordelingen kloppen met hoe updates op jouw indexers heten.
+Begin met uit en kijk een paar dagen of de scores kloppen met hoe updates op jouw indexers heten. Vanaf 9 is voorzichtig; vanaf 7 neemt ook releases mee waarvan de versie is afgeleid.
 
 Een verstuurde release die na `GRAB_WAIT_HOURS` (48 uur) nog niet in je bibliotheek staat, geldt als mislukt. NSWHunter slaat hem daarna over en biedt de volgende kandidaat aan.
 
