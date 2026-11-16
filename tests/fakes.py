@@ -52,7 +52,11 @@ RELEASES = [
     ("EA SPORTS FC 25 In-Game Commentary Spanish DLC NSW-VENOM", "2024-09-20", 1300000000),
     ("EA SPORTS FC 25 In-Game Commentary Latin American Spanish DLC NSW-VENOM", "2024-09-20", 1500000000),
     # The same name as the Switch update, but posted in PC > Games (4050): not for the Switch.
-    ("Hades.Update.v131072-PCGROUP", "2021-03-02", 150000000, 4050),
+    ("Hades.Update.v131072-PCGROUP", "2021-03-02", 150000000, [4000, 4050]),
+    # The user's real case: Console also holds other consoles. One filed under PS4 (1180), one
+    # filed under Console/Other with the platform only in its name.
+    ("Hades.Update.v131072.incl.DLC-PSGROUP", "2021-03-03", 36400000000, [1000, 1180]),
+    ("Hades.v1.38.incl.DLC.PS4-CUSA34119", "2021-03-04", 36400000000, [1000, 1090]),
     # Real names from the user's Prowlarr: three language variants per update.
     ("NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS", "2026-09-30", 4290000000),
     ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS", "2026-09-30", 4190000000),
@@ -101,8 +105,7 @@ def make_fakes():
             text = name.lower().replace(".", " ").replace("_", " ")
             if all(w in text for w in words):
                 found.append({
-                    "categories": [{"id": 4000, "name": "PC"}, {"id": 4050, "name": "PC/Games"}] if category
-                    else [{"id": 1000, "name": "Console"}, {"id": 1090, "name": "Console/Other"}],
+                    "categories": [{"id": c} for c in (category[0] if category else [1000, 1090])],
                     "guid": f"guid-{n}", "title": name, "size": size, "indexer": "FakeIndexer",
                     "indexerId": 1, "publishDate": published + "T10:00:00Z", "protocol": "usenet",
                     "downloadUrl": f"http://elsewhere.invalid/1/download?apikey=secret&link={n}",

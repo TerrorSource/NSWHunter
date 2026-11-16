@@ -42,6 +42,16 @@ TOKEN_RE = re.compile(r"[0-9a-z]+")
 
 UPDATE_WORDS = {"update", "updates", "upd", "updt", "patch"}
 INCLUDE_WORDS = {"incl", "including", "includes"}
+# The Console category of an indexer holds every console. These say "not the Switch" ...
+OTHER_PLATFORMS = {
+    "ps2", "ps3", "ps4", "ps5", "psp", "psv", "psvita", "playstation", "xbox", "xbox360", "x360",
+    "xboxone", "xone", "xsx", "wii", "wiiu", "3ds", "n3ds", "nds", "gba", "ngc", "gamecube",
+}
+# ... as do the product codes of PlayStation releases (CUSA34119).
+OTHER_CODE_RE = re.compile(r"(?<![0-9a-z])(cusa|ppsa|pcse|pcsb|bles|blus|npub|npeb|npua)\d{5}(?![0-9a-z])")
+# ... and these say it is the Switch.
+SWITCH_WORDS = {"nsw", "switch", "nsp", "nsz", "xci", "xcz", "eshop", "nx"}
+UNMARKED = 0.85  # a title that names no platform at all
 CRACK_WORDS = {"crack", "cracked"}
 DLC_WORDS = {"dlc", "dlcs", "addon", "addons"}
 BUNDLE_WORDS = {"base", "incl", "including", "includes", "plus", "with", "and"}
@@ -330,6 +340,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     rest = text
     name_match = None
     extras = []
+    at = None
     if name_tokens:
         at = _find_name(toks, name_tokens)
         if at is not None:
@@ -368,6 +379,14 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     else:
         reasons.append("naam komt overeen")
 
+    # ---- which platform
+    # Words of the game's own name do not count ("Wii Sports" would otherwise never match).
+    outside = {t for t, _, _ in tokens(rest)} | ({t for t, _, _ in toks[:at]} if name_match == "exact" else set())
+    if not own_ids:
+        other = sorted(outside & OTHER_PLATFORMS) or [m.group() for m in [OTHER_CODE_RE.search(text)] if m]
+        if other:
+            return Rejection(f"voor een ander platform ({other[0].upper()}), niet voor de Switch")
+
     # ---- what it is
     has_update = bool(words & UPDATE_WORDS) or any(re.fullmatch(r"upd\d+", w) for w in words)
     has_dlc = bool(words & DLC_WORDS)
@@ -387,7 +406,8 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
         kind = "unknown"
 
     if want == "dlc":
-        return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons)
+        return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
+                             bool(outside & SWITCH_WORDS))
     if kind == "dlc":
         return Rejection("alleen DLC, geen update")
     if kind == "base":
@@ -480,6 +500,10 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
 
     # ---- the score
     crack = bool(words & CRACK_WORDS)
+    # A title ID and an internal version number (v131072) exist on the Switch only.
+    if not (own_ids or internal is not None and internal >= 65536 or outside & SWITCH_WORDS):
+        chance *= UNMARKED
+        reasons.append("het platform staat niet in de titel")
     if kind == "bundle":
         reasons.append("bundel: bevat ook het basisspel of DLC")
     if crack:
@@ -517,7 +541,7 @@ def _named(words, own):
     return (len(hits) / len(own), len(hits)) if own else (0.0, 0)
 
 
-def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
+def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, switch=True):
     """A missing DLC: only its own title ID makes it certain; a name is a guess."""
     dlc_id = (dlc or {}).get("id", "").upper()
     if own_ids:
@@ -549,6 +573,9 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
     else:
         chance = 0.3
         reasons.append("DLC van deze game, maar niet te zien welke")
+    if not switch:
+        chance *= UNMARKED
+        reasons.append("het platform staat niet in de titel")
     kind = "dlc" if kind == "dlc" else "bundle"
     return Candidate(mark("extras" if left else "exact", chance, kind), "dlc", name_match,
                      None, None, None, reasons)

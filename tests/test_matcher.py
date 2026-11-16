@@ -57,6 +57,10 @@ def test_candidates(title, score, kind, is_latest):
     "Alan Wake Remastered [0100AAAA00000800][v196608]",      # name fits, title ID of another game
     "Alan Wake Remastered [0100623017A59001][v0] DLC",       # DLC, not an update
     "Some Other Game Update v196608 NSW",
+    "Alan.Wake.Remastered.Update.v1.0.3.PS4-GRP",            # another console
+    "Alan Wake Remastered v1.03 incl DLC PS4-CUSA34119",
+    "Alan Wake Remastered Update v1.0.3 CUSA34119",          # a PlayStation product code
+    "Alan Wake Remastered Update v1.0.3 XBOX360",
     "Control Ultimate Edition Update v1.0.3",
 ])
 def test_rejections(title):
@@ -319,3 +323,29 @@ def test_same_release_whatever_the_separators():
     assert matcher.same_release("Diablo.II.Resurrected.Update.v1.0.35.0.incl.Offline.Crack.NSW-VENOM") == \
         matcher.same_release("Diablo II Resurrected Update v1.0.35.0 incl Offline Crack NSW-VENOM")
     assert matcher.same_release("Game Update v1.0.1 NSW-A") != matcher.same_release("Game Update v1.0.2 NSW-A")
+
+
+def test_only_the_switch():
+    """The user's real case: the Console category also holds PS4 releases of the same game."""
+    game = Game(id="0100B04011742000", name="Monster Hunter Rise", dlc=[
+        {"id": "0100B04011743001", "name": '"Morale Boost" gesture'}])
+    ps4 = evaluate(game, "Monster.Hunter.Rise.v16.01.incl.DLC.PS4-CUSA34119", want="dlc", dlc=game.dlc[0])
+    assert isinstance(ps4, Rejection) and "PS4" in ps4.reason
+    assert matcher.observe(game, "Monster.Hunter.Rise.Update.v16.01.PS4-GRP") is None
+    # A title ID is of the Switch whatever else the title says.
+    assert evaluate(game, "Monster Hunter Rise [0100B04011743001][v0] DLC PS4 port", want="dlc",
+                    dlc=game.dlc[0]).score == 10
+
+
+def test_platform_word_in_the_games_own_name_is_not_a_platform():
+    game = Game(id="0100AAAA0000A000", name="Wii Sports Club", local_version=0, latest_version=65536)
+    assert evaluate(game, "Wii Sports Club Update v65536 NSW-GRP").score == 9
+
+
+def test_title_without_any_platform_scores_lower():
+    marked = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", AFTER_LATEST)
+    bare = evaluate(alan(), "Alan Wake Remastered Update v1.0.3", AFTER_LATEST)
+    assert (marked.score, bare.score) == (7, 6)
+    assert "het platform staat niet in de titel" in bare.reasons
+    # An internal version number is a Switch thing: no doubt about the platform.
+    assert evaluate(alan(), "Alan Wake Remastered Update v196608").score == 9

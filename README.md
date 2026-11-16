@@ -41,7 +41,7 @@ Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
 |---|---|
 | Bibliotheek: adres en API key | Switch-library-manager-web > My account > API keys > Make a key, met het recht Read only. De key begint met `slm_` en wordt één keer getoond. Staat inloggen daar uit, dan is er geen key nodig. |
 | Prowlarr: adres en API key | Prowlarr > Settings > General > API Key |
-| Prowlarr: categorieën | `1000` is Console met alle subcategorieën. Alleen daarin wordt gezocht. |
+| Prowlarr: categorieën | `1000` is Console met alle subcategorieën. Alleen daarin wordt gezocht. Releases die de indexer onder een andere console heeft ingedeeld (PS4, Xbox, Wii, …) of die een ander platform in de naam hebben, vallen af: de Switch heeft geen eigen categorie. |
 | Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
 | Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
 | Automatisch zoeken | Elke 6, 12, 24 of 48 uur, zie [Zoeken en API-limieten](#zoeken-en-api-limieten) |

@@ -117,6 +117,9 @@ async def prowlarr_search(session, query):
         # Prowlarr already searches in the chosen categories only; this holds it to that.
         if categories and not any(in_categories(c) for c in categories):
             continue
+        # Console (1000) also covers PS4, Xbox and the rest: a release filed there is not ours.
+        if any(c in OTHER_CONSOLES and str(c) not in config.PROWLARR_CATEGORIES for c in categories):
+            continue
         releases.append({
             "guid": item["guid"],
             "title": item["title"],
@@ -129,6 +132,25 @@ async def prowlarr_search(session, query):
             "grabs": item.get("grabs") or 0,
         })
     return releases
+
+
+# The Newznab subcategories of Console that are another console than the Switch. The Switch
+# has no category of its own: its releases are filed under Console or Console/Other (1090).
+OTHER_CONSOLES = {
+    1010,  # NDS
+    1020,  # PSP
+    1030,  # Wii
+    1040,  # XBox
+    1050,  # XBox 360
+    1060,  # Wiiware
+    1070,  # XBox 360 DLC
+    1080,  # PS3
+    1110,  # 3DS
+    1120,  # PS Vita
+    1130,  # WiiU
+    1140,  # XBox One
+    1180,  # PS4
+}
 
 
 def in_categories(category):

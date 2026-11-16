@@ -2,6 +2,16 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.5.1] - 2026-11-16
+
+### Opgelost
+
+- Releases voor andere consoles stonden tussen de resultaten: de categorie Console (1000) bevat ook PS4, Xbox, Wii en de rest. Een release valt nu af als de indexer hem onder een andere console heeft ingedeeld (bijvoorbeeld 1180, PS4), of als er een ander platform in de naam staat (`PS4`, `XBOX360`, een PlayStation-productcode als `CUSA34119`).
+
+### Gewijzigd
+
+- Staat er in een titel geen enkel platform (geen `NSW`, `Switch`, `NSP`, title ID of intern versienummer), dan is de score iets lager en staat dat bij de reden.
+
 ## [1.5.0] - 2026-11-16
 
 ### Opgelost
