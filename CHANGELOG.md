@@ -2,6 +2,20 @@
 
 Alle wijzigingen per versie. Het versienummer staat in `app/version.py`; elke versie heeft hier een sectie en een release op GitHub.
 
+## [1.3.0] - 2026-11-16
+
+### Toegevoegd
+
+- **Versieladder:** een zichtbare versie uit een releasenaam (`v1.7.1`) wordt vertaald naar het updatenummer (update 11, `v720896`) op volgorde in plaats van alleen op datum. Je eigen versie uit de bibliotheek is het vaste punt (1.7.0 = update 10); een hogere versie is de volgende update. Zonder versie uit de bibliotheek bepaalt de plaatsingsdatum de onderste trede.
+- Is die vertaling volledig afgeleid van je eigen versie en is het de nieuwste update, dan is de release **Zeker**. Rust ze deels op datums, dan **Waarschijnlijk**.
+- NSWHunter onthoudt per game elke versie die in releasenamen voorkomt, ook van releases die afvallen: die zijn treden van de ladder. Het paneel toont de ladder per game ("v1.7.0 = update 10 · v1.7.1 = update 11").
+
+### Gewijzigd
+
+- De lijst met updates en datums komt nu eerst van de databron van switch-library-manager-web en anders van blawar/titledb. De eerste kent nieuwe updates eerder.
+- Een release valt niet meer af omdat hij vóór de datum van een update is geplaatst, tenzij dat meer dan 45 dagen scheelt: de datum van een nieuwe update staat vaak weken te laat in de lijsten (bij NARUTO X BORUTO drie weken).
+- Na het bijwerken worden alle games één keer opnieuw gezocht.
+
 ## [1.2.0] - 2026-11-16
 
 ### Opgelost

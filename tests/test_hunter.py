@@ -103,13 +103,14 @@ def test_manual_grab_reaches_nzbget_and_clears_when_library_is_updated():
 def test_auto_sure_sends_only_certain_latest_updates():
     async def test(hunter, fakes):
         await hunter.round()
-        assert [name for name, _, _ in fakes["sent"]] == [
-            "Alan Wake Remastered [0100623017A58800][v196608].nsz.nzb"]
+        assert sorted(name for name, _, _ in fakes["sent"]) == [
+            "Alan Wake Remastered [0100623017A58800][v196608].nsz.nzb",
+            "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS.nzb"]
         assert hunter.state["items"][ALAN]["grab"]["auto"] is True
         assert hunter.state["items"][HADES]["grab"] is None
-        # A second round does not send it again.
+        # A second round does not send them again.
         await hunter.round()
-        assert len(fakes["sent"]) == 1
+        assert len(fakes["sent"]) == 2
     run(test, AUTO_DOWNLOAD="sure")
 
 
@@ -124,8 +125,9 @@ def test_auto_likely_also_sends_display_versions_posted_after_the_latest_update(
     run(test, AUTO_DOWNLOAD="likely")
 
 
-def test_display_version_is_matched_to_the_update_by_its_posting_date():
-    """The user's real case: releases say v1.7.1, the library says update 11 (v720896)."""
+def test_display_version_is_matched_to_the_update_by_its_place():
+    """The user's real case: releases say v1.7.1, the library says update 11 (v720896), and the
+    databases date update 11 three weeks after the release was posted."""
     async def test(hunter, fakes):
         await hunter.round()
         found = hunter.state["items"][NARUTO]["candidates"]
@@ -134,9 +136,13 @@ def test_display_version_is_matched_to_the_update_by_its_posting_date():
             "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS",
             "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 MULTI4 NSW-SUXXORS",
             "NARUTO X BORUTO ULTIMATE NINJA STORM CONNECTIONS Update v1.7.1 MULTI6 NSW-SUXXORS"]
-        assert {(c["confidence"], c["is_latest"], c["estimated_version"]) for c in found} == {
-            ("likely", True, 720896)}
+        assert {(c["confidence"], c["is_latest"], c["estimated_version"], c["deduced"]) for c in found} == {
+            ("sure", True, 720896, True)}
         assert any("update 11" in reason for reason in found[0]["reasons"])
+        # Also the version that is not wanted was noticed: it is a step of the ladder.
+        assert hunter.state["seen"][NARUTO] == {"1.7.0": "2026-08-20", "1.7.1": "2026-09-30"}
+        shown = next(i for i in hunter.view()["items"] if i["key"] == NARUTO)
+        assert [(r["display"], r["update"]) for r in shown["ladder"]] == [("1.7.0", "update 10"), ("1.7.1", "update 11")]
     run(test)
 
 

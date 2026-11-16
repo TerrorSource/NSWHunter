@@ -200,7 +200,7 @@ function versions(item) {
 function candidate(item, c, first) {
   const version = [c.display_version ? "v" + c.display_version : null,
     c.internal_version != null ? upd(c.internal_version) + " (v" + c.internal_version + ")" : null,
-    c.estimated_version ? "waarschijnlijk " + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
+    c.estimated_version ? (c.deduced ? "" : "waarschijnlijk ") + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
   const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
   const safe = /^https?:\/\//.test(c.infoUrl || "");
   return h("div", {class: "cand" + (first ? " first" : "")},
@@ -225,7 +225,9 @@ function itemCard(item) {
       h("div", {class: "grow"},
         h("div", {class: "title"}, item.name),
         h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
-          item.last_search ? " · gezocht " + ago(item.last_search) : "")),
+          item.last_search ? " · gezocht " + ago(item.last_search) : ""),
+        item.ladder && item.ladder.length > 1 ? h("div", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
+          item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null),
       h("span", {class: "badge " + item.status}, label),
       h("button", {disabled: searching,
                    onclick: () => post("/api/search", {key: item.key}, "s" + item.key).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},

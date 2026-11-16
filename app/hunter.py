@@ -46,6 +46,8 @@ class Hunter:
             "items": {},  # key -> one missing update or DLC, with its candidates
             "searched": {},  # game id -> time of the last search by name
             "vermap": {},  # game id -> {"1.0.4": 262144}
+            "seen": {},  # game id -> {"1.7.1": "2026-09-30"}: display versions and their first post
+            "versions_source": "",
             "events": [],
             "library": {"fetched": None, "games": 0, "updates": 0, "dlc": 0},
             "services": {},  # name -> {"ok": bool, "text": str}
@@ -58,7 +60,12 @@ class Hunter:
     def load(self):
         try:
             with open(config.STATE_FILE) as f:
-                self.state.update(json.load(f))
+                saved = json.load(f)
+            self.state.update(saved)
+            if "seen" not in saved:
+                # State from before the version ladder: search every game once more, so the
+                # display versions in the release names are noticed.
+                self.state["searched"] = {}
         except (FileNotFoundError, ValueError):
             pass
         try:
@@ -94,23 +101,26 @@ class Hunter:
         return dates
 
     async def refresh_versions(self):
-        """The release date of every update, from titledb. Once a day is plenty."""
-        if not config.TITLEDB_VERSIONS_URL or time.time() - self.state["versions_fetched"] < 86400:
+        """Every update of every game with its date. Once a day is plenty."""
+        source = config.TITLEDB_VERSIONS_URL
+        fresh = time.time() - self.state["versions_fetched"] < 86400
+        if not source or (fresh and self.state.get("versions_source") == source):
             return
         try:
             text = await clients.titledb_versions(self.session)
             versions = json.loads(text)
             if not isinstance(versions, dict):
-                raise clients.ServiceError("titledb: onverwacht antwoord")
+                raise clients.ServiceError("Versielijst: onverwacht antwoord")
         except (clients.ServiceError, ValueError) as e:
             self.service("titledb", False, str(e))
             return
-        self.versions = versions
+        self.versions = {str(k).lower(): v for k, v in versions.items() if isinstance(v, dict)}
         os.makedirs(config.DATA_DIR, exist_ok=True)
         with open(config.VERSIONS_FILE, "w") as f:
-            f.write(text)
+            json.dump(self.versions, f)
         self.state["versions_fetched"] = int(time.time())
-        self.service("titledb", True, f"{len(versions)} games")
+        self.state["versions_source"] = source
+        self.service("titledb", True, f"{len(self.versions)} games")
 
     async def sync_library(self):
         """Read the export and keep one item per missing update (and per missing DLC)."""
@@ -192,12 +202,35 @@ class Hunter:
         dlc = {"id": item.get("dlc_id", ""), "name": item.get("dlc_name", "")}
         vermap = self.state["vermap"].setdefault(game.id, {})
         result = matcher.evaluate(game, release["title"], published_date(release), vermap,
-                                  want=item["type"], dlc=dlc)
+                                  want=item["type"], dlc=dlc, seen=self.seen(game.id))
         if not self.state["vermap"][game.id]:
             del self.state["vermap"][game.id]
         if isinstance(result, matcher.Rejection):
             return None
         return {**release, **result.to_dict()}
+
+    def seen(self, game_id):
+        """{display version: date first posted} of everything seen for a game."""
+        result = {}
+        for display, day in self.state["seen"].get(game_id, {}).items():
+            try:
+                result[display] = datetime.date.fromisoformat(day) if day else None
+            except ValueError:
+                result[display] = None
+        return result
+
+    def notice(self, game_id, release):
+        """Remember the display version of a release of this game. True if that changed what is
+        known: a new version, or an earlier first post."""
+        display = matcher.observe(self.games[game_id], release["title"])
+        if not display:
+            return False
+        seen = self.state["seen"].setdefault(game_id, {})
+        day = str(published_date(release) or "")
+        if display in seen and (not day or (seen[display] and seen[display] <= day)):
+            return False
+        seen[display] = day
+        return True
 
     def offer(self, item, release):
         """Add a release to an item's candidates if it is one. True if it is new."""
@@ -220,6 +253,23 @@ class Hunter:
             fresh = [self.judge(item, c) for c in item["candidates"]]
             item["candidates"] = sorted((c for c in fresh if c), key=best_first, reverse=True)
 
+    def ladder_text(self, game_id):
+        """For the panel: which display version is which update, from the library's own up."""
+        game = self.games.get(game_id)
+        seen = self.seen(game_id)
+        if game is None or not seen:
+            return []
+        steps = matcher.ladder(game, seen, self.state["vermap"].get(game_id))
+        rows = []
+        for display in sorted(steps, key=matcher.version_tuple):
+            step = steps[display]
+            if step.version is not None and step.version < game.local_version:
+                continue
+            name = matcher.update_name(step.version) if step.version else (
+                "basisspel" if step.version == 0 else "nieuwer dan " + matcher.update_name(game.latest_version))
+            rows.append({"display": display, "update": name, "how": step.how, "solid": step.solid})
+        return rows
+
     def process(self, releases, game_ids):
         """Hold releases against the items of these games. Returns how many new candidates."""
         by_game = {}
@@ -227,7 +277,8 @@ class Hunter:
             if item["game_id"] in game_ids:
                 by_game.setdefault(item["game_id"], []).append(item)
         names = {g: {t for t, _, _ in matcher.tokens(matcher.clean(self.games[g].name))} for g in by_game}
-        found = 0
+        relevant = []
+        learned = False
         for release in releases:
             text = matcher.clean(release["title"])
             words = {t for t, _, _ in matcher.tokens(text)}
@@ -236,8 +287,13 @@ class Hunter:
                 # Not one word of the name and no title ID: it cannot be this game.
                 if not has_id and not words & names[game_id]:
                     continue
-                for item in items:
-                    found += self.offer(item, release)
+                relevant.append((release, items))
+                learned = self.notice(game_id, release) or learned
+        # First every version is noticed, then the releases are judged: what one release is
+        # can depend on the others (see matcher.ladder).
+        found = sum(self.offer(item, release) for release, items in relevant for item in items)
+        if learned:
+            self.reevaluate()
         return found
 
     # ------------------------------------------------------------ searching
@@ -453,6 +509,8 @@ class Hunter:
             shown["candidates"] = [
                 {k: v for k, v in c.items() if k not in ("downloadUrl", "rank", "indexerId")}
                 for c in item["candidates"]]
+            if item["type"] == "update":
+                shown["ladder"] = self.ladder_text(item["game_id"])
             auto = self.automatic(item)
             shown["auto_guid"] = auto["guid"] if auto else None
             if item["ignored"]:

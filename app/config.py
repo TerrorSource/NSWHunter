@@ -78,9 +78,13 @@ SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # A sent release that has not arrived in the library after this long counts as failed.
 GRAB_WAIT_HOURS = number("GRAB_WAIT_HOURS", 48)
 
-# Release dates of every update, used when a release name has no internal version number.
+# Every update of every game with its date, used to tell which update a release is. Several
+# addresses, comma separated: the first that answers. The list of switch-library-manager-web
+# knows new updates sooner than blawar/titledb.
 TITLEDB_VERSIONS_URL = env(
-    "TITLEDB_VERSIONS_URL", "https://raw.githubusercontent.com/blawar/titledb/master/versions.json")
+    "TITLEDB_VERSIONS_URL",
+    "https://github.com/DeLFuS77/switch-library-manager-web/releases/download/data/versions.json,"
+    "https://raw.githubusercontent.com/blawar/titledb/master/versions.json")
 
 PANEL_USER = env("PANEL_USER", "admin")
 PANEL_PASSWORD = env("PANEL_PASSWORD")

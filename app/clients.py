@@ -54,13 +54,17 @@ async def library(session, cfg=config):
 
 
 async def titledb_versions(session):
-    """{title id: {version: "YYYY-MM-DD"}} for every Switch game."""
-    try:
-        async with session.get(config.TITLEDB_VERSIONS_URL, timeout=LONG) as r:
-            await _check(r, "titledb")
-            return await r.text()
-    except Exception as e:
-        raise _wrap("titledb", e) from e
+    """{title id: {version: "YYYY-MM-DD"}} for every Switch game, from the first address that
+    answers."""
+    error = ServiceError("Versielijst: geen adres ingesteld")
+    for address in [a.strip() for a in config.TITLEDB_VERSIONS_URL.split(",") if a.strip()]:
+        try:
+            async with session.get(address, timeout=LONG) as r:
+                await _check(r, "Versielijst")
+                return await r.text()
+        except Exception as e:  # noqa: BLE001
+            error = _wrap("Versielijst", e)
+    raise error
 
 
 # ---------------------------------------------------------------- prowlarr

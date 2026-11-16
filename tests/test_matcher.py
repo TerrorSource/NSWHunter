@@ -76,9 +76,74 @@ def test_posting_date_tells_which_update_a_display_version_is():
 
 
 def test_a_newer_display_version_is_not_rejected_on_dates_alone():
-    """titledb can list an update later than the scene posted it."""
+    """Higher than the library's own version, so at least the next update, whatever the dates say."""
     result = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.2_NSW-VENOM", day("2022-12-01"))
-    assert isinstance(result, Candidate) and result.confidence == UNCERTAIN and result.estimated_version is None
+    assert isinstance(result, Candidate)
+    assert (result.confidence, result.estimated_version, result.is_latest) == (UNCERTAIN, 131072, None)
+
+
+# The user's real case, with the dates as the databases have them: update 11 is listed on
+# 21 October, the release with v1.7.1 was posted on 30 September.
+NARUTO_SEEN = {"1.7.0": day("2026-08-20"), "1.7.1": day("2026-09-30")}
+V171 = "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS"
+V170 = "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.0 NSW-SUXXORS"
+
+
+def naruto(local=655360, display="1.7.0"):
+    return Game(
+        id="0100D2D0190A4000", name="NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS",
+        local_version=local, latest_version=720896, local_display=display,
+        dates={524288: day("2024-09-24"), 589824: day("2025-02-03"), 655360: day("2026-08-19"),
+               720896: day("2026-10-21")})
+
+
+def test_ladder_own_version_is_the_anchor():
+    """The library has 1.7.0 = update 10; v1.7.1 is higher, and only update 11 is newer."""
+    result = evaluate(naruto(), V171, day("2026-09-30"), seen=NARUTO_SEEN)
+    assert (result.confidence, result.estimated_version, result.is_latest, result.deduced) == (
+        SURE, 720896, True, True)
+    assert isinstance(evaluate(naruto(), V170, day("2026-08-20"), seen=NARUTO_SEEN), Rejection)
+    # The same without the other releases: the library's own pair is enough.
+    assert evaluate(naruto(), V171, day("2026-09-30")).confidence == SURE
+
+
+def test_ladder_without_the_librarys_display_version():
+    """No 1.7.0 from the library: v1.7.0 is update 10 by its date, v1.7.1 the next by its place."""
+    game = naruto(display=None)
+    steps = matcher.ladder(game, NARUTO_SEEN)
+    assert (steps["1.7.0"].version, steps["1.7.0"].how) == (655360, "date")
+    assert (steps["1.7.1"].version, steps["1.7.1"].how, steps["1.7.1"].solid) == (720896, "order", False)
+    result = evaluate(game, V171, day("2026-09-30"), seen=NARUTO_SEEN)
+    assert (result.confidence, result.estimated_version, result.is_latest) == (LIKELY, 720896, True)
+    assert isinstance(evaluate(game, V170, day("2026-08-20"), seen=NARUTO_SEEN), Rejection)
+
+
+def test_ladder_alone_and_dated_late_is_a_doubt_not_a_rejection():
+    """Only v1.7.1 seen, nothing from the library: by date it is update 10, but update 11 is
+    listed only three weeks later, so it can be that one."""
+    result = evaluate(naruto(display=None), V171, day("2026-09-30"))
+    assert isinstance(result, Candidate) and (result.confidence, result.is_latest) == (UNCERTAIN, None)
+
+
+def test_ladder_two_updates_behind():
+    """Library at update 9: v1.7.0 is the update in between, v1.7.1 the newest."""
+    game = naruto(local=589824, display="1.6.0")
+    between = evaluate(game, V170, day("2026-08-20"), seen=NARUTO_SEEN)
+    assert (between.estimated_version, between.is_latest) == (655360, False)
+    newest = evaluate(game, V171, day("2026-09-30"), seen=NARUTO_SEEN)
+    assert (newest.confidence, newest.estimated_version, newest.is_latest) == (LIKELY, 720896, True)
+
+
+def test_ladder_higher_than_everything_known():
+    seen = {**NARUTO_SEEN, "1.8.0": day("2026-11-10")}
+    result = evaluate(naruto(), V171.replace("1.7.1", "1.8.0"), day("2026-11-10"), seen=seen)
+    assert (result.is_latest, result.estimated_version) == (True, None)
+
+
+def test_observe_reads_the_version_only_from_releases_of_this_game():
+    assert matcher.observe(naruto(), V170) == "1.7.0"
+    assert matcher.observe(naruto(), "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS 2 Update v1.7.0") is None
+    assert matcher.observe(naruto(), "Some Other Game Update v1.7.0") is None
 
 
 def test_update_name():

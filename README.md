@@ -55,15 +55,25 @@ Dezelfde instellingen kunnen ook als omgevingsvariabele in de compose staan (`SL
 Releasenamen hebben geen vast format, dus NSWHunter zoekt drie dingen ergens in de titel:
 
 - **Welke game.** Een title ID (`0100623017A58800`) is doorslaggevend. Anders moet de gamenaam er als geheel in staan. Staat er een vervolgnummer achter (`Hades II`), dan is het een andere game. Staan er andere extra woorden bij, dan is het een twijfelgeval.
-- **Welke versie.** Een intern nummer (`v131072`) wordt direct vergeleken met `localUpdate` en `latestUpdate` uit de export. Een zichtbare versie (`v1.7.1`) is niet om te rekenen naar een intern nummer. Daarvoor gebruikt NSWHunter de releasedatums van titledb: een release bevat de update die op de dag van plaatsen de nieuwste was. Kwam update 11 uit op 29 september en is `Update v1.7.1` op 30 september geplaatst, dan is dat waarschijnlijk update 11. Staan beide versies ooit samen in één titel, dan onthoudt NSWHunter die vertaling.
+- **Welke versie.** Een intern nummer (`v131072`) wordt direct vergeleken met `localUpdate` en `latestUpdate` uit de export. Een zichtbare versie (`v1.7.1`) wordt vertaald met de versieladder, zie hieronder.
 - **Wat het is.** Alleen DLC, het basisspel (`v0`, `1.0.0`) en versies die je al hebt vallen af. Een bundel (basisspel + update) blijft kandidaat, maar staat lager.
+
+### De versieladder
+
+Geen enkele bron heeft van een update zowel het zichtbare als het interne versienummer. NSWHunter legt het verband zelf, per game:
+
+1. **Het vaste punt is je eigen versie.** De bibliotheek kent van jouw update beide nummers, bijvoorbeeld 1.7.0 = update 10.
+2. **Hogere versies zijn latere updates.** Staat er in releasenamen een `v1.7.1`, dan is dat de volgende update die bekend is: update 11.
+3. **Zonder vast punt bepaalt de datum de onderste trede.** Een versie die voor het eerst is geplaatst toen update 10 de nieuwste was, is update 10. Daarboven telt weer de volgorde.
+
+De volgorde is betrouwbaarder dan de datum: de lijsten met updates zetten een nieuwe update er vaak weken te laat in. Daarom onthoudt NSWHunter elke versie die in releasenamen voorkomt, ook van releases die afvallen. Het paneel toont de ladder per game: "v1.7.0 = update 10 · v1.7.1 = update 11".
 
 Dat geeft drie niveaus:
 
 | Niveau | Betekenis |
 |---|---|
-| Zeker | Juiste game (title ID of exacte naam) en een intern versienummer dat nieuwer is dan het jouwe |
-| Waarschijnlijk | Exacte naam, zichtbare versie, geplaatst na de release van de nieuwste update |
+| Zeker | Juiste game (title ID of exacte naam) en een intern versienummer dat nieuwer is dan het jouwe, of een zichtbare versie die via je eigen versie als nieuwste update is afgeleid |
+| Waarschijnlijk | Exacte naam en een zichtbare versie die de nieuwste update is, deels afgeleid van plaatsingsdatums |
 | Twijfel | Naam wijkt af, of niet te zien welke versie het is |
 
 ## Automatisch downloaden

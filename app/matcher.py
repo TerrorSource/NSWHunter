@@ -20,6 +20,8 @@ CONFIDENCE_RANK = {SURE: 2, LIKELY: 1, UNCERTAIN: 0}
 
 # A release may be posted a little before the official date in titledb (time zones, early dumps).
 DATE_SLACK = datetime.timedelta(days=3)
+# How late the date of a new update can be in the databases (seen: three weeks).
+LATE_SLACK = datetime.timedelta(days=45)
 
 TID_RE = re.compile(r"(?<![0-9a-z])(01[0-9a-f]{14})(?![0-9a-z])")
 # v65536, v.131072, "v 196608": five or more digits is always an internal version number.
@@ -68,7 +70,8 @@ class Candidate:
     is_latest: bool | None  # None: cannot tell from the title
     reasons: list
     rank: tuple = ()
-    estimated_version: int | None = None  # by posting date, when the title has no internal number
+    estimated_version: int | None = None  # what a display version was translated to (see ladder)
+    deduced: bool = False  # that translation rests on exact pairs, not on dates
 
     def to_dict(self):
         d = asdict(self)
@@ -180,12 +183,92 @@ def _versions(text, rest):
     return internal, display
 
 
-def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
+@dataclass
+class Step:
+    """What a display version is, on the ladder of one game's updates."""
+    version: int | None  # internal version; None = higher than every update that is known
+    how: str  # exact: seen together or the library's own pair; date: by posting date; order: by its place
+    solid: bool  # rests on exact pairs only, no dates
+    after: str | None = None  # the display version one step lower
+    floor: int | None = None  # ... and its internal version
+
+
+def _newest_on(game, day):
+    """The newest update that was out on a day, 0 if none was, None if that cannot be told."""
+    if day is None or not game.dates:
+        return None
+    out = [v for v, released in game.dates.items() if released - DATE_SLACK <= day]
+    return max(out) if out else 0
+
+
+def _before_any_newer(game, day):
+    """Posted so long before the next update came out that it cannot be that update. With a
+    wide margin: the databases often list a new update weeks after it was released."""
+    newer = [released for v, released in game.dates.items() if v > game.local_version]
+    return bool(newer) and day is not None and day < min(newer) - LATE_SLACK
+
+
+def ladder(game, seen, vermap=None):
+    """Translate display versions (1.7.1) to internal ones (720896 = update 11).
+
+    Nothing lists both numbers of an update. What is known: the internal versions of a game
+    and roughly when they came out; the pair the library holds (its own 1.7.0 is update 10);
+    and every display version seen in release names with the day it was first posted (`seen`).
+    Display versions and internal versions rise together, so walking up the display versions:
+    one that was posted when a newer update was out is that update (date), and one that is
+    higher than the previous but not newer by date is the next update (order). The dates of
+    the newest updates are often weeks late in the databases; the order does not need them.
+
+    Returns {display: Step}.
+    """
+    known = set(game.dates) | {v for v in (game.local_version, game.latest_version) if v}
+    if not game.dates and (game.latest_version - game.local_version) % 65536 == 0:
+        # No list of this game's updates: assume the usual one step per update in between.
+        known |= set(range(game.local_version + 65536, game.latest_version, 65536))
+    known = sorted(known)
+    exact = dict(vermap or {})
+    if game.local_display:
+        exact[game.local_display] = game.local_version
+    displays = []
+    for display in set(seen) | set(exact):
+        try:
+            displays.append((version_tuple(display), display))
+        except ValueError:
+            continue
+    steps, floor, after, floor_solid = {}, None, None, True
+    for _, display in sorted(displays):
+        if display in exact:
+            step = Step(exact[display], "exact", True, after, floor)
+        else:
+            by_date = _newest_on(game, seen.get(display))
+            if by_date is not None and (floor is None or by_date > floor):
+                step = Step(by_date, "date", False, after, floor)
+            elif floor is not None:
+                later = [v for v in known if v > floor]
+                step = Step(later[0] if later else None, "order", floor_solid, after, floor)
+            else:
+                continue
+        steps[display] = step
+        if step.version is not None:
+            floor, after, floor_solid = step.version, display, step.solid
+    return steps
+
+
+def observe(game, title):
+    """The display version in a release that is certainly of this game, else None. Feeds
+    ladder(): also releases that are not wanted (the version already owned) are steps."""
+    result = evaluate(game, title, only_version=True)
+    return result if isinstance(result, str) else None
+
+
+def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, seen=None,
+             only_version=False):
     """Judge one release for one game.
 
     published: datetime.date the release was posted, if known.
     vermap: {"1.0.4": 262144} learned earlier for this game, to translate display versions.
     want: "update", or "dlc" with `dlc` = {"id": ..., "name": ...} of the missing DLC.
+    seen: {"1.7.0": date first posted} of every display version seen for this game.
     """
     text = EXTENSION_RE.sub("", clean(title).strip())
     toks = tokens(text)
@@ -267,6 +350,9 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
 
     # ---- which version
     internal, display = _versions(text, rest)
+    clean_name = name_match == "tid" or (name_match == "exact" and not extras)
+    if only_version:
+        return display if clean_name and display else None
     if internal is not None and display and internal >= 65536:
         if vermap is not None:
             vermap[display] = internal  # both in one title: remember the translation
@@ -275,50 +361,67 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
         reasons.append(f"v{display} is eerder gezien als v{internal}")
 
     is_latest = None
-    estimated = None  # the internal version this release probably is, judged by its posting date
+    estimated = None  # the internal version this release is taken to be when its title has none
+    deduced = False  # ... and whether that rests on exact pairs only
+    local, latest = game.local_version, game.latest_version
     if internal is not None:
         if internal == 0:
             return Rejection("basisspel (v0), geen update")
-        if internal <= game.local_version:
+        if internal <= local:
             return Rejection(f"v{internal} is niet nieuwer dan je eigen versie")
-        is_latest = bool(game.latest_version) and internal >= game.latest_version
+        is_latest = bool(latest) and internal >= latest
         reasons.append("is de nieuwste versie" if is_latest else
-                       f"nieuwer dan je eigen versie, maar niet de nieuwste ({update_name(game.latest_version)})")
+                       f"nieuwer dan je eigen versie, maar niet de nieuwste ({update_name(latest)})")
+    elif display:
+        parsed = version_tuple(display)
+        if parsed <= (1, 0, 0) and kind != "update":
+            return Rejection("versie 1.0.0 is het basisspel")
+        newer_than_own = False
+        if game.local_display:
+            try:
+                if parsed <= version_tuple(game.local_display):
+                    return Rejection(f"v{display} is niet nieuwer dan je eigen versie")
+                newer_than_own = True
+            except ValueError:
+                pass
+        days = [d for d in ((seen or {}).get(display), published) if d]
+        first = min(days) if days else None
+        step = ladder(game, {**(seen or {}), display: first}, vermap).get(display)
+        if step and step.version is None:
+            is_latest, deduced = True, step.solid
+            reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), de nieuwste update die bekend is")
+        elif step and step.version > local:
+            estimated, deduced = step.version, step.solid
+            if step.how == "order":
+                # The next update at least; more only if a version was never posted.
+                is_latest = True if latest and estimated >= latest else None
+                reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), dus "
+                               + ("" if is_latest else "minstens ") + update_name(estimated))
+            else:
+                is_latest = bool(latest) and estimated >= latest
+                reasons.append(f"v{display} is voor het eerst geplaatst toen {update_name(estimated)} de nieuwste was")
+        elif step and not newer_than_own:
+            if step.version < local or _before_any_newer(game, first):
+                return Rejection(f"v{display} is {update_name(step.version)}: niet nieuwer dan je eigen versie")
+            reasons.append("geplaatst na je eigen update; kan die update zijn of een nieuwere")
+    elif kind == "unknown":
+        return Rejection("geen versie en geen 'update' in de titel")
     else:
-        proven_newer = False
-        if display:
-            parsed = version_tuple(display)
-            if parsed <= (1, 0, 0) and kind != "update":
-                return Rejection("versie 1.0.0 is het basisspel")
-            if game.local_display:
-                try:
-                    if parsed <= version_tuple(game.local_display):
-                        return Rejection(f"v{display} is niet nieuwer dan je eigen versie")
-                    proven_newer = True
-                    reasons.append(f"v{display} is nieuwer dan je eigen v{game.local_display}")
-                except ValueError:
-                    pass
-        elif kind == "unknown":
-            return Rejection("geen versie en geen 'update' in de titel")
-        # No internal number in the title. A display version (v1.7.1) cannot be translated to
-        # one, but the posting date can: the release holds the update that was newest that day.
-        if published and any(v > game.local_version for v in game.dates):
-            out = [v for v, day in game.dates.items() if day - DATE_SLACK <= published]
-            estimated = max(out) if out else 0
-            if estimated <= game.local_version:
-                if not proven_newer:
-                    return Rejection("geplaatst voordat er een nieuwere update bestond")
-                estimated = None  # the dates and the version disagree: trust the version
-            elif game.latest_version in game.dates:
-                is_latest = estimated >= game.latest_version
-                reasons.append(f"geplaatst toen {update_name(estimated)} de nieuwste was"
-                               + ("" if is_latest else f"; de nieuwste is nu {update_name(game.latest_version)}"))
-        if is_latest is None:
-            reasons.append("niet te zien of dit de nieuwste versie is")
+        # No version at all: only the posting date says something.
+        by_date = _newest_on(game, published)
+        if by_date is not None and by_date > local:
+            estimated = by_date
+            is_latest = bool(latest) and estimated >= latest
+            reasons.append(f"geplaatst toen {update_name(estimated)} de nieuwste was")
+        elif by_date is not None and (by_date < local or _before_any_newer(game, published)):
+            return Rejection("geplaatst voordat er een nieuwere update bestond")
+    if is_latest is None:
+        reasons.append("niet te zien of dit de nieuwste versie is")
+    elif internal is None and estimated and not is_latest:
+        reasons.append(f"de nieuwste is {update_name(latest)}")
 
     # ---- how sure
-    clean_name = name_match == "tid" or (name_match == "exact" and not extras)
-    if clean_name and internal is not None:
+    if clean_name and (internal is not None or (deduced and is_latest)):
         confidence = SURE
     elif clean_name and display and is_latest:
         confidence = LIKELY
@@ -332,11 +435,12 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None):
         CONFIDENCE_RANK[confidence],
         {True: 2, None: 1, False: 0}[is_latest],
         kind_rank,
-        internal or 0,
+        internal or estimated or 0,
         version_tuple(display) if display else (),
         published.toordinal() if published else 0,
     )
-    return Candidate(confidence, kind, name_match, internal, display, is_latest, reasons, rank, estimated)
+    return Candidate(confidence, kind, name_match, internal, display, is_latest, reasons, rank,
+                     estimated, deduced)
 
 
 def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons):
