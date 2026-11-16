@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NSWHunter</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%23e4002b'/><path d='M4 8.5l2.5 2.5L12 5.5' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #f5f5f3; --card: #ffffff; --line: #e2e1dc; --text: #1d1d1b; --soft: #6b6a65;
+    --accent: #e4002b; --accent-text: #ffffff;
+    --good: #1a7f4b; --good-bg: #e3f4ea; --warn: #9a6200; --warn-bg: #fbf0d6;
+    --info: #1f5fbf; --info-bg: #e4edfb; --bad: #b3261e; --bad-bg: #fbe6e4; --mute-bg: #ecebe7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --card: #1f1f1d; --line: #33322f; --text: #ecebe6; --soft: #9c9a93;
+      --accent: #ff4d5e; --accent-text: #1a0508;
+      --good: #6fd39b; --good-bg: #173524; --warn: #f0c36a; --warn-bg: #3a2e12;
+      --info: #8ab4f8; --info-bg: #1a2a45; --bad: #f2928b; --bad-bg: #40201d; --mute-bg: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+  h1 small { font-size: 12px; font-weight: 400; color: var(--soft); margin-left: 6px; }
+  .grow { flex: 1; }
+  .line { color: var(--soft); font-size: 13px; }
+  button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button:hover { border-color: var(--soft); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.quiet { border-color: transparent; background: none; color: var(--soft); padding: 6px 8px; }
+  button.quiet:hover { color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .chip, .badge { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px;
+                  background: var(--mute-bg); color: var(--soft); white-space: nowrap; }
+  .chip.ok, .badge.sure { background: var(--good-bg); color: var(--good); }
+  .chip.bad, .badge.error { background: var(--bad-bg); color: var(--bad); }
+  .badge.likely, .badge.sent { background: var(--info-bg); color: var(--info); }
+  .badge.uncertain, .badge.review { background: var(--warn-bg); color: var(--warn); }
+  .notice { background: var(--bad-bg); color: var(--bad); border-radius: 9px; padding: 10px 14px; margin-bottom: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  .stat b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--soft); font-size: 13px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; align-items: center; }
+  .tabs button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .tabs input { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
+                background: var(--card); color: var(--text); min-width: 160px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
+  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; }
+  .head > .grow { min-width: 230px; }
+  .title { font-weight: 600; }
+  .sub { color: var(--soft); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .cands { border-top: 1px solid var(--line); }
+  .cand { display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; padding: 9px 14px; align-items: start; }
+  .cand + .cand { border-top: 1px solid var(--line); }
+  .cand.first { background: color-mix(in srgb, var(--good-bg) 35%, transparent); }
+  .cand .name { overflow-wrap: anywhere; }
+  .cand a { color: inherit; }
+  .cand .acts { display: flex; gap: 4px; }
+  .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .empty { color: var(--soft); text-align: center; padding: 40px 0; }
+  details { margin-top: 24px; }
+  summary { cursor: pointer; color: var(--soft); }
+  .log { font-size: 13px; margin-top: 8px; }
+  .log div { padding: 3px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  .log time { color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 9px 16px; border-radius: 9px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 640px) { .cand { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>NSWHunter <small id="version"></small></h1>
+    <span class="line grow" id="statusline">Laden…</span>
+    <button class="primary" id="sync">Nu synchroniseren</button>
+  </header>
+  <div class="chips" id="chips"></div>
+  <div id="notice"></div>
+  <div class="stats" id="stats"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="list"></div>
+  <details>
+    <summary>Logboek</summary>
+    <div class="log" id="log"></div>
+  </details>
+</main>
+<div id="toast"></div>
+<script>
+// Release names come from indexers: everything is put on the page as text, never as HTML.
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) el.append(c);
+  return el;
+}
+const $ = id => document.getElementById(id);
+let state = null, tab = "review", filter = "", busy = new Set();
+
+const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
+const CONFIDENCE = {sure: "Zeker", likely: "Waarschijnlijk", uncertain: "Twijfel"};
+const KIND = {update: "update", bundle: "bundel", dlc: "DLC", unknown: ""};
+const SERVICES = {slm: "Bibliotheek", prowlarr: "Prowlarr", downloader: "Downloadclient", titledb: "titledb", config: "Instellingen"};
+const AUTO = {off: "uit: alles wacht op je keuze", sure: "aan voor zekere releases", likely: "aan voor zekere en waarschijnlijke releases"};
+
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 4000);
+}
+function ago(ts) {
+  if (!ts) return "nooit";
+  const s = Math.max(0, state.now - ts);
+  if (s < 90) return "zojuist";
+  if (s < 5400) return Math.round(s / 60) + " min geleden";
+  if (s < 129600) return Math.round(s / 3600) + " uur geleden";
+  return Math.round(s / 86400) + " dagen geleden";
+}
+function size(bytes) {
+  if (!bytes) return "";
+  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + " GB" : Math.round(bytes / 1048576) + " MB";
+}
+function day(iso) { return iso ? iso.slice(0, 10) : ""; }
+function inTab(item, name) {
+  if (name === "all") return true;
+  if (name === "open") return item.status === "new" || item.status === "none";
+  return item.status === name;
+}
+
+async function post(path, body, key) {
+  busy.add(key); render();
+  try {
+    const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
+    if (!data.ok) toast(data.error || "Mislukt");
+    return data;
+  } catch (e) {
+    toast("Geen verbinding met NSWHunter");
+    return {ok: false};
+  } finally {
+    busy.delete(key); await load();
+  }
+}
+
+function versions(item) {
+  if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
+  const local = "v" + item.local_version + (item.local_display ? " (" + item.local_display + ")" : "");
+  return local + " → v" + item.latest_version + (item.latest_date ? " van " + item.latest_date : "");
+}
+
+function candidate(item, c, first) {
+  const version = [c.internal_version != null ? "v" + c.internal_version : null, c.display_version ? "v" + c.display_version : null]
+    .filter(Boolean).join(" / ");
+  const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
+  const safe = /^https?:\/\//.test(c.infoUrl || "");
+  return h("div", {class: "cand" + (first ? " first" : "")},
+    h("div", {}, h("span", {class: "badge " + c.confidence}, CONFIDENCE[c.confidence]),
+      c.guid === item.auto_guid ? h("div", {class: "sub"}, "gaat automatisch") : null),
+    h("div", {},
+      h("div", {class: "name"}, safe ? h("a", {href: c.infoUrl, target: "_blank", rel: "noopener noreferrer"}, c.title) : c.title),
+      h("div", {class: "sub"}, meta),
+      h("div", {class: "sub"}, c.reasons.join("; "))),
+    h("div", {class: "acts"},
+      h("button", {class: first ? "primary" : "", disabled: busy.has(c.guid),
+                   onclick: () => post("/api/grab", {key: item.key, guid: c.guid}, c.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))}, "Download"),
+      h("button", {class: "quiet", title: "Deze release nooit meer tonen",
+                   onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Verwerp")));
+}
+
+function itemCard(item) {
+  const label = {review: "te beoordelen", sent: "verstuurd", none: "niets gevonden", new: "nog niet gezocht", ignored: "genegeerd"}[item.status];
+  const searching = busy.has("s" + item.key);
+  const card = h("div", {class: "item"},
+    h("div", {class: "head"},
+      h("div", {class: "grow"},
+        h("div", {class: "title"}, item.name),
+        h("div", {class: "sub"}, h("span", {class: "mono"}, item.game_id), " · ", versions(item),
+          item.last_search ? " · gezocht " + ago(item.last_search) : "")),
+      h("span", {class: "badge " + item.status}, label),
+      h("button", {disabled: searching || state.status.running,
+                   onclick: () => post("/api/search", {key: item.key}, "s" + item.key).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
+        searching ? "Zoeken…" : "Zoek nu"),
+      h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
+        item.ignored ? "Niet meer negeren" : "Negeer")));
+  if (item.grab) {
+    card.append(h("div", {class: "sent-row"},
+      h("span", {class: "badge sent"}, item.grab.auto ? "automatisch verstuurd" : "verstuurd"),
+      h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
+      h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is en kies opnieuw",
+                   onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Opnieuw kiezen")));
+  } else if (item.candidates.length && !item.ignored) {
+    card.append(h("div", {class: "cands"}, item.candidates.map((c, i) => candidate(item, c, i === 0))));
+  }
+  return card;
+}
+
+function render() {
+  if (!state) return;
+  $("version").textContent = "v" + state.version;
+  const st = state.status;
+  $("statusline").textContent = st.running ? "Bezig: " + (st.phase || "…")
+    : "Laatste ronde " + ago(st.last_run) + (st.next_run ? " · volgende over " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
+  $("sync").disabled = st.running;
+
+  $("chips").replaceChildren(...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
+    h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
+    h("span", {class: "chip"}, "Automatisch downloaden " + AUTO[state.settings.auto]),
+    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")));
+  const errors = Object.entries(state.services).filter(([, s]) => !s.ok);
+  $("notice").replaceChildren(...errors.map(([, s]) => h("div", {class: "notice"}, s.text)));
+
+  const count = name => state.items.filter(i => inTab(i, name)).length;
+  $("stats").replaceChildren(
+    h("div", {class: "stat"}, h("b", {}, state.library.games), h("span", {}, "games in je bibliotheek")),
+    h("div", {class: "stat"}, h("b", {}, state.library.updates), h("span", {}, "updates ontbreken")),
+    state.settings.dlc ? h("div", {class: "stat"}, h("b", {}, state.library.dlc), h("span", {}, "DLC ontbreken")) : null,
+    h("div", {class: "stat"}, h("b", {}, count("review")), h("span", {}, "wachten op je keuze")),
+    h("div", {class: "stat"}, h("b", {}, count("sent")), h("span", {}, "verstuurd, nog niet binnen")));
+
+  $("tabs").replaceChildren(...TABS.map(([name, text]) =>
+    h("button", {class: tab === name ? "on" : "", onclick: () => { tab = name; render(); }}, text + " (" + count(name) + ")")),
+    h("span", {class: "grow"}),
+    h("input", {type: "search", placeholder: "Filter op naam", value: filter, id: "filter",
+                oninput: e => { filter = e.target.value; renderList(); }}));
+  renderList();
+
+  $("log").replaceChildren(...state.events.map(e =>
+    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString("nl-NL", {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text))));
+}
+
+function renderList() {
+  const needle = filter.trim().toLowerCase();
+  const items = state.items.filter(i => inTab(i, tab) && (!needle || i.name.toLowerCase().includes(needle) || i.game_id.toLowerCase().includes(needle)));
+  const empty = {
+    review: "Niets te beoordelen. Gevonden releases verschijnen hier.",
+    sent: "Er is niets onderweg.", open: "Voor alle ontbrekende updates is iets gevonden.",
+    ignored: "Je negeert geen games.", all: "Je bibliotheek mist geen updates. Of de eerste ronde loopt nog."}[tab];
+  $("list").replaceChildren(...(items.length ? items.map(itemCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/state");
+    if (!r.ok) throw new Error();
+    state = await r.json();
+    // Keep typing in the filter box: only rebuild around it when it has no focus.
+    if (document.activeElement && document.activeElement.id === "filter") renderList(); else render();
+  } catch (e) {
+    $("statusline").textContent = "Geen verbinding met NSWHunter";
+  }
+}
+$("sync").addEventListener("click", async () => {
+  await fetch("/api/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+  toast("Ronde gestart"); setTimeout(load, 1500);
+});
+load();
+setInterval(load, 8000);
+</script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+aiohttp==3.14.5
+apprise==1.13.1

@@ -1,0 +1,16 @@
+# Lokaal ontwikkelen: bouwt het image uit deze map, instellingen uit .env (cp .env.example .env).
+#   docker compose -f docker-compose.dev.yml up -d --build
+services:
+  nswhunter:
+    container_name: nswhunter-dev
+    build: .
+    image: nswhunter:dev
+    restart: unless-stopped
+    network_mode: bridge
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - 127.0.0.1:3033:3033
+    volumes:
+      - ./data:/data

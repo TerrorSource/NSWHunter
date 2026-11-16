@@ -1,0 +1,15 @@
+data/
+.env
+.git
+.github/
+.venv/
+tests/
+commit-git.sh
+docker-compose*.yml
+requirements-dev.txt
+pytest.ini
+*.md
+!README.md
+!CHANGELOG.md
+**/__pycache__
+**/.DS_Store

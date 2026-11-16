@@ -1,0 +1,8 @@
+# State and API keys: never commit these.
+/data/
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
