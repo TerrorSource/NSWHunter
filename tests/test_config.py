@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import shutil
 import stat
 import zipfile
@@ -448,6 +449,15 @@ def test_api_covers_and_tasks():
         data = await (await client.get("/api/tasks")).json()
         assert [t["text"] for t in data["tasks"]][:3] == ["Check Health", "Library Sync", "Rss Sync"]
         assert data["runs"] == []  # nothing ran yet
+        # The Updates page: the changelog per version, newest first, without the marks of Markdown.
+        data = await (await client.get("/api/updates")).json()
+        newest = data["versions"][0]
+        assert newest["version"] == data["version"] == main.__version__ and re.fullmatch(r"\d{4}-\d\d-\d\d", newest["date"])
+        assert {c["kind"] for c in newest["changes"]} <= {"Added", "Changed", "Fixed", "Removed", "Security", ""}
+        assert all(c["text"] and "**" not in c["text"] and "`" not in c["text"] for v in data["versions"] for c in v["changes"])
+        assert data["versions"][-1]["version"] == "1.0.0"
+        state = await (await client.get("/api/state")).json()
+        assert 0 <= state["now"] - state["started"] < 600
         # Not set up: a task cannot be run, and says so instead of failing.
         r = await client.post("/api/task", json={"name": "rss"})
         assert r.status == 502 and "not set up" in (await r.json())["error"]

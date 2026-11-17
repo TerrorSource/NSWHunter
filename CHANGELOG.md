@@ -2,6 +2,22 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.4.0] - 2026-11-17
+
+### Added
+
+- **System > Updates**, as in Sonarr and Radarr: what changed in every version up to the one that runs, with the installed version marked. It reads the list of changes that comes with the image; nothing is fetched from elsewhere.
+- **Details** in the History and on the Blocklist: the small "i" at the end of a row opens a window with the release, the game, the indexer, the protocol, the score, the download client and the message.
+- **Remove Selected** in the Queue and on the Blocklist, with a tick box per row and one for all of them; the Blocklist has **Clear** too, which asks before it takes everything off.
+- **Uptime** on the Status page.
+
+### Changed
+
+- **The other lists follow Sonarr and Radarr too**, as Games and Wanted already did. The Queue, the History and the Events start a row with a small drawing for its state instead of a label; the Queue shows the protocol as a coloured label and the progress as a bar.
+- **Long lists come a page at a time** (50 rows), with the buttons to leaf through them under the table next to the total number of records. That is the History, the Events, the Queue and the Blocklist.
+- **System > Status**: Health and Services show a drawing per line, and About is a list with the names on the left.
+- **System > Backup** starts a row with a drawing for scheduled or made by hand.
+
 ## [3.3.0] - 2026-11-17
 
 ### Changed

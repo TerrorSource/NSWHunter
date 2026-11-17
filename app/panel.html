@@ -81,7 +81,7 @@
   .toolbar .tool:focus-visible { outline: 2px solid var(--accent-on-dark); outline-offset: -2px; }
   .toolbar .sep { width: 1px; margin: 12px 8px; background: rgba(255, 255, 255, .25); }
   .toolbar .right { margin-left: auto; display: flex; align-items: stretch; gap: 2px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
-  .toolbar .right input { min-width: 0; flex: 0 1 220px; align-self: center; margin-right: 8px; font: inherit; font-size: 13px; padding: 5px 8px;
+  .toolbar .right input { min-width: 0; width: 220px; flex: 0 1 auto; align-self: center; margin-right: 8px; font: inherit; font-size: 13px; padding: 5px 8px;
                           border-radius: 4px; border: 1px solid var(--edge); background: var(--input); color: var(--text); }
   /* A button with a short list under it: Sort and Filter in the toolbar, the account in the bar on top. */
   .menuwrap { position: relative; display: flex; }
@@ -179,10 +179,28 @@
   .ibtn:focus-visible { outline: 2px solid var(--link); }
   .table .acts { flex-wrap: nowrap; gap: 2px; }
   .total { padding: 14px 8px; text-align: right; color: var(--soft); font-size: 13px; }
+  /* Under a long list: the buttons to leaf through it in the middle, the number of records on the right. */
+  .pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+  .pager .pages { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+  .pager .pages span { padding: 0 10px; }
+  /* A drawing that says what a row is. */
+  .mark { display: inline-flex; vertical-align: middle; color: var(--soft); }
+  .mark.good { color: var(--good); } .mark.bad { color: var(--bad); } .mark.warn { color: #d98200; } .mark.info { color: var(--link); }
+  .label.usenet { background: #17a2c6; color: #fff; } .label.torrent { background: #1f8f3a; color: #fff; }
+  /* The lines of a details window and of About: the name on the left, in bold. */
+  .facts { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px 20px; margin: 0; }
+  .facts dt { text-align: right; font-weight: 700; color: var(--head); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  /* Updates: a version, and under it what changed. */
+  .update { margin-bottom: 26px; }
+  .uhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .uversion { font-size: 21px; color: var(--head); }
+  .change { display: flex; gap: 10px; align-items: flex-start; padding: 4px 0; }
+  .change .label { flex: none; min-width: 74px; margin-top: 1px; }
   .table td.wrap { overflow-wrap: anywhere; min-width: 220px; }
   .table.plain td:first-child { width: 220px; color: var(--head); font-weight: 700; }
   .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
-  progress { width: 110px; height: 14px; accent-color: #5d9cec; vertical-align: middle; }
+  progress { width: 110px; height: 10px; accent-color: #7a43b6; vertical-align: middle; }
   /* The small picture of a game in front of its row; a grey square while there is none. */
   .cover { display: block; width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: var(--mute-bg); }
   .table td.pic { width: 56px; padding-top: 4px; padding-bottom: 4px; }
@@ -260,6 +278,7 @@
     .cand { grid-template-columns: 1fr; }
     .cand.th { display: none; }
     .acts { justify-content: flex-start; }
+    .facts { grid-template-columns: 1fr; gap: 0; } .facts dt { text-align: left; margin-top: 10px; }
     .field, .dialog .field { grid-template-columns: 1fr; } .field > label, .field > .name { text-align: left; padding-top: 0; } .field .help { grid-column: 1; }
     .pcard { width: 100%; }
     .mbody { padding: 16px; } .mhead, .mfoot { padding: 12px 16px; }
@@ -287,11 +306,7 @@
         <div class="total" id="gamecount"></div>
       </section>
       <section id="page-queue" hidden><div id="queue"></div></section>
-      <section id="page-history" hidden>
-        <div class="scroll" id="history"></div>
-        <div class="empty" id="historymore"></div>
-        <div class="total" id="historycount"></div>
-      </section>
+      <section id="page-history" hidden><div id="history"></div></section>
       <section id="page-blocklist" hidden><div id="blocklist"></div></section>
       <section id="page-wanted" hidden><div id="list"></div></section>
       <section id="page-settings" hidden>
@@ -301,11 +316,8 @@
       <section id="page-status" hidden><div id="status"></div></section>
       <section id="page-tasks" hidden><div id="tasks"></div></section>
       <section id="page-backup" hidden><div id="backups"></div></section>
-      <section id="page-log" hidden>
-        <div class="scroll"><table class="table log"><tbody id="log"></tbody></table></div>
-        <div class="empty" id="logmore"></div>
-        <div class="total" id="logcount"></div>
-      </section>
+      <section id="page-updates" hidden><div id="updates"></div></section>
+      <section id="page-log" hidden><div id="log"></div></section>
       <section id="page-logfiles" hidden><div id="logfiles"></div></section>
     </div>
   </div>
@@ -366,6 +378,11 @@ const ICONS = {
   bookmark: "M6 3h12v18l-6-4-6 4z",
   check: "M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z",
   trash: "M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7z",
+  info: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 5h2v2h-2zm0 4h2v6h-2z",
+  first: "M6 6h2v12H6zm12 0v12l-8.5-6z",
+  prev: "M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z",
+  next: "M8.6 16.6 10 18l6-6-6-6-1.4 1.4L13.2 12z",
+  last: "M16 6h2v12h-2zM6 6l8.5 6L6 18z",
   restore: "M12 4a8 8 0 1 1-7.7 10h2.1A6 6 0 1 0 8 7.5L10.5 10H4V3.5l2.6 2.6A8 8 0 0 1 12 4zm-1 4h2v4.2l3 1.8-1 1.7-4-2.4z",
   remove: "M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z",
 };
@@ -402,7 +419,7 @@ const MENU = [
     {id: "general", text: "General", form: true, about: "Security, logging and backups"},
     {id: "ui", text: "UI", form: true, about: "Theme, date and time options"}]},
   {id: "system", text: "System", icon: "laptop", first: "status", children: [
-    {id: "status", text: "Status"}, {id: "tasks", text: "Tasks"}, {id: "backup", text: "Backup"}, {id: "log", text: "Events"},
+    {id: "status", text: "Status"}, {id: "tasks", text: "Tasks"}, {id: "backup", text: "Backup"}, {id: "updates", text: "Updates"}, {id: "log", text: "Events"},
     {id: "logfiles", text: "Log Files"}]},
 ];
 const PAGES = {settings: {id: "settings", text: "Settings", group: "settings"}};
@@ -419,9 +436,9 @@ let settings = null, clearing = new Set(), opened = false, confirming = false, e
 let selected = new Set();  // the games that are ticked on a Wanted page
 let only = remembered("wantedfilter", "all"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
 let auth = null;  // "login" or "change" while the login screen is up
-let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logShown = 100, logFiles = null;
+let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logFiles = null;
 let library = null, gameNeedle = "", gameOnly = remembered("games", "all"), gameSort = "name", gameDown = false, gameShown = 200;
-let past = null, pastOnly = "all", pastShown = 100;
+let past = null, pastOnly = "all";
 let ui = {theme: "auto", date: "browser", time: "browser", relative: true};
 const BULK = 9;  // "Download all" takes the best release of a game from this score on
 
@@ -601,10 +618,11 @@ function ready() {
   return state.items.filter(i => waiting(i) && (i.candidates[0].score || 0) >= BULK && i.candidates[0].kind !== "bundle");
 }
 
-async function post(path, body, key) {
+// `work`: something of more than one request, done in the place of the one to `path`.
+async function post(path, body, key, work) {
   busy.add(key); render();
   try {
-    const {data} = await request(path, body);
+    const data = work ? {ok: await work()} : (await request(path, body)).data;
     if (!data.ok) toast(data.error || "Failed");
     return data;
   } catch (e) {
@@ -872,32 +890,98 @@ function renderGames() {
 }
 
 // ---------------------------------------------------------------- Activity
+// A column is its name ("Size#" for one with numbers) or the cell of the head itself.
 function table(columns, rows, none) {
   if (!rows.length) return h("div", {class: "alert"}, none);
   return h("div", {class: "scroll"}, h("table", {class: "table"},
-    h("thead", {}, h("tr", {}, columns.map(c => h("th", {class: c.endsWith("#") ? "num" : ""}, c.replace("#", ""))))),
+    h("thead", {}, h("tr", {}, columns.map(c => c instanceof Node ? c : h("th", {class: c.endsWith("#") ? "num" : ""}, c.replace("#", ""))))),
     h("tbody", {}, rows)));
 }
+// The tick boxes of a list: one per row, and one in the head for all of them.
+const ticked = {queue: new Set(), blocklist: new Set()};
+function tickAll(set, ids) {
+  for (const id of [...set]) if (!ids.includes(id)) set.delete(id);  // no longer in the list
+  return h("th", {class: "check"}, h("input", {type: "checkbox", checked: ids.length > 0 && ids.every(id => set.has(id)), "aria-label": "Select all",
+    onchange: e => { ids.forEach(id => e.target.checked ? set.add(id) : set.delete(id)); render(); }}));
+}
+function tick(set, id, name) {
+  return h("td", {class: "check"}, h("input", {type: "checkbox", checked: set.has(id), "aria-label": "Select " + name,
+    onchange: e => { e.target.checked ? set.add(id) : set.delete(id); render(); }}));
+}
+// A drawing that says what a row is, with the words for it as a tooltip.
+function mark(name, text, cls) {
+  return h("span", {class: "mark " + (cls || ""), title: text, role: "img", "aria-label": text}, icon(name));
+}
+// Long lists come a page at a time, with the buttons to leaf through them under the table.
+const PER_PAGE = 50, leaf = {};
+function paged(key, rows) {
+  const last = Math.max(0, Math.ceil(rows.length / PER_PAGE) - 1);
+  leaf[key] = Math.min(leaf[key] || 0, last);
+  return rows.slice(leaf[key] * PER_PAGE, (leaf[key] + 1) * PER_PAGE);
+}
+function pager(key, total, again) {
+  const last = Math.max(0, Math.ceil(total / PER_PAGE) - 1), now = leaf[key] || 0;
+  const go = n => { leaf[key] = n; again(); };
+  return h("div", {class: "pager"}, h("span", {}),
+    last ? h("div", {class: "pages"},
+      ibtn("first", "First page", () => go(0), now === 0), ibtn("prev", "Previous page", () => go(now - 1), now === 0),
+      h("span", {}, (now + 1) + " / " + (last + 1)),
+      ibtn("next", "Next page", () => go(now + 1), now === last), ibtn("last", "Last page", () => go(last), now === last)) : h("span", {}),
+    h("div", {class: "total"}, "Total records: " + total));
+}
+// The lines of a details window: a name on the left, what it is on the right.
+function facts(pairs) {
+  return h("dl", {class: "facts"}, pairs.filter(([, value]) => value !== null && value !== undefined && value !== "" && value !== false)
+    .map(([name, value]) => [h("dt", {}, name), h("dd", {}, value === true ? "Yes" : value)]));
+}
+function details(title, pairs) {
+  editing = null; viewing = null;
+  put($("modal"), dialog(title, facts(pairs), [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Close")]));
+  $("modal").hidden = false;
+}
+const protocol = name => h("span", {class: "label " + (name === "torrent" ? "torrent" : "usenet")}, name || "usenet");
+// What the toolbar does with the ticked rows of a list, one after the other.
+async function eachTicked(set, rows, done, work) {
+  const chosen = rows.filter(r => set.has(r.id));
+  busy.add("bulk"); render();
+  let count = 0;
+  for (const row of chosen) {
+    try { if (await work(row)) count++; } catch (e) { if (e === LOGIN) break; }
+  }
+  busy.delete("bulk"); set.clear();
+  await load();
+  toast(plural(count, "release") + " " + done);
+}
 // Queue: what was handed to a download client and is not in the library yet.
+const QUEUE_MARK = {sent: ["clock", ""], downloading: ["download", "info"], done: ["check", "good"], stuck: ["warn", "warn"]};
+const queueRows = () => queued().sort((a, b) => b.grab.at - a.grab.at).map(item => ({id: item.key, item}));
+const unsend = row => request("/api/unsend", {key: row.item.key}).then(r => r.data.ok === true);
 function renderQueue() {
-  const rows = queued().sort((a, b) => b.grab.at - a.grab.at).map(item => {
-    const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent;
-    return h("tr", {},
-      h("td", {class: "tight"}, h("span", {class: "label " + (g.state === "stuck" ? "review" : "sent")}, SENT[g.state] || SENT.sent)),
-      h("td", {}, h("button", {class: "linkish", onclick: () => openGame(item.game_id)}, item.name),
+  const all = queueRows(), set = ticked.queue;
+  const head = tickAll(set, all.map(r => r.id));
+  const rows = paged("queue", all).map(({id, item}) => {
+    const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent, [drawing, cls] = QUEUE_MARK[g.state] || QUEUE_MARK.sent;
+    return h("tr", {class: set.has(id) ? "picked" : ""},
+      tick(set, id, g.title),
+      h("td", {class: "tight"}, mark(drawing, sentText(g), cls)),
+      h("td", {}, h("button", {class: "linkish", title: "Show the releases that were found", onclick: () => openGame(item.game_id)}, item.name),
         h("div", {class: "sub"}, whatOf(item))),
       h("td", {class: "wrap"}, g.title),
-      h("td", {}, g.protocol || "usenet"),
+      h("td", {class: "tight"}, protocol(g.protocol)),
       h("td", {}, g.client_name || "–"), h("td", {}, g.indexer || "–"),
       h("td", {class: "tight"}, ago(g.at) + (g.auto ? " · automatic" : "")),
-      h("td", {class: "tight"}, percent !== null && percent !== undefined ? [h("progress", {max: "100", value: String(percent)}), " " + percent + "%"] : "–"),
+      h("td", {class: "tight"}, percent !== null && percent !== undefined
+        ? h("progress", {max: "100", value: String(percent), title: percent + "%", "aria-label": percent + "%"}) : "–"),
       h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the queue: forget that this was sent, so it awaits your choice again. The download client keeps the download.",
         () => post("/api/unsend", {key: item.key}, "u" + item.key), busy.has("u" + item.key)))));
   });
-  put($("queue"), table(["Status", "Game", "Release", "Protocol", "Download Client", "Indexer", "Added", "Progress", ""], rows, "Queue is empty"));
+  put($("queue"), table([head, "", "Game", "Release", "Protocol", "Download Client", "Indexer", "Added", "Progress", ""], rows, "Queue is empty"),
+    all.length ? pager("queue", all.length, render) : null);
 }
 // History: what was sent, what arrived and what failed.
 const PAST = {all: "All", grabbed: "Grabbed", arrived: "Arrived", failed: "Failed"};
+const PAST_MARK = {grabbed: ["download", "Grabbed: sent to the download client", "info"], arrived: ["check", "Arrived in your library", "good"],
+                   failed: ["warn", "Download failed", "bad"]};
 async function loadHistory() {
   try {
     const {data} = await request("/api/history");
@@ -910,43 +994,62 @@ async function loadHistory() {
 function renderHistory() {
   if (!past) return;
   const rows = past.filter(e => pastOnly === "all" || e.kind === pastOnly);
-  $("historycount").textContent = "Total records: " + rows.length + (rows.length === past.length ? "" : " of " + past.length);
-  const cls = {grabbed: "sent", arrived: "ok", failed: "error"};
-  put($("history"), table(["Event", "Game", "Release", "Details", "Date#"], rows.slice(0, pastShown).map(e => h("tr", {},
-    h("td", {class: "tight"}, h("span", {class: "label " + cls[e.kind]}, PAST[e.kind] || e.kind)),
-    h("td", {}, e.name, h("div", {class: "sub"}, e.what)),
-    h("td", {class: "wrap"}, e.title),
-    h("td", {}, [e.kind === "grabbed" ? [e.auto ? "automatic" : "", e.score ? "score " + e.score : "", e.protocol, e.indexer].filter(Boolean).join(" · ") : e.note,
-      e.client ? h("div", {class: "sub"}, e.client) : null]),
-    h("td", {class: "num"}, moment(e.at)))), "No history yet. What is sent, arrives or fails from now on is listed here."));
-  put($("historymore"), rows.length > pastShown
-    ? h("button", {onclick: () => { pastShown += 200; renderHistory(); }}, "Show " + Math.min(200, rows.length - pastShown) + " more") : null);
+  put($("history"), table(["", "Game", "Release", "Download Client", "Date#", ""], paged("history", rows).map(e => {
+    const [drawing, text, cls] = PAST_MARK[e.kind] || ["clock", e.kind, ""];
+    return h("tr", {},
+      h("td", {class: "tight"}, mark(drawing, text, cls)),
+      h("td", {}, e.name, h("div", {class: "sub"}, e.what)),
+      h("td", {class: "wrap"}, e.title),
+      h("td", {}, e.client || "–"),
+      h("td", {class: "num"}, moment(e.at)),
+      h("td", {}, h("div", {class: "acts"}, ibtn("info", "Details", () => details(PAST[e.kind] || e.kind, [
+        ["Release", e.title], ["Game", e.name], ["For", e.what], ["Indexer", e.indexer], ["Protocol", e.protocol],
+        ["Score", e.score ? e.score + " of 10" : null], ["Automatic", e.kind === "grabbed" ? (e.auto ? "Yes" : "No, chosen by hand") : null],
+        ["Download Client", e.client], ["Message", e.note], ["Date", moment(e.at)]])))));
+  }), past.length ? "Nothing in the history matches the filter." : "No history yet. What is sent, arrives or fails from now on is listed here."),
+    rows.length ? pager("history", rows.length, renderHistory) : null);
 }
 // Blocklist: releases that are never offered or sent again: rejected by you, or failed.
-function renderBlocklist() {
+function blockRows() {
   const rows = [];
   for (const item of state.items) {
-    const game = () => [item.name, h("div", {class: "sub"}, whatOf(item))];  // made anew for every row it is in
-    for (const f of item.failed || []) rows.push({at: f.failed_at, row: h("tr", {},
-      h("td", {}, game()), h("td", {class: "wrap"}, f.title), h("td", {}, f.indexer || "–"),
-      h("td", {}, h("span", {class: "label error"}, "Download failed"), h("div", {class: "sub"}, f.why)), h("td", {class: "num"}, moment(f.failed_at)),
-      h("td", {}, h("div", {class: "acts"},
-        ibtn("refresh", "Try again: send this release to the download client once more", () => grab(item, f), busy.has(f.guid)),
-        ibtn("remove", "Dismiss: take it off the failed downloads. It stays on the blocklist as a rejected release.",
-             () => post("/api/dismiss", {key: item.key, guid: f.guid}, "d" + f.guid)))))});
-    for (const r of item.turned_down || []) rows.push({at: r.at || 0, row: h("tr", {},
-      h("td", {}, game()), h("td", {class: "wrap"}, r.title), h("td", {}, r.indexer || "–"),
-      h("td", {}, h("span", {class: "label"}, "Rejected")), h("td", {class: "num"}, r.at ? moment(r.at) : "–"),
-      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the blocklist: it is offered again",
-        () => post("/api/restore", {key: item.key, guid: r.guid}, r.guid), busy.has(r.guid)))))});
-    if (item.unnamed) rows.push({at: -1, row: h("tr", {},
-      h("td", {}, game()), h("td", {class: "wrap"}, plural(item.unnamed, "release") + " rejected before their names were kept"), h("td", {}, "–"),
-      h("td", {}, h("span", {class: "label"}, "Rejected")), h("td", {class: "num"}, "–"),
-      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove them all from the blocklist: they return at the next search",
-        () => post("/api/restore", {key: item.key}, "r" + item.key), busy.has("r" + item.key)))))});
+    for (const f of item.failed || []) rows.push({id: item.key + "|f|" + f.guid, item, kind: "failed", release: f, at: f.failed_at});
+    for (const r of item.turned_down || []) rows.push({id: item.key + "|r|" + r.guid, item, kind: "rejected", release: r, at: r.at || 0});
+    if (item.unnamed) rows.push({id: item.key + "|u", item, kind: "unnamed", at: -1,
+      release: {title: plural(item.unnamed, "release") + " rejected before their names were kept"}});
   }
-  rows.sort((a, b) => b.at - a.at);
-  put($("blocklist"), table(["Game", "Release", "Indexer", "Reason", "Date#", ""], rows.map(r => r.row), "No history blocklist"));
+  return rows.sort((a, b) => b.at - a.at);
+}
+// Off the blocklist altogether: a failed download is first taken off the failed ones, which leaves it rejected.
+async function unblock(row) {
+  const key = row.item.key, guid = row.release.guid;
+  if (row.kind === "failed" && !(await request("/api/dismiss", {key, guid})).data.ok) return false;
+  return (await request("/api/restore", row.kind === "unnamed" ? {key} : {key, guid})).data.ok === true;
+}
+function renderBlocklist() {
+  const all = blockRows(), set = ticked.blocklist;
+  const head = tickAll(set, all.map(r => r.id));
+  const rows = paged("blocklist", all).map(row => {
+    const {id, item, kind, release} = row, failed = kind === "failed";
+    return h("tr", {class: set.has(id) ? "picked" : ""},
+      tick(set, id, release.title),
+      h("td", {}, item.name, h("div", {class: "sub"}, whatOf(item))),
+      h("td", {class: "wrap"}, release.title),
+      h("td", {}, release.indexer || "–"),
+      h("td", {class: "tight"}, h("span", {class: "label wide " + (failed ? "danger" : "mute"), title: failed ? release.why : "You rejected this release"},
+        failed ? "Download Failed" : "Rejected")),
+      h("td", {class: "num"}, row.at > 0 ? moment(row.at) : "–"),
+      h("td", {}, h("div", {class: "acts"},
+        ibtn("info", "Details", () => details(failed ? "Download Failed" : "Rejected", [
+          ["Release", release.title], ["Game", item.name], ["For", whatOf(item)], ["Indexer", release.indexer],
+          ["Protocol", release.protocol], ["Size", size(release.size)], ["Message", failed ? release.why : "You rejected this release."],
+          ["Date", row.at > 0 ? moment(row.at) : null]])),
+        failed ? ibtn("refresh", "Try again: send this release to the download client once more", () => grab(item, release), busy.has(release.guid)) : null,
+        ibtn("remove", kind === "unnamed" ? "Remove them all from the blocklist: they return at the next search" : "Remove from the blocklist: it is offered again",
+             () => post("/api/restore", {}, id, () => unblock(row)), busy.has(id)))));
+  });
+  put($("blocklist"), table([head, "Game", "Release", "Indexer", "Reason", "Date#", ""], rows, "No history blocklist"),
+    all.length ? pager("blocklist", all.length, render) : null);
 }
 
 // ---------------------------------------------------------------- System
@@ -963,33 +1066,40 @@ function health() {
 function renderStatus() {
   const st = state.status, s = state.services, issues = health();
   const row = (name, service) => h("tr", {},
+    h("td", {class: "tight"}, service ? mark(service.ok ? "check" : "warn", service.ok ? "OK" : "Problem", service.ok ? "good" : "bad") : mark("clock", "Not asked yet", "")),
     h("td", {}, name),
-    h("td", {class: "tight"}, service ? h("span", {class: "label " + (service.ok ? "ok" : "error")}, service.ok ? "OK" : "Problem") : h("span", {class: "label"}, "Not asked yet")),
-    h("td", {}, service ? service.text : ""),
+    h("td", {class: "wrap"}, service ? service.text : "Not asked yet"),
     h("td", {class: "num"}, service ? ago(service.at) : ""));
   const listed = kind => (state.providers[kind] || []).map(e =>
-    e.enabled ? row(e.name, s[kind + ":" + e.id]) : h("tr", {}, h("td", {}, e.name), h("td", {}, h("span", {class: "label"}, "Disabled")), h("td", {}), h("td", {})));
+    e.enabled ? row(e.name, s[kind + ":" + e.id]) : h("tr", {}, h("td", {class: "tight"}, mark("remove", "Disabled", "")), h("td", {}, e.name), h("td", {}, "Disabled"), h("td", {})));
   put($("status"),
     h("h2", {}, "Health"),
     issues.length ? h("table", {class: "table"}, h("tbody", {}, issues.map(([level, text]) => h("tr", {},
-        h("td", {class: "tight"}, h("span", {class: "label " + (level === "error" ? "error" : "review")}, level === "error" ? "Error" : "Warning")), h("td", {}, text)))))
+        h("td", {class: "tight"}, mark("warn", level === "error" ? "Error" : "Warning", level === "error" ? "bad" : "warn")), h("td", {class: "wrap"}, text)))))
       : h("div", {class: "line"}, "No issues with your configuration"),
     h("h2", {}, "Services"),
     h("div", {class: "scroll"}, h("table", {class: "table"},
-      h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "State"), h("th", {}, "Message"), h("th", {class: "num"}, "Last Check"))),
+      h("thead", {}, h("tr", {}, h("th", {}), h("th", {}, "Name"), h("th", {}, "Message"), h("th", {class: "num"}, "Last Check"))),
       h("tbody", {},
         row("Library (Switch-library-manager-web)", s.slm), row("Version list", s.titledb),
         listed("INDEXERS"), listed("DOWNLOAD_CLIENTS"), listed("CONNECTIONS"),
         s.backup ? row("Backups", s.backup) : null))),
     h("h2", {}, "About"),
-    h("table", {class: "table plain"}, h("tbody", {},
-      h("tr", {}, h("td", {}, "Version"), h("td", {}, state.version)),
-      h("tr", {}, h("td", {}, "Last Round"), h("td", {}, st.running ? "busy: " + (st.phase || "…") : ago(st.last_run))),
-      h("tr", {}, h("td", {}, "Rounds"), h("td", {}, "every " + Math.round(state.settings.interval) + " minutes; every game is searched by name every " + state.settings.search_hours + " hours")),
-      h("tr", {}, h("td", {}, "Automatic Download"), h("td", {}, state.settings.auto ? "from score " + state.settings.auto : "off: everything awaits your choice")),
-      h("tr", {}, h("td", {}, "Library"), h("td", {}, plural(state.library.games, "game") + ", " + plural(state.library.updates, "update") + " missing"
-        + (state.settings.dlc ? ", " + state.library.dlc + " DLC missing" : ""))),
-      h("tr", {}, h("td", {}, "User"), h("td", {}, state.user)))));
+    facts([
+      ["Version", state.version],
+      ["Uptime", state.started ? lasting(state.now - state.started) : null],
+      ["Last Round", st.running ? "busy: " + (st.phase || "…") : ago(st.last_run)],
+      ["Rounds", "every " + Math.round(state.settings.interval) + " minutes; every game is searched by name every " + state.settings.search_hours + " hours"],
+      ["Automatic Download", state.settings.auto ? "from score " + state.settings.auto : "off: everything awaits your choice"],
+      ["Library", plural(state.library.games, "game") + ", " + plural(state.library.updates, "update") + " missing"
+        + (state.settings.dlc ? ", " + state.library.dlc + " DLC missing" : "")],
+      ["Data Folder", "/data"],
+      ["User", state.user]]));
+}
+// How long something has been going on: "3d 4h 12m".
+function lasting(seconds) {
+  const d = Math.floor(seconds / 86400), hours = Math.floor(seconds / 3600) % 24, m = Math.floor(seconds / 60) % 60;
+  return (d ? d + "d " : "") + (d || hours ? hours + "h " : "") + m + "m";
 }
 // Events: what NSWHunter did, newest first.
 const LEVELS = {all: "All", warn: "Warnings and errors", error: "Errors"};
@@ -1002,19 +1112,20 @@ async function loadLog() {
     if (e !== LOGIN) toast("Could not load the events");
   }
 }
+const LOG_MARK = {error: ["warn", "Error", "bad"], warn: ["warn", "Warning", "warn"], grab: ["download", "Sent to a download client", "good"]};
 function renderLog() {
   if (!events) return;
   const word = logNeedle.trim().toLowerCase();
   const rows = events.filter(e => (logLevel === "all" || e.level === "error" || (logLevel === "warn" && e.level === "warn"))
     && (!word || e.text.toLowerCase().includes(word)));
-  $("logcount").textContent = "Total records: " + rows.length + (rows.length === events.length ? "" : " of " + events.length);
-  const names = {error: "Error", warn: "Warn", grab: "Info", info: "Info"};
-  put($("log"), rows.length ? rows.slice(0, logShown).map(e => h("tr", {class: e.level},
-      h("td", {class: "tight"}, h("span", {class: "label " + (e.level === "error" ? "error" : e.level === "warn" ? "review" : "")}, names[e.level] || "Info")),
-      h("td", {class: "tight"}, moment(e.at)), h("td", {class: "wrap"}, e.text)))
-    : h("tr", {}, h("td", {class: "line"}, events.length ? "No event matches." : "Nothing happened yet.")));
-  put($("logmore"), rows.length > logShown
-    ? h("button", {onclick: () => { logShown += 200; renderLog(); }}, "Show " + Math.min(200, rows.length - logShown) + " more") : null);
+  put($("log"), rows.length ? [h("div", {class: "scroll"}, h("table", {class: "table log"},
+      h("thead", {}, h("tr", {}, h("th", {}), h("th", {}, "Time"), h("th", {}, "Message"))),
+      h("tbody", {}, paged("log", rows).map(e => {
+        const [drawing, text, cls] = LOG_MARK[e.level] || ["info", "Info", "info"];
+        return h("tr", {class: e.level}, h("td", {class: "tight"}, mark(drawing, text, cls)),
+          h("td", {class: "tight"}, moment(e.at)), h("td", {class: "wrap"}, e.text));
+      })))), pager("log", rows.length, renderLog)]
+    : h("div", {class: "alert"}, events.length ? "No event matches." : "Nothing happened yet."));
 }
 async function loadLogFiles() {
   try {
@@ -1116,15 +1227,35 @@ function renderBackups() {
   if (!backups) return;
   put($("backups"),
     h("div", {class: "alert"}, "Backups are located in: " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state. Interval and retention are under Settings > General."),
-    table(["Name", "Type", "Size#", "Time#", ""], backups.backups.map(b => h("tr", {},
+    table(["", "Name", "Size#", "Time#", ""], backups.backups.map(b => h("tr", {},
+      h("td", {class: "tight"}, b.kind === "manual" ? mark("person", "Manual: made with Backup Now", "") : mark("clock", "Scheduled", "")),
       h("td", {class: "mono"}, h("a", {href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name, title: "Download this backup"}, b.name)),
-      h("td", {}, b.kind === "manual" ? "Manual" : "Scheduled"),
       h("td", {class: "num"}, kb(b.size)), h("td", {class: "num"}, ago(b.at)),
       h("td", {}, h("div", {class: "acts"},
         ibtn("restore", "Restore: replace the settings and the state by this backup",
              () => ask("Replace the settings and the state by " + b.name + "?", "Restore", () => backupDo("restore", b.name)), busy.has("b" + b.name)),
         ibtn("trash", "Delete this backup", () => backupDo("delete", b.name), busy.has("b" + b.name)))))),
       "No backups are available"));
+}
+// Updates: what changed in every version up to the one that runs, as the changelog has it.
+let updates = null;
+const CHANGE = {Added: ["New", "ok"], Changed: ["Changed", "info"], Fixed: ["Fixed", "warn"], Removed: ["Removed", "mute"], Security: ["Security", "danger"]};
+async function loadUpdates() {
+  if (updates) return;
+  try {
+    updates = (await request("/api/updates")).data.versions || [];
+    if (page === "updates") renderUpdates();
+  } catch (e) { /* the page stays as it was */ }
+}
+function renderUpdates() {
+  if (!updates || !state) return;
+  put($("updates"), updates.length ? updates.map(u => h("div", {class: "update"},
+      h("div", {class: "uhead"}, h("span", {class: "uversion"}, u.version), h("span", {class: "sub"}, "—"), h("span", {class: "sub"}, day(u.date) || u.date),
+        u.version === state.version ? h("span", {class: "label wide ok"}, "Currently Installed") : null),
+      u.changes.map(c => h("div", {class: "change"},
+        c.kind ? h("span", {class: "label wide " + (CHANGE[c.kind] || ["", "mute"])[1]}, (CHANGE[c.kind] || [c.kind])[0]) : null,
+        h("span", {}, c.text)))))
+    : h("div", {class: "alert"}, "The list of changes is not in this build."));
 }
 
 // ---------------------------------------------------------------- Settings: the pages with a form
@@ -1440,7 +1571,7 @@ async function deleteEditor() {
     if (e !== LOGIN) toast("No connection to NSWHunter");
   }
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape" && (editing || viewing)) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("modal").hidden) closeModal(); });
 $("modal").addEventListener("mousedown", e => { if (e.target === $("modal")) closeModal(); });
 
 // ---------------------------------------------------------------- the frame
@@ -1543,11 +1674,22 @@ function renderToolbar() {
     if (page === "wanted") right.push(menuTool("filter", "filter", "Filter", Object.entries(WANTED).map(([key, v]) =>
       [v.text, key === only, () => { only = key; remember("wantedfilter", key); render(); }])));
   } else if (page === "queue") {
-    left.push(tool("refresh", "Refresh", load));
+    const picked = ticked.queue.size, working = busy.has("bulk");
+    left.push(tool("refresh", "Refresh", load), h("span", {class: "sep"}),
+      tool("remove", working ? "Busy…" : "Remove Selected", () => eachTicked(ticked.queue, queueRows(), "removed from the queue", unsend),
+        {disabled: !picked || working, title: "Forget that the ticked releases were sent, so they await your choice again. The download client keeps the downloads."}));
+  } else if (page === "blocklist") {
+    const all = blockRows(), picked = ticked.blocklist.size, working = busy.has("bulk");
+    left.push(
+      tool("remove", working ? "Busy…" : "Remove Selected", () => eachTicked(ticked.blocklist, blockRows(), "removed from the blocklist", unblock),
+        {disabled: !picked || working, title: "Take the ticked releases off the blocklist: they are offered again"}),
+      tool("trash", "Clear", () => ask("Take all " + plural(all.length, "release") + " off the blocklist? They are offered again, and can be sent again by themselves.", "Clear",
+        () => { all.forEach(r => ticked.blocklist.add(r.id)); eachTicked(ticked.blocklist, all, "removed from the blocklist", unblock); }),
+        {disabled: !all.length || working, title: "Take everything off the blocklist"}));
   } else if (page === "history") {
     left.push(tool("refresh", "Refresh", loadHistory));
     right.push(menuTool("pastfilter", "filter", "Filter", Object.entries(PAST).map(([key, text]) =>
-      [text, key === pastOnly, () => { pastOnly = key; pastShown = 100; renderHistory(); render(); }])));
+      [text, key === pastOnly, () => { pastOnly = key; leaf.history = 0; renderHistory(); render(); }])));
   } else if (here.form) {
     left.push(tool("save", busy.has("save") ? "Saving…" : dirty ? "Save Changes" : "No Changes", saveForm, {disabled: !dirty || busy.has("save")}));
   } else if (here.kind || page === "status") {
@@ -1558,9 +1700,9 @@ function renderToolbar() {
     left.push(tool("refresh", "Refresh", loadLog));
     right.push(
       h("input", {type: "search", placeholder: "Search the events", value: logNeedle, id: "logfilter", "aria-label": "Search the events",
-                  oninput: e => { logNeedle = e.target.value; logShown = 100; renderLog(); }}),
+                  oninput: e => { logNeedle = e.target.value; leaf.log = 0; renderLog(); }}),
       menuTool("logfilter", "filter", "Filter", Object.entries(LEVELS).map(([key, text]) =>
-        [text, key === logLevel, () => { logLevel = key; logShown = 100; remember("loglevel", key); renderLog(); render(); }])));
+        [text, key === logLevel, () => { logLevel = key; leaf.log = 0; remember("loglevel", key); renderLog(); render(); }])));
   } else if (page === "logfiles") {
     left.push(tool("refresh", "Refresh", loadLogFiles));
   }
@@ -1573,11 +1715,12 @@ function show(name) {
   try { history.replaceState(null, "", "#" + name); } catch (e) { /* the address stays as it is */ }
   const here = PAGES[name];
   $("side").classList.remove("open"); $("menu").setAttribute("aria-expanded", "false");
-  for (const id of ["games", "queue", "history", "blocklist", "wanted", "settings", "status", "tasks", "backup", "log", "logfiles"]) $("page-" + id).hidden = id !== SECTION(name);
+  for (const id of ["games", "queue", "history", "blocklist", "wanted", "settings", "status", "tasks", "backup", "updates", "log", "logfiles"]) $("page-" + id).hidden = id !== SECTION(name);
   if (here.group === "settings") { put($("config")); put($("extra")); dirty = false; if (name === "settings") renderOverview(); else openSettings(); }
   if (name === "log") { renderLog(); loadLog(); }
   if (name === "logfiles") { renderLogFiles(); loadLogFiles(); }
   if (name === "backup") { renderBackups(); loadBackups(); }
+  if (name === "updates") { renderUpdates(); loadUpdates(); }
   if (name === "tasks") { renderTasks(); loadTasks(); }
   if (name === "history") { renderHistory(); loadHistory(); }
   if (name === "games") { renderGames(); loadGames(); }

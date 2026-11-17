@@ -23,6 +23,7 @@ from version import __version__
 warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+STARTED = int(time.time())  # for the uptime on the Status page
 background = set()
 
 with open(os.path.join(HERE, "panel.html"), encoding="utf-8") as f:
@@ -188,10 +189,45 @@ async def api_state(request):
     view = request.app["hunter"].view()
     view["version"] = __version__
     view["now"] = int(time.time())
+    view["started"] = STARTED
     view["user"] = config.PANEL_USER
     view["ui"] = {"theme": config.UI_THEME, "date": config.UI_DATE_FORMAT, "time": config.UI_TIME_FORMAT,
                   "relative": config.UI_RELATIVE_DATES}
     return web.json_response(view)
+
+
+def changes():
+    """The changelog as the Updates page shows it: per version its date and what changed.
+    The file sits next to the code in the image, and a folder higher in the repository."""
+    for path in (os.path.join(HERE, "CHANGELOG.md"), os.path.join(HERE, os.pardir, "CHANGELOG.md")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            break
+        except OSError:
+            continue
+    else:
+        return []
+    versions, kind = [], ""
+    for line in lines:
+        head = re.match(r"## \[(.+?)\] - (\S+)", line)
+        if head:
+            versions.append({"version": head[1], "date": head[2], "changes": []})
+            kind = ""
+        elif line.startswith("### "):
+            kind = line[4:].strip()
+        elif versions and line.strip():
+            # A line that is not a point of a list is a note about the version as a whole.
+            text = re.sub(r"\*\*|`", "", line[2:] if line.startswith("- ") else line).strip()
+            versions[-1]["changes"].append({"kind": kind if line.startswith("- ") else "", "text": text})
+    return versions
+
+
+CHANGES = changes()
+
+
+async def api_updates(request):
+    return web.json_response({"ok": True, "version": __version__, "versions": CHANGES})
 
 
 async def api_history(request):
@@ -529,6 +565,7 @@ def make_app():
         web.get("/api/tasks", api_tasks),
         web.post("/api/task", api_task),
         web.get("/api/history", api_history),
+        web.get("/api/updates", api_updates),
         web.post("/api/search-all", api_search_all),
         web.post("/api/test-all", api_test_all),
         web.get("/api/logfiles", api_logfiles),
