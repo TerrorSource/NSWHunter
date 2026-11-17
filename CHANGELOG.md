@@ -2,6 +2,38 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [2.0.0] - 2026-11-17
+
+Version 2 because the panel now always has a login, and the login of the browser (the pop-up) is gone. After the update the panel asks you to log in, or to make a login if you had no password. Take the new [docker-compose.yml](docker-compose.yml) over in your stack to get the hardened container.
+
+### Security
+
+- **Login screen in the page.** The pop-up of the browser is gone. A login lasts 30 days in a cookie that scripts cannot read and other sites cannot send; **Log out** ends it. A new password logs every other browser out.
+- **A login is required.** Without a password the panel shows nothing and asks to make a login: a username and a password of at least 8 characters. The password can be replaced, no longer removed.
+- **Wrong logins have to wait:** after 5 from one address 30 seconds, twice as long after every next one, up to 15 minutes.
+- **A saved key is only sent to its own address.** Before, the Test button used the address in the form with the key that was saved, so anyone who could reach the panel could have a key sent to an address of their own. Now a changed address needs its key or password typed again, for testing and for saving.
+- **Host names.** The panel answers to an IP address and to names that only exist inside a home network. Other names are refused, unless they are filled in under **Host names** (`PANEL_HOSTS`). This stops a website from reaching the panel through your browser (DNS rebinding). Requests that come from another site are refused as well.
+- **Headers** on every answer: the page runs only its own script, loads nothing from elsewhere and cannot be shown inside another page.
+- **Limits** on the size of every answer of a service.
+- **The container** in `docker-compose.yml` runs with a read-only file system, without privileges and with only the four capabilities the start needs.
+
+### Added
+
+- **A round that breaks is said out loud:** a red bar on every page, one message in Telegram, and the health check of the container turns red.
+- **One game that cannot be handled no longer stops the round.** It is left out, written to the log once, and a yellow bar says how many were left out.
+- **Download on the card.** A card names the best release of its game and has a Download button, so it need not be opened.
+- **Download all with score 9+** sends the best release of every waiting game that scores 9 or 10. It asks once more in the page, and leaves bundles alone.
+- **Restore.** What you rejected is listed below the releases of a game and can be taken back. Rejections of older versions, of which no name was kept, can be restored together.
+- **Progress** of a download in the queue, as NZBGet or SABnzbd reports it.
+- **Arrived:** a tile with what was sent and is now in your library, of the last 30 days.
+- **Log:** the last 1000 lines instead of 60, with a filter for warnings and errors and a search box.
+- **Choose in Telegram.** For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round. Only the chat that is set up can press them. It is off until you switch it on, on the Configuration tab, because it needs a bot that NSWHunter has to itself: it reads what the bot receives. Switched on, it replaces the message that says how many releases await your choice.
+
+### Changed
+
+- A DLC pack no longer asks for a choice while every missing DLC of its game is already on its way.
+- Dismissing a failed download moves it to what you rejected, so it can still be restored.
+
 ## [1.8.0] - 2026-11-17
 
 ### Fixed

@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import json
 import os
+import secrets
 import time
 
 import clients
@@ -18,7 +19,11 @@ RELEASE_FIELDS = ("guid", "title", "size", "indexer", "indexerId", "published", 
 # A release that belongs under another item of the same game did not fall off: it is there.
 ELSEWHERE = ("is another DLC", "names no DLC", "names one DLC", "has the title ID of one DLC",
              "not DLC", "DLC only", "title ID of another part")
-MAX_EVENTS = 200
+MAX_EVENTS = 1000
+MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
+ARRIVED_DAYS = 30  # how long the panel shows what arrived
+MAX_ASKS = 10  # questions in Telegram per round
+ASK_DELAY = 1.1  # seconds between two messages: Telegram allows about one per second to a chat
 DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
 
 
@@ -61,10 +66,14 @@ class Hunter:
         self.session = session
         self.notify = notify or no_notify
         self.lock = asyncio.Lock()  # one round or search at a time
+        self.tell_later, self.dropped, self.finished = [], False, False  # of follow_grabs
         self.games = {}  # game id -> matcher.Game, only games that miss something
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
         self.priorities = {}  # Prowlarr indexer id -> priority
-        self.status = {"running": False, "phase": None, "last_run": None, "next_run": None}
+        self.status = {"running": False, "phase": None, "last_run": None, "next_run": None,
+                       "error": None,  # {"text", "at"} of the last round, if it broke
+                       "skipped": 0}  # games and releases the last round had to leave out
+        self.troubles = set()  # what was already written to the log about those
         self.state = {
             "items": {},  # key -> one missing update or DLC, with its candidates
             "searched": {},  # game id -> time of the last search by name
@@ -75,6 +84,8 @@ class Hunter:
             "library": {"fetched": None, "games": 0, "updates": 0, "dlc": 0},
             "services": {},  # name -> {"ok": bool, "text": str}
             "versions_fetched": 0,
+            "arrived": [],  # what was sent and is now in the library, newest first
+            "telegram_offset": 0,  # the next update to ask Telegram for
         }
         self.load()
 
@@ -107,6 +118,10 @@ class Hunter:
             json.dump(self.state, f)
         os.replace(tmp, config.STATE_FILE)
 
+    def log(self):
+        """The whole log, for the Log tab."""
+        return self.state["events"]
+
     def event(self, text, level="info"):
         log(text)
         self.state["events"].insert(0, {"at": int(time.time()), "text": text, "level": level})
@@ -114,6 +129,15 @@ class Hunter:
 
     def service(self, name, ok, text):
         self.state["services"][name] = {"ok": ok, "text": text, "at": int(time.time())}
+
+    def skip(self, what, error, count=True):
+        """Leave out one game or release that cannot be handled, so the rest goes on. Written
+        to the log once; the panel says how many the last round left out."""
+        self.status["skipped"] += 1 if count else 0
+        text = f"Skipped {what}: {error!r}"
+        if text not in self.troubles:
+            self.troubles.add(text)
+            self.event(text, "error")
 
     # ------------------------------------------------------------ library
 
@@ -155,52 +179,21 @@ class Hunter:
         except clients.ServiceError as e:
             self.service("slm", False, str(e))
             return False
-        games, wanted = {}, {}
+        games, wanted, broken = {}, {}, set()
         for title in titles:
-            game_id = str(title.get("id", "")).upper()
-            # 04...: a Switch 2 title. Left alone on purpose: only the first Switch.
-            if len(game_id) != 16 or game_id.startswith("04"):
-                continue
-            name = title.get("name") or ""
-            if name == "Unknown title":
-                name = ""  # nothing to match on; only a title ID can identify it
-            update = bool(title.get("updateMissing")) and not title.get("updatesIgnored")
-            all_dlc = [{"id": str(d.get("id", "")).upper(), "name": d.get("name") or "",
-                        "status": d.get("status")} for d in title.get("dlc") or [] if isinstance(d, dict)]
-            missing_dlc = [d for d in all_dlc if d["status"] == "missing"] if config.INCLUDE_DLC else []
-            if not update and not missing_dlc:
-                continue
-            game = matcher.Game(
-                id=game_id, name=name,
-                local_version=int(title.get("localUpdate") or 0),
-                latest_version=int(title.get("latestUpdate") or 0),
-                local_display=title.get("version") or None,
-                dates=self.dates_for(game_id), missing_dlc=missing_dlc, dlc=all_dlc,
-                **self.sizes(title))
-            games[game_id] = game
-            shown = name or game_id
-            if update:
-                wanted[game_id] = {
-                    "type": "update", "game_id": game_id, "name": shown,
-                    "local_version": game.local_version, "latest_version": game.latest_version,
-                    "local_display": game.local_display,
-                    "latest_date": str(game.dates.get(game.latest_version) or ""),
-                }
-            for dlc in missing_dlc:
-                wanted[dlc["id"]] = {
-                    "type": "dlc", "game_id": game_id, "name": shown,
-                    "dlc_id": dlc["id"], "dlc_name": dlc["name"],
-                }
-            if missing_dlc:
-                # "DLC Unlocker", "DLC Pack": releases that name no DLC, once per game.
-                wanted[game_id + ":pack"] = {
-                    "type": "dlcpack", "game_id": game_id, "name": shown, "dlc_missing": len(missing_dlc)}
+            try:
+                self.read_title(title, games, wanted)
+            except Exception as e:  # noqa: BLE001
+                game_id = str(title.get("id", "")).upper() if isinstance(title, dict) else ""
+                broken.add(game_id)  # what is known about it is kept as it is
+                self.skip(f"{game_id or 'a game'} of the library", e)
         items = self.state["items"]
         arrived = []
-        for key in [k for k in items if k not in wanted]:
+        for key in [k for k in items if k not in wanted and items[k]["game_id"] not in broken]:
             gone = items.pop(key)
             if gone.get("grab") and gone["type"] != "dlcpack":
                 arrived.append(f"Arrived: {self.label(gone)} is now in the library")
+                self.arrive(gone, gone["grab"])
         for key, facts in wanted.items():
             item = items.setdefault(key, {
                 "key": key, "candidates": [], "blocked": [], "ignored": False,
@@ -209,9 +202,11 @@ class Hunter:
             if grab and facts.get("local_version", 0) > grab.get("local_version", facts.get("local_version", 0)):
                 # What was sent arrived, but it was not the newest update: choose again.
                 arrived.append(f"Arrived: {grab['title']}. There is a newer update still.")
+                self.arrive(item, grab, "a newer update is still missing")
                 item["grab"] = None
             elif grab and facts.get("dlc_missing", 0) < grab.get("dlc_missing", 0):
                 arrived.append(f"Arrived: {grab['title']}. {facts['dlc_missing']} DLC are still missing.")
+                self.arrive(item, grab, f"{facts['dlc_missing']} DLC are still missing")
                 item["grab"] = None
             item.update(facts)
         self.games = games
@@ -227,6 +222,47 @@ class Hunter:
             await self.tell(text)
         return True
 
+    def read_title(self, title, games, wanted):
+        """One game of the export: what it misses, as items to look for."""
+        game_id = str(title.get("id", "")).upper()
+        # 04...: a Switch 2 title. Left alone on purpose: only the first Switch.
+        if len(game_id) != 16 or game_id.startswith("04"):
+            return
+        name = title.get("name") or ""
+        if name == "Unknown title":
+            name = ""  # nothing to match on; only a title ID can identify it
+        update = bool(title.get("updateMissing")) and not title.get("updatesIgnored")
+        all_dlc = [{"id": str(d.get("id", "")).upper(), "name": d.get("name") or "",
+                    "status": d.get("status")} for d in title.get("dlc") or [] if isinstance(d, dict)]
+        missing_dlc = [d for d in all_dlc if d["status"] == "missing"] if config.INCLUDE_DLC else []
+        if not update and not missing_dlc:
+            return
+        game = matcher.Game(
+            id=game_id, name=name,
+            local_version=int(title.get("localUpdate") or 0),
+            latest_version=int(title.get("latestUpdate") or 0),
+            local_display=title.get("version") or None,
+            dates=self.dates_for(game_id), missing_dlc=missing_dlc, dlc=all_dlc,
+            **self.sizes(title))
+        games[game_id] = game
+        shown = name or game_id
+        if update:
+            wanted[game_id] = {
+                "type": "update", "game_id": game_id, "name": shown,
+                "local_version": game.local_version, "latest_version": game.latest_version,
+                "local_display": game.local_display,
+                "latest_date": str(game.dates.get(game.latest_version) or ""),
+            }
+        for dlc in missing_dlc:
+            wanted[dlc["id"]] = {
+                "type": "dlc", "game_id": game_id, "name": shown,
+                "dlc_id": dlc["id"], "dlc_name": dlc["name"],
+            }
+        if missing_dlc:
+            # "DLC Unlocker", "DLC Pack": releases that name no DLC, once per game.
+            wanted[game_id + ":pack"] = {
+                "type": "dlcpack", "game_id": game_id, "name": shown, "dlc_missing": len(missing_dlc)}
+
     @staticmethod
     def sizes(title):
         """The size of the game and of the newest update in the library, to weigh a release by."""
@@ -236,6 +272,16 @@ class Hunter:
         newest = max(updates, key=lambda f: f.get("version") or 0, default={})
         return {"update_size": int(newest.get("size") or 0),
                 "base_size": int(base[0].get("size") or 0) if base else 0}
+
+    def arrive(self, item, grab, note=""):
+        """Remember that what was sent is now in the library, for the panel."""
+        now = int(time.time())
+        what = ("DLC: " + (item.get("dlc_name") or item["key"]) if item["type"] == "dlc"
+                else "DLC pack" if item["type"] == "dlcpack" else "update")
+        arrived = [a for a in self.state.setdefault("arrived", []) if a["at"] > now - ARRIVED_DAYS * 86400]
+        self.state["arrived"] = [{
+            "at": now, "game_id": item["game_id"], "name": item["name"], "what": what,
+            "title": grab["title"], "auto": bool(grab.get("auto")), "note": note}] + arrived[:299]
 
     @staticmethod
     def label(item):
@@ -247,6 +293,16 @@ class Hunter:
 
     def items_of(self, game_id):
         return [i for i in self.state["items"].values() if i["game_id"] == game_id]
+
+    def awaits(self, item):
+        """Does this item wait for a choice? A DLC pack does not while every missing DLC of
+        its game is already on its way: the pack would bring the same."""
+        if item["ignored"] or item["grab"] or not item["candidates"]:
+            return False
+        if item["type"] == "dlcpack":
+            dlc = [i for i in self.items_of(item["game_id"]) if i["type"] == "dlc"]
+            return not dlc or not all(i["grab"] for i in dlc)
+        return True
 
     # ------------------------------------------------------------ judging
 
@@ -332,8 +388,12 @@ class Hunter:
             pool = item["candidates"] + item.get("rejected", [])
             item["candidates"], item["rejected"] = [], []
             for release in sorted(pool, key=priority_of):
-                if release["guid"] not in item["blocked"]:
+                if release["guid"] in item["blocked"]:
+                    continue
+                try:
                     self.place(item, release)
+                except Exception as e:  # noqa: BLE001
+                    self.skip(f"a release of {item['name']}", e)
 
     def ladder_text(self, game_id):
         """For the panel: which display version is which update, from the library's own up."""
@@ -369,11 +429,20 @@ class Hunter:
                 # Not one word of the name and no title ID: it cannot be this game.
                 if not has_id and not words & names[game_id]:
                     continue
-                relevant.append((release, items))
-                learned = self.notice(game_id, release) or learned
+                try:
+                    learned = self.notice(game_id, release) or learned
+                    relevant.append((release, items))
+                except Exception as e:  # noqa: BLE001
+                    self.skip(f"a release of {self.games[game_id].name or game_id}", e)
         # First every version is noticed, then the releases are judged: what one release is
         # can depend on the others (see matcher.ladder).
-        found = sum(self.offer(item, release) for release, items in relevant for item in items)
+        found = 0
+        for release, items in relevant:
+            for item in items:
+                try:
+                    found += self.offer(item, release)
+                except Exception as e:  # noqa: BLE001
+                    self.skip(f"a release of {item['name']}", e)
         if learned:
             self.reevaluate()
         return found
@@ -431,6 +500,9 @@ class Hunter:
             except clients.ServiceError as e:
                 self.service("prowlarr", False, str(e))
                 return
+            except Exception as e:  # noqa: BLE001
+                self.skip(self.games[game_id].name or game_id, e)
+                self.state["searched"][game_id] = int(time.time())  # again after the interval, not every round
             self.save()  # a long first round: keep what was found so far
         if queue:
             self.event(f"Searched {len(queue)} game(s) by name")
@@ -471,31 +543,13 @@ class Hunter:
             states = {}
         now, wait = time.time(), config.GRAB_WAIT_MINUTES * 60
         waited = f"{config.GRAB_WAIT_MINUTES} minutes" if wait < 7200 else f"{config.GRAB_WAIT_MINUTES // 60} hours"
-        tell, dropped, finished = [], False, False
+        self.tell_later, self.dropped, self.finished = [], False, False
         for item in pending:
-            grab = item["grab"]
-            state = states.get(grab.get("client_id")) if grab.get("client_id") else None
-            if state == "failed":
-                tell.append(self.drop(item, f"Download failed: {grab['title']}. The next release gets its turn.",
-                                      "the download client reports that the download failed"))
-                dropped = True
-            elif state == "downloading":
-                grab["state"] = "downloading"
-            elif state == "done":
-                if grab.get("state") not in ("done", "stuck"):
-                    grab.update(state="done", done_at=int(now))
-                    finished = True
-                    self.event(f"Downloaded: {grab['title']}. Waiting for the library.")
-                elif grab["state"] == "done" and now - grab["done_at"] > wait:
-                    grab["state"] = "stuck"
-                    text = (f"Downloaded, but not in your library after {waited}: {grab['title']}. "
-                            "Does Switch-library-manager-web scan the folder of your download client?")
-                    self.event(text, "warn")
-                    tell.append(text)
-            elif grab.get("state") not in ("done", "stuck") and now - grab["at"] > wait:
-                tell.append(self.drop(item, f"Not arrived after {waited}: {grab['title']}. The next release gets its turn.",
-                                      f"unknown to the download client and not in the library after {waited}"))
-                dropped = True
+            try:
+                self.follow(item, states, now, wait, waited)
+            except Exception as e:  # noqa: BLE001
+                self.skip(f"the download of {item['name']}", e)
+        tell, dropped, finished = self.tell_later, self.dropped, self.finished
         if finished and not await clients.library_rescan(self.session) and not self.state.get("rescan_hint"):
             self.state["rescan_hint"] = True
             self.event("Switch-library-manager-web refuses to scan on request. Give the API key the Editor "
@@ -507,6 +561,36 @@ class Hunter:
             await self.tell(text)
         if dropped and self.state["services"].get("downloader", {}).get("ok", True):
             await self.auto_grab()
+
+    def follow(self, item, states, now, wait, waited):
+        """One sent release: what the download client says about it, and what follows."""
+        grab = item["grab"]
+        known = states.get(grab.get("client_id")) if grab.get("client_id") else None
+        state = (known or {}).get("state")
+        grab["percent"] = (known or {}).get("percent")
+        if state == "failed":
+            self.tell_later.append(self.drop(
+                item, f"Download failed: {grab['title']}. The next release gets its turn.",
+                "the download client reports that the download failed"))
+            self.dropped = True
+        elif state == "downloading":
+            grab["state"] = "downloading"
+        elif state == "done":
+            if grab.get("state") not in ("done", "stuck"):
+                grab.update(state="done", done_at=int(now))
+                self.finished = True
+                self.event(f"Downloaded: {grab['title']}. Waiting for the library.")
+            elif grab["state"] == "done" and now - grab["done_at"] > wait:
+                grab["state"] = "stuck"
+                text = (f"Downloaded, but not in your library after {waited}: {grab['title']}. "
+                        "Does Switch-library-manager-web scan the folder of your download client?")
+                self.event(text, "warn")
+                self.tell_later.append(text)
+        elif grab.get("state") not in ("done", "stuck") and now - grab["at"] > wait:
+            self.tell_later.append(self.drop(
+                item, f"Not arrived after {waited}: {grab['title']}. The next release gets its turn.",
+                f"unknown to the download client and not in the library after {waited}"))
+            self.dropped = True
 
     async def watch(self):
         """Between rounds: follow the downloads. Skipped while a round runs; that does it too."""
@@ -533,7 +617,7 @@ class Hunter:
     def automatic(self, item):
         """The candidate that may go out without a click, or None."""
         threshold = config.auto_min_score()
-        if not threshold or item["ignored"] or item["grab"] or not item["candidates"]:
+        if not threshold or not self.awaits(item):
             return None
         best = item["candidates"][0]
         if best.get("score", 0) < threshold:
@@ -560,6 +644,7 @@ class Hunter:
         item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto,
                         "local_version": item.get("local_version", 0),
                         "dlc_missing": item.get("dlc_missing", 0), "client_id": client_id, "state": "sent"}
+        item["ask"] = None  # a question about it in Telegram is answered by this
         item.setdefault("sent", [])
         if guid not in item["sent"]:
             item["sent"].append(guid)
@@ -588,6 +673,163 @@ class Hunter:
                 self.service("downloader", False, str(e))
                 self.event(f"Sending failed: {candidate['title']}: {e}", "error")
                 break
+            except Exception as e:  # noqa: BLE001
+                self.skip(item["name"], e)
+
+    async def grab_best(self, min_score):
+        """The button "Download all": of every item that awaits a choice, send the best
+        release if its score is at least `min_score`. Bundles are left for a click of their
+        own. Returns how many were sent; stops at the first one the download client refuses."""
+        sent = 0
+        for item in list(self.state["items"].values()):
+            if not self.awaits(item):
+                continue
+            best = item["candidates"][0]
+            if best.get("score", 0) < min_score or best["kind"] == "bundle":
+                continue
+            try:
+                await self.grab(item["key"], best["guid"])
+            except clients.ServiceError as e:
+                raise clients.ServiceError(f"{sent} sent, then: {e}") from e
+            sent += 1
+        return sent
+
+    # ------------------------------------------------------------ rejecting and restoring
+
+    def turn_down(self, item, release):
+        kept = [r for r in item.get("turned_down", []) if r["guid"] != release["guid"]]
+        entry = {k: release.get(k) for k in RELEASE_FIELDS}
+        item["turned_down"] = ([{**entry, "at": int(time.time())}] + kept)[:MAX_TURNED_DOWN]
+
+    def reject(self, key, guid):
+        """Reject one release: it is never offered or sent again, until it is restored."""
+        item = self.state["items"][key]
+        release = next((c for c in item["candidates"] + item.get("rejected", []) if c["guid"] == guid), None)
+        if guid not in item["blocked"]:
+            item["blocked"].append(guid)
+        item["candidates"] = [c for c in item["candidates"] if c["guid"] != guid]
+        if (item.get("ask") or {}).get("guid") == guid:
+            item["ask"] = None
+        if release:
+            self.turn_down(item, release)
+        self.save()
+
+    def dismiss(self, key, guid):
+        """Take a failed download off the list. The release stays rejected."""
+        item = self.state["items"][key]
+        for release in [f for f in item.get("failed", []) if f["guid"] == guid]:
+            self.turn_down(item, release)
+        item["failed"] = [f for f in item.get("failed", []) if f["guid"] != guid]
+        self.save()
+
+    def restore(self, key, guid=None):
+        """Take back a rejection. Without a guid: every rejection of this item of which only
+        the id was kept (made by an older version); those releases return at the next search."""
+        item = self.state["items"][key]
+        if guid is None:
+            named = {r["guid"] for r in item.get("turned_down", []) + item.get("failed", [])}
+            item["blocked"] = [g for g in item["blocked"] if g in named]
+        else:
+            release = next((r for r in item.get("turned_down", []) if r["guid"] == guid), None)
+            item["turned_down"] = [r for r in item.get("turned_down", []) if r["guid"] != guid]
+            item["blocked"] = [g for g in item["blocked"] if g != guid]
+            if release:
+                self.place(item, {k: release.get(k) for k in RELEASE_FIELDS})
+        self.save()
+
+    # ------------------------------------------------------------ choosing in Telegram
+
+    def asking(self):
+        return bool(config.TELEGRAM_ASK and config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID)
+
+    async def ask(self):
+        """One message per item that awaits a choice, with buttons to download or reject its
+        best release from Telegram. Every release is asked about once; at most MAX_ASKS
+        messages per round, the highest scores first, the rest in the next rounds."""
+        waiting = [i for i in self.state["items"].values()
+                   if self.awaits(i) and i.get("asked") != i["candidates"][0]["guid"]]
+        waiting.sort(key=lambda i: -i["candidates"][0].get("score", 0))
+        for n, item in enumerate(waiting[:MAX_ASKS]):
+            if n:
+                await asyncio.sleep(ASK_DELAY)
+            best = item["candidates"][0]
+            facts = [f"{best['size'] / 2**20:.0f} MB" if best.get("size") else "", best.get("indexer") or "",
+                     (best.get("published") or "")[:10]]
+            text = "\n".join(["NSWHunter", self.label(item), f"{best.get('score', 0)}/10 · {best['title']}",
+                              " · ".join(f for f in facts if f), "; ".join(best.get("reasons") or [])])
+            token = secrets.token_hex(6)
+            try:
+                message_id = await clients.telegram(self.session, text, buttons=[
+                    ("Download", "d:" + token), ("Reject", "r:" + token)])
+                self.service("telegram", True, "last message sent")
+            except clients.ServiceError as e:
+                self.service("telegram", False, str(e))
+                return
+            item["asked"] = best["guid"]
+            item["ask"] = {"token": token, "guid": best["guid"], "message_id": message_id, "text": text}
+
+    async def telegram_answers(self, wait=50):
+        """Wait for a press on a button under one of the questions in Telegram and act on it.
+        False if no question is open: then Telegram is not asked anything."""
+        if not self.asking() or not any(i.get("ask") for i in self.state["items"].values()):
+            return False
+        updates = await clients.telegram_call(self.session, "getUpdates", {
+            "offset": self.state.get("telegram_offset", 0), "timeout": wait,
+            "allowed_updates": ["callback_query"]}, wait=wait)
+        for update in updates if isinstance(updates, list) else []:
+            self.state["telegram_offset"] = int(update.get("update_id", 0)) + 1
+            try:
+                await self.pressed(update.get("callback_query") or {})
+            except Exception as e:  # noqa: BLE001
+                self.skip("a press on a button in Telegram", e)
+        if updates:
+            self.save()
+        return True
+
+    async def pressed(self, query):
+        """A press on Download or Reject under a question. Only the chat that is set up may
+        decide: a press from anywhere else is not even answered."""
+        chat = (query.get("message") or {}).get("chat") or {}
+        mine = str(config.TELEGRAM_CHAT_ID)
+        if str(chat.get("id")) != mine and "@" + str(chat.get("username") or "").lower() != mine.lower():
+            return
+        action, _, token = str(query.get("data") or "").partition(":")
+        item = next((i for i in self.state["items"].values()
+                     if token and (i.get("ask") or {}).get("token") == token), None)
+
+        async def answer(text):
+            try:
+                await clients.telegram_call(self.session, "answerCallbackQuery", {
+                    "callback_query_id": query.get("id"), "text": text[:190]})
+            except clients.ServiceError:
+                pass  # the choice was made; only the small confirmation is lost
+
+        if item is None or action not in ("d", "r"):
+            await answer("This release no longer awaits a choice.")
+            return
+        ask = item["ask"]
+        release = next((c for c in item["candidates"] if c["guid"] == ask["guid"]), None)
+        if release is None or item["grab"] or item["ignored"]:
+            outcome = "This release no longer awaits a choice."
+        elif action == "d":
+            try:
+                await self.grab(item["key"], ask["guid"])
+            except clients.ServiceError as e:
+                await answer(str(e))  # the question stays open: the press can be tried again
+                return
+            outcome = "✓ Sent to the download client."
+        else:
+            self.reject(item["key"], ask["guid"])
+            self.event(f"Rejected in Telegram: {release['title']}")
+            outcome = "✕ Rejected."
+        item["ask"] = None
+        await answer(outcome)
+        try:
+            # Without buttons in the call the buttons disappear: the question is settled.
+            await clients.telegram_call(self.session, "editMessageText", {
+                "chat_id": chat.get("id"), "message_id": ask["message_id"], "text": ask["text"] + "\n\n" + outcome})
+        except clients.ServiceError:
+            pass
 
     # ------------------------------------------------------------ one round
 
@@ -629,15 +871,32 @@ class Hunter:
         return self.state["services"]
 
     async def round(self):
+        """One round. A round that breaks is not only written to the log: the panel, the
+        health check and Telegram say so too, until a round works again."""
+        try:
+            await self.whole_round()
+        except Exception as e:  # noqa: BLE001
+            text = f"Round failed: {e!r}"
+            self.status["error"] = {"text": text, "at": int(time.time())}
+            self.event(text, "error")
+            if self.state.get("told_error") != text:
+                self.state["told_error"] = text
+                await self.tell(text + ". The round did not finish; the Log tab of the panel has the details.")
+            self.save()
+        else:
+            self.status["error"] = None
+            self.state.pop("told_error", None)
+
+    async def whole_round(self):
         problems = config.problems()
         if problems:
             self.service("config", False, "; ".join(problems))
             return
         self.state["services"].pop("config", None)
         async with self.lock:
-            self.status["running"] = True
+            self.status.update(running=True, skipped=0)
             try:
-                waiting = sum(1 for i in self.state["items"].values() if i["candidates"] and not i["grab"])
+                waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
                 self.status["phase"] = "testing the connections"
                 await self.check_services()
                 self.status["phase"] = "reading the library"
@@ -651,10 +910,10 @@ class Hunter:
                 if self.state["services"]["downloader"]["ok"]:
                     self.status["phase"] = "sending"
                     await self.auto_grab()
-                now_waiting = sum(
-                    1 for i in self.state["items"].values()
-                    if i["candidates"] and not i["grab"] and not i["ignored"])
-                if now_waiting > waiting:
+                now_waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
+                if self.asking():
+                    await self.ask()
+                elif now_waiting > waiting:
                     await self.tell(f"{now_waiting} updates or DLC await your choice")
             finally:
                 self.status.update(running=False, phase=None, last_run=int(time.time()))
@@ -678,48 +937,64 @@ class Hunter:
         if service == "downloader":
             return await clients.downloader_status(self.session, cfg)
         if service == "telegram":
-            return await clients.telegram(self.session, "NSWHunter\nThis is a test message.", cfg)
+            await clients.telegram(self.session, "NSWHunter\nThis is a test message.", cfg)
+            return "Test message sent"
         raise clients.ServiceError("Unknown service")
 
     # ------------------------------------------------------------ for the panel
+
+    def shown(self, item):
+        """One item as the panel gets it."""
+        inside = ("candidates", "blocked", "rejected", "failed", "turned_down", "ask", "asked")
+        shown = {k: v for k, v in item.items() if k not in inside}
+        hidden = ("downloadUrl", "rank", "confidence", "indexerId")
+        shown["turned_down"] = [{k: v for k, v in r.items() if k not in hidden} for r in item.get("turned_down", [])]
+        named = {r["guid"] for r in item.get("turned_down", []) + item.get("failed", [])}
+        # Rejections of which an older version kept only the id.
+        shown["unnamed"] = sum(1 for g in item["blocked"] if g not in named)
+        shown["asked"] = bool(item.get("ask"))
+        shown["candidates"] = [{k: v for k, v in c.items() if k not in hidden} for c in item["candidates"]]
+        shown["rejected"] = [{k: v for k, v in r.items() if k not in hidden} for r in item.get("rejected", [])]
+        shown["failed"] = [{k: v for k, v in f.items() if k not in hidden} for f in item.get("failed", [])]
+        if item["type"] == "update":
+            shown["ladder"] = self.ladder_text(item["game_id"])
+        auto = self.automatic(item)
+        shown["auto_guid"] = auto["guid"] if auto else None
+        if item["ignored"]:
+            shown["status"] = "ignored"
+        elif item["grab"]:
+            shown["status"] = "sent"
+        elif self.awaits(item):
+            shown["status"] = "review"
+        elif item["candidates"]:
+            shown["status"] = "covered"  # a DLC pack while the DLC itself is on its way
+        elif item.get("last_search"):
+            shown["status"] = "none"
+        else:
+            shown["status"] = "new"
+        return shown
 
     def view(self):
         """Everything the panel shows. Download links stay inside: they hold the Prowlarr key."""
         items = []
         for item in self.state["items"].values():
-            shown = {k: v for k, v in item.items() if k not in ("candidates", "blocked", "rejected", "failed")}
-            hidden = ("downloadUrl", "rank", "confidence", "indexerId")
-            shown["candidates"] = [{k: v for k, v in c.items() if k not in hidden} for c in item["candidates"]]
-            shown["rejected"] = [{k: v for k, v in r.items() if k not in hidden} for r in item.get("rejected", [])]
-            shown["failed"] = [{k: v for k, v in f.items() if k not in hidden} for f in item.get("failed", [])]
-            if item["type"] == "update":
-                shown["ladder"] = self.ladder_text(item["game_id"])
-            auto = self.automatic(item)
-            shown["auto_guid"] = auto["guid"] if auto else None
-            if item["ignored"]:
-                shown["status"] = "ignored"
-            elif item["grab"]:
-                shown["status"] = "sent"
-            elif item["candidates"]:
-                shown["status"] = "review"
-            elif item.get("last_search"):
-                shown["status"] = "none"
-            else:
-                shown["status"] = "new"
-            items.append(shown)
-        order = {"review": 0, "sent": 1, "new": 2, "none": 3, "ignored": 4}
+            try:
+                items.append(self.shown(item))
+            except Exception as e:  # noqa: BLE001
+                self.skip(str(item.get("name") or item.get("key")), e, count=False)
+        order = {"review": 0, "sent": 1, "covered": 1, "new": 2, "none": 3, "ignored": 4}
         items.sort(key=lambda i: (order[i["status"]], i["name"].lower(), i["type"]))
         return {
             "status": self.status,
             "library": self.state["library"],
             "services": self.state["services"],
-            "events": self.state["events"][:60],
             "items": items,
+            "arrived": [a for a in self.state.get("arrived", []) if a["at"] > time.time() - ARRIVED_DAYS * 86400],
             "settings": {
                 "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
                 "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
-                "wait_minutes": config.GRAB_WAIT_MINUTES,
+                "wait_minutes": config.GRAB_WAIT_MINUTES, "asking": self.asking(),
             },
             "configured": not config.problems(),
         }

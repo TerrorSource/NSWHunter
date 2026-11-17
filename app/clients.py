@@ -1,5 +1,6 @@
 """The four services NSWHunter talks to: the library, Prowlarr, and the download clients."""
 import base64
+import json
 import re
 from urllib.parse import urlsplit, urlunsplit
 
@@ -9,6 +10,9 @@ import config
 
 SHORT = aiohttp.ClientTimeout(total=30)
 LONG = aiohttp.ClientTimeout(total=180)  # a Prowlarr search waits for the slowest indexer
+# No answer may be bigger than this: a service that sends without end must not fill the memory.
+SMALL = 2 * 2**20
+LARGE = 96 * 2**20  # a library of thousands of games, the list of every update, a big NZB
 
 
 class ServiceError(Exception):
@@ -23,9 +27,26 @@ async def _check(response, what):
         raise ServiceError(f"{what}: HTTP {response.status} {body}")
 
 
+async def _read(response, limit=SMALL):
+    """The body of an answer, refused when it is bigger than `limit` bytes."""
+    data = bytearray()
+    async for chunk in response.content.iter_chunked(65536):
+        data += chunk
+        if len(data) > limit:
+            raise ServiceError(f"the answer is bigger than {limit // 2**20} MB")
+    return bytes(data)
+
+
+async def _json(response, limit=SMALL):
+    try:
+        return json.loads(await _read(response, limit))
+    except ValueError as e:
+        raise ServiceError("the answer is not JSON") from e
+
+
 def _wrap(what, error):
     if isinstance(error, ServiceError):
-        return error
+        return error if str(error).startswith(what) else ServiceError(f"{what}: {error}")
     if isinstance(error, TimeoutError):
         return ServiceError(f"{what}: no answer (timeout)")
     return ServiceError(f"{what}: {error}")
@@ -45,7 +66,7 @@ async def library(session, cfg=config):
         async with session.get(f"{cfg.SLM_URL}/export/library.json", headers=headers,
                                timeout=LONG) as r:
             await _check(r, "Library")
-            data = await r.json(content_type=None)
+            data = await _json(r, LARGE)
     except Exception as e:
         raise _wrap("Library", e) from e
     if not isinstance(data, list):
@@ -61,7 +82,7 @@ async def titledb_versions(session):
         try:
             async with session.get(address, timeout=LONG) as r:
                 await _check(r, "Version list")
-                return await r.text()
+                return (await _read(r, LARGE)).decode("utf-8", "replace")
         except Exception as e:  # noqa: BLE001
             error = _wrap("Version list", e)
     raise error
@@ -82,11 +103,11 @@ async def prowlarr_status(session, cfg=config):
         async with session.get(f"{cfg.PROWLARR_URL}/api/v1/system/status",
                                headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
             await _check(r, "Prowlarr")
-            version = (await r.json(content_type=None)).get("version", "?")
+            version = (await _json(r)).get("version", "?")
         async with session.get(f"{cfg.PROWLARR_URL}/api/v1/indexer",
                                headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
             await _check(r, "Prowlarr")
-            indexers = await r.json(content_type=None)
+            indexers = await _json(r)
     except Exception as e:
         raise _wrap("Prowlarr", e) from e
     usenet = [i for i in indexers if isinstance(i, dict)
@@ -106,7 +127,7 @@ async def prowlarr_search(session, query):
         async with session.get(f"{config.PROWLARR_URL}/api/v1/search", params=params,
                                headers=_prowlarr_headers(), timeout=LONG) as r:
             await _check(r, "Prowlarr")
-            data = await r.json()
+            data = await _json(r, LARGE)
     except Exception as e:
         raise _wrap("Prowlarr", e) from e
     releases = []
@@ -169,7 +190,7 @@ async def prowlarr_priorities(session):
         async with session.get(f"{config.PROWLARR_URL}/api/v1/indexer",
                                headers=_prowlarr_headers(), timeout=SHORT) as r:
             await _check(r, "Prowlarr")
-            indexers = await r.json(content_type=None)
+            indexers = await _json(r)
     except Exception as e:
         raise _wrap("Prowlarr", e) from e
     return {i["id"]: int(i.get("priority") or 25) for i in indexers if isinstance(i, dict) and "id" in i}
@@ -188,7 +209,7 @@ async def prowlarr_nzb(session, release):
     try:
         async with session.get(_via_prowlarr(release["downloadUrl"]), timeout=LONG) as r:
             await _check(r, "Fetching the NZB")
-            data = await r.read()
+            data = await _read(r, LARGE)
     except Exception as e:
         raise _wrap("Fetching the NZB", e) from e
     if b"<nzb" not in data[:4000].lower():
@@ -227,7 +248,7 @@ async def _nzbget(session, method, params, cfg=config):
         async with session.post(f"{cfg.NZBGET_URL}/jsonrpc", headers=headers, timeout=LONG,
                                 json={"method": method, "params": params, "id": 1}) as r:
             await _check(r, "NZBGet")
-            data = await r.json(content_type=None)
+            data = await _json(r, LARGE)
     except Exception as e:
         raise _wrap("NZBGet", e) from e
     if data.get("error"):
@@ -246,7 +267,7 @@ async def _sabnzbd(session, fields, nzb=None, cfg=config):
     try:
         async with session.post(f"{cfg.SABNZBD_URL}/api", data=form, timeout=LONG) as r:
             await _check(r, "SABnzbd")
-            data = await r.json(content_type=None)
+            data = await _json(r, LARGE)
     except Exception as e:
         raise _wrap("SABnzbd", e) from e
     if data.get("status") is False:
@@ -267,7 +288,7 @@ async def downloader_status(session, cfg=config):
         async with session.get(f"{cfg.PROWLARR_URL}/api/v1/downloadclient",
                                headers=_prowlarr_headers(cfg), timeout=SHORT) as r:
             await _check(r, "Prowlarr")
-            names = [c.get("name", "?") for c in await r.json(content_type=None) if c.get("enable")]
+            names = [c.get("name", "?") for c in await _json(r) if c.get("enable")]
     except Exception as e:
         raise _wrap("Prowlarr", e) from e
     if not names:
@@ -296,26 +317,40 @@ async def send(session, release):
     return str(ids[0]) if ids else None
 
 
+def _percent(done, total):
+    try:
+        return max(0, min(100, int(100 * float(done) / float(total)))) if float(total) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def download_states(session):
-    """{client id: "downloading" | "done" | "failed"} of what the download client has in its
-    queue and its history. Empty when downloads go through Prowlarr: it tells nothing back."""
+    """{client id: {"state": "downloading" | "done" | "failed", "percent": 0-100 or None}} of
+    what the download client has in its queue and its history. Empty when downloads go through
+    Prowlarr: it tells nothing back."""
     states = {}
     if config.DOWNLOAD_CLIENT == "nzbget":
         for entry in await _nzbget(session, "history", [False]) or []:
             status = str(entry.get("Status", ""))
             # SUCCESS/ALL, WARNING/HEALTH: the files are there. FAILURE/PAR, DELETED/MANUAL: not.
-            states[str(entry.get("NZBID"))] = "done" if status.startswith(("SUCCESS", "WARNING")) else "failed"
+            done = status.startswith(("SUCCESS", "WARNING"))
+            states[str(entry.get("NZBID"))] = {"state": "done" if done else "failed", "percent": None}
         for entry in await _nzbget(session, "listgroups", [0]) or []:
-            states[str(entry.get("NZBID"))] = "downloading"
+            total, left = entry.get("FileSizeMB"), entry.get("RemainingSizeMB")
+            percent = _percent(total - left, total) if isinstance(total, (int, float)) and isinstance(
+                left, (int, float)) else None
+            states[str(entry.get("NZBID"))] = {"state": "downloading", "percent": percent}
     elif config.DOWNLOAD_CLIENT == "sabnzbd":
         history = await _sabnzbd(session, {"mode": "history", "limit": "300"})
         for slot in (history.get("history") or {}).get("slots") or []:
             status = str(slot.get("status", ""))
-            states[str(slot.get("nzo_id"))] = (
-                "done" if status == "Completed" else "failed" if status == "Failed" else "downloading")
+            states[str(slot.get("nzo_id"))] = {
+                "state": "done" if status == "Completed" else "failed" if status == "Failed" else "downloading",
+                "percent": None}
         queue = await _sabnzbd(session, {"mode": "queue"})
         for slot in (queue.get("queue") or {}).get("slots") or []:
-            states[str(slot.get("nzo_id"))] = "downloading"
+            states[str(slot.get("nzo_id"))] = {
+                "state": "downloading", "percent": _percent(slot.get("percentage"), 100)}
     return states
 
 
@@ -330,22 +365,40 @@ async def library_rescan(session):
         return False
 
 
-async def telegram(session, text, cfg=config):
-    """Send a message through the user's own Telegram bot."""
+async def telegram_call(session, method, body, cfg=config, wait=0):
+    """One call to the Bot API of Telegram with the user's own bot. Returns its result.
+    wait: seconds the call itself may stay open (getUpdates waits for news)."""
     if not cfg.TELEGRAM_BOT_TOKEN or not cfg.TELEGRAM_CHAT_ID:
         raise ServiceError("Telegram: fill in the bot token and the chat ID")
     # The address holds the token: no error may ever show it.
-    address = f"{config.TELEGRAM_API_URL}/bot{cfg.TELEGRAM_BOT_TOKEN}/sendMessage"
-    body = {"chat_id": cfg.TELEGRAM_CHAT_ID, "text": text[:3900], "disable_web_page_preview": True}
+    address = f"{config.TELEGRAM_API_URL}/bot{cfg.TELEGRAM_BOT_TOKEN}/{method}"
     try:
-        async with session.post(address, json=body, timeout=SHORT) as r:
+        async with session.post(address, json=body, timeout=aiohttp.ClientTimeout(total=wait + 30)) as r:
             status = r.status
-            answer = await r.json(content_type=None) if status != 200 else {}
+            try:
+                answer = json.loads(await _read(r))
+            except ValueError:
+                answer = None
     except Exception as e:  # noqa: BLE001
         raise ServiceError("Telegram: no connection to Telegram") from e
     if status in (401, 404):
         raise ServiceError("Telegram: the bot token is wrong")
-    if status != 200:
-        why = str((answer or {}).get("description", f"HTTP {status}"))[:120]
-        raise ServiceError(f"Telegram refuses the message: {why}. Is the chat ID right, and did you send the bot a message yet?")
-    return "Test message sent"
+    if status == 409:
+        raise ServiceError("Telegram: another program reads the messages of this bot. Choosing from Telegram "
+                           "needs a bot of its own for NSWHunter.")
+    if status != 200 or not isinstance(answer, dict):
+        why = str((answer if isinstance(answer, dict) else {}).get("description", f"HTTP {status}"))[:120]
+        if method == "sendMessage":
+            raise ServiceError(f"Telegram refuses the message: {why}. Is the chat ID right, and did you send the bot a message yet?")
+        raise ServiceError(f"Telegram: {why}")
+    return answer.get("result")
+
+
+async def telegram(session, text, cfg=config, buttons=None):
+    """Send a message through the user's own Telegram bot. buttons: [(text, data)] shown under
+    the message; a press comes back through getUpdates. Returns the id of the message."""
+    body = {"chat_id": cfg.TELEGRAM_CHAT_ID, "text": text[:3900], "disable_web_page_preview": True}
+    if buttons:
+        body["reply_markup"] = {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]}
+    result = await telegram_call(session, "sendMessage", body, cfg)
+    return result.get("message_id") if isinstance(result, dict) else None

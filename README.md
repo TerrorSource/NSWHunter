@@ -21,6 +21,18 @@ services:
     image: ghcr.io/<account>/nswhunter:latest
     restart: always
     network_mode: bridge
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     environment:
       - TZ=Etc/UTC
       - PUID=1000
@@ -31,11 +43,13 @@ services:
       - /path/to/nswhunter/data:/data
 ```
 
+The container runs with a read-only file system and without privileges: it only writes to `/data`. The four capabilities are for the start, where `/data` is given to `PUID`:`PGID`; after that the app runs as that user without any.
+
 The repo is private, and so is the image. Portainer then needs a registry to pull it: **Registries > Add registry > Custom**, URL `ghcr.io`, username `<account>` and as password a GitHub token with the `read:packages` scope. Or make the package public under GitHub > Packages > nswhunter > Package settings.
 
 ## Setting up
 
-Open `http://<nas>:3033`. Without settings you land on the **Configuration** tab:
+Open `http://<nas>:3033`. The first visit asks you to make a login: a username and a password of at least 8 characters. After that you land on the **Configuration** tab:
 
 | Setting | Where to find it |
 |---|---|
@@ -46,10 +60,11 @@ Open `http://<nas>:3033`. Without settings you land on the **Configuration** tab
 | Automatic download | See [Automatic download](#automatic-download) |
 | Automatic search | Every 6, 12, 24 or 48 hours, see [Searching and API limits](#searching-and-api-limits) |
 | Wait for the library | How long a sent release may take to show up in your library, see [After sending](#after-sending) |
-| Notifications (Telegram) | Bot token from @BotFather and your chat ID (from @userinfobot). First send your bot one message yourself. You get a message when something was sent automatically, something awaits your choice, a download failed or something arrived. |
-| Panel | Username and password. Without a password the panel has no login. Only a hash of the password is stored. |
+| Notifications (Telegram) | Bot token from @BotFather and your chat ID (from @userinfobot). First send your bot one message yourself. You get a message when something was sent automatically, a download failed, something arrived or a round broke. |
+| Choose in Telegram | See [Choosing in Telegram](#choosing-in-telegram) |
+| Panel | Username, password and host names, see [Security](#security) |
 
-Each service has a **Test** button that tries the connection with what is in the form, even if it has not been saved yet. **Save and test the connections** stores the settings, tries each service and starts a round. The settings are in `/data/settings.json`, readable only by the app user. Keys and passwords never go back to the browser: an empty field means "keep what is there", and **Clear** empties one.
+Each service has a **Test** button that tries the connection with what is in the form, even if it has not been saved yet. **Save and test the connections** stores the settings, tries each service and starts a round. The settings are in `/data/settings.json`, readable only by the app user. Keys and passwords never go back to the browser: an empty field means "keep what is there", and **Clear** empties one. A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
 
 The same settings can also be environment variables in the compose file (`SLM_URL`, `PROWLARR_API_KEY`, …). That is then the initial value; a saved value takes precedence. The other settings (timing, indexers, notifications through Apprise) are in the compose file only, see [.env.example](.env.example).
 
@@ -62,7 +77,16 @@ The tiles at the top of the **Updates** tab are buttons. A click on one shows on
 - **awaiting your choice**: games with a candidate release that has not been sent.
 - **added to queue**: games with a release that was sent to the download client.
 - **download failed**: downloads that the download client reported as failed, or that it did not know and that had not arrived in the library after the waiting time. Each can be sent once more with **Try again** or taken off the list with **Dismiss**.
+- **arrived**: what was sent and is now in your library, of the last 30 days.
 - **ignored**: only shown when you ignore something.
+
+A card shows the best release of its game with a **Download** button, so it need not be opened. With many games waiting, **Download all with score 9+** sends the best release of every game that scores 9 or 10 in one go; it asks once more before it does, and leaves bundles for a click of their own.
+
+**Reject** takes a release out of the list. Below the releases of a game is what you rejected, with **Restore** to take it back.
+
+If a round breaks, every page says so in a red bar, you get a message in Telegram and the health check of the container turns red. If one game cannot be handled, it is left out and the rest of the round goes on; a yellow bar says how many were left out.
+
+The **Log** tab holds the last 1000 lines. It can be limited to warnings and errors, and searched.
 
 The row with the service checks (Library, Prowlarr, Download client, Version list, …) is on the **Configuration** tab only.
 
@@ -116,13 +140,34 @@ NSWHunter asks the download client every two minutes how a sent release is doing
 
 | What the download client says | What NSWHunter does |
 |---|---|
-| Busy or in the queue | Wait, however long it takes |
+| Busy or in the queue | Wait, however long it takes. The panel shows how far the download is |
 | Failed | The release is skipped and listed under **download failed**; the next one gets its turn at once |
 | Downloaded | Switch-library-manager-web gets the request to scan, and the library is read again |
 | Downloaded, but not in the library after the waiting time | You get a notification. No next release is sent: the folder of your download client apparently does not reach the library |
 | Does not know the release | After the waiting time it counts as not arrived: it is listed under **download failed** and the next one gets its turn |
 
 You set the waiting time on the Configuration tab (**Wait for the library**, default 60 minutes). Scanning on request only works if the API key of Switch-library-manager-web has the Editor role; with "Read only" NSWHunter waits for the library's own scan.
+
+## Choosing in Telegram
+
+**Choose in Telegram** is off until you switch it on, on the Configuration tab. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
+
+- At most 10 questions per round, the highest scores first; the rest follow in the next rounds. Every release is asked about once.
+- Only the chat that is set as Chat ID can press the buttons. A press from anywhere else is ignored.
+- Switch it on only for a bot that NSWHunter has to itself. NSWHunter then reads what the bot receives, and two programs cannot read one bot: the other one would miss its messages, or NSWHunter its presses. NSWHunter only listens to Telegram while a question is open.
+- Switched off, you get one message that says how many releases await your choice.
+
+## Security
+
+- **Login.** The panel has a login screen of its own; the browser shows no pop-up. A login lasts 30 days in a cookie that scripts cannot read and that other sites cannot send. **Log out** ends it. Only a hash of the password is stored, and a new password logs every other browser out.
+- **Wrong logins.** After 5 wrong logins from one address it has to wait: 30 seconds, and twice as long after every next wrong one, up to 15 minutes.
+- **No encryption by itself.** The panel speaks HTTP. Inside your home network that is usual; to reach it from outside, put it behind a reverse proxy with HTTPS. The password then crosses the network once per login instead of with every request.
+- **Host names.** The panel answers to an IP address and to names that only exist inside a home network (`nas`, `nas.local`, `nas.lan`). Any other name is refused, so a website cannot reach the panel through your browser by pointing a name of its own at your NAS. If you use a domain name, fill it in under **Host names** on the Configuration tab or in `PANEL_HOSTS`.
+- **Keys stay with their address.** A saved key or password is never sent to a changed address; you fill it in again.
+- **The page.** It runs only its own script, loads nothing from elsewhere and cannot be shown inside another page.
+- **The container.** Read-only file system, no privileges, every answer of a service limited in size.
+
+Forgot the password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: the panel asks to make a login.
 
 ## Searching and API limits
 
@@ -177,6 +222,7 @@ Without `-r` the script only pushes; `latest` is then rebuilt, without a new rel
 | `app/clients.py` | Talks to the library, Prowlarr, NZBGet and SABnzbd |
 | `app/hunter.py` | One round: fetch, search, judge, send |
 | `app/main.py` | Web panel and scheduling |
+| `app/auth.py` | The login, its sessions and the host names the panel answers to |
 | `app/config.py` | Settings from environment variables |
 | `entrypoint.sh` | Starts the app as `PUID`:`PGID` |
 | `commit-git.sh` | Puts the working directory on GitHub and creates a release |

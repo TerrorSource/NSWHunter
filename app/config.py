@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+from urllib.parse import urlsplit
 
 
 def env(name, default=""):
@@ -33,6 +34,7 @@ DATA_DIR = env("DATA_DIR", "/data")
 PORT = int(number("PORT", 3033))
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
 
 # Switch-library-manager-web: the library and what is missing.
@@ -122,10 +124,19 @@ def check_password(password):
 
 
 PANEL_USER = env("PANEL_USER", "admin")
+# Without a password the panel asks to make a login before it shows anything.
 PANEL_PASSWORD = hash_password(env("PANEL_PASSWORD"))
+MIN_PASSWORD = 8
+# Extra host names the panel answers to, comma separated: the name of a reverse proxy, for
+# example. An IP address and a name inside the home network always work (see auth.py).
+PANEL_HOSTS = env("PANEL_HOSTS").lower().replace(" ", "")
 # Notifications: Telegram from the Configuration tab, and Apprise URLs for anything else.
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
+# Ask per release in Telegram, with buttons to download or reject it there. Off unless it is
+# switched on: NSWHunter then reads what the bot receives, and a bot that another program
+# also reads cannot serve both.
+TELEGRAM_ASK = flag("TELEGRAM_ASK")
 TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
 NOTIFY_URLS = env("NOTIFY_URLS")
 
@@ -142,10 +153,38 @@ EDITABLE = {
     "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS,
-    "TELEGRAM_BOT_TOKEN": "secret", "TELEGRAM_CHAT_ID": "text",
-    "PANEL_USER": "text", "PANEL_PASSWORD": "secret",
+    "TELEGRAM_BOT_TOKEN": "secret", "TELEGRAM_CHAT_ID": "text", "TELEGRAM_ASK": "bool",
+    "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
+# A key or password belongs to the address it was saved for: it is never sent to another one.
+BOUND = {"SLM_URL": "SLM_API_KEY", "PROWLARR_URL": "PROWLARR_API_KEY",
+         "NZBGET_URL": "NZBGET_PASSWORD", "SABNZBD_URL": "SABNZBD_API_KEY"}
+
+
+def origin(address):
+    """Scheme, host and port of an address: where a key that goes with it would be sent."""
+    parts = urlsplit(address or "")
+    try:
+        return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return parts.scheme.lower(), parts.netloc.lower(), None
+
+
+def panel_hosts():
+    return {h for h in PANEL_HOSTS.split(",") if h}
+
+
+def check_bound(new, clear):
+    """A changed address with a saved key that was not typed again: refuse. Otherwise anyone
+    who can reach the form could have a saved key sent to an address of their own."""
+    for address, secret in BOUND.items():
+        # An emptied address sends nothing anywhere.
+        if not new.get(address) or origin(new[address]) == origin(globals()[address]):
+            continue
+        if globals()[secret] and secret not in new and secret not in clear:
+            raise ValueError(f"{secret}: fill it in again, because the address changed. "
+                             "A saved key or password is only sent to the address it was saved for.")
 
 
 def normalize(name, value):
@@ -184,7 +223,13 @@ def normalize(name, value):
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
+        if value and not value.startswith("scrypt$") and len(value) < MIN_PASSWORD:
+            raise ValueError(f"PANEL_PASSWORD: use at least {MIN_PASSWORD} characters")
         value = hash_password(value)
+    elif name == "PANEL_HOSTS":
+        value = value.lower().replace(" ", "")
+        if any(not h or not all(c.isalnum() or c in ".-" for c in h) for h in value.split(",") if value):
+            raise ValueError("PANEL_HOSTS: fill in host names separated by commas, without http:// and without a port")
     elif name == "TELEGRAM_CHAT_ID" and value and not (value.lstrip("-").isdigit() or value.startswith("@")):
         raise ValueError("TELEGRAM_CHAT_ID: a chat ID is a number (with a minus in front for a group) or @channelname")
     return value
@@ -236,7 +281,10 @@ def update(values, clear=()):
     for name in clear:
         if name not in SECRETS:
             raise ValueError(f"Unknown setting: {name}")
+        if name == "PANEL_PASSWORD":
+            raise ValueError("PANEL_PASSWORD: the panel cannot be without a password")
         new[name] = ""
+    check_bound(new, clear)
     write({**saved(), **new})
     changed = sorted(name for name, value in new.items() if globals()[name] != value)
     globals().update(new)
@@ -248,12 +296,16 @@ def overlay(values, clear=()):
     for the Test buttons. Same rules as update(): an empty secret keeps the saved one."""
     import types
     result = types.SimpleNamespace(**{name: globals()[name] for name in EDITABLE})
+    new = {}
     for name, value in values.items():
         if name not in EDITABLE:
             raise ValueError(f"Unknown setting: {name}")
         if name in SECRETS and str(value or "").strip() == "":
             continue
-        setattr(result, name, normalize(name, value))
+        new[name] = normalize(name, value)
+    check_bound(new, clear)
+    for name, value in new.items():
+        setattr(result, name, value)
     for name in clear:
         if name in SECRETS:
             setattr(result, name, "")

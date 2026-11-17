@@ -80,6 +80,11 @@ def make_fakes():
     app["downloads"] = {}  # NZBGet: id -> "queue", or a history status like "SUCCESS/ALL"
     app["rescans"] = []  # one entry for every time the library was asked to scan
     app["telegram"] = []  # messages the bot sent
+    app["buttons"] = []  # the buttons under each of those messages (None if it had none)
+    app["updates"] = []  # what getUpdates has to hand out: presses on those buttons
+    app["answers"] = []  # the small confirmations after a press
+    app["edits"] = []  # messages that were rewritten after a press
+    app["progress"] = {}  # NZBGet: id -> (MB in total, MB left) of what is in the queue
     app["indexer_ids"] = []
 
     async def export(request):
@@ -150,7 +155,9 @@ def make_fakes():
                 {"NZBID": int(i), "Status": s} for i, s in app["downloads"].items() if s != "queue"]})
         if body["method"] == "listgroups":
             return web.json_response({"result": [
-                {"NZBID": int(i), "Status": "DOWNLOADING"} for i, s in app["downloads"].items() if s == "queue"]})
+                {"NZBID": int(i), "Status": "DOWNLOADING", "FileSizeMB": app["progress"].get(i, (0, 0))[0],
+                 "RemainingSizeMB": app["progress"].get(i, (0, 0))[1]}
+                for i, s in app["downloads"].items() if s == "queue"]})
         name, content, category = body["params"][:3]
         app["sent"].append((name, category, base64.b64decode(content)))
         app["downloads"][str(len(app["sent"]))] = "queue"
@@ -168,7 +175,23 @@ def make_fakes():
         if str(body.get("chat_id")) != "42":
             return web.json_response({"ok": False, "description": "Bad Request: chat not found"}, status=400)
         app["telegram"].append(body["text"])
-        return web.json_response({"ok": True})
+        app["buttons"].append(body.get("reply_markup"))
+        return web.json_response({"ok": True, "result": {"message_id": len(app["telegram"])}})
+
+    async def telegram_updates(request):
+        if request.match_info["token"] != "TESTTOKEN":
+            return web.json_response({"ok": False, "description": "Unauthorized"}, status=401)
+        body = await request.json()
+        return web.json_response({"ok": True, "result": [
+            u for u in app["updates"] if u["update_id"] >= body.get("offset", 0)]})
+
+    async def telegram_answer(request):
+        app["answers"].append((await request.json())["text"])
+        return web.json_response({"ok": True, "result": True})
+
+    async def telegram_edit(request):
+        app["edits"].append(await request.json())
+        return web.json_response({"ok": True, "result": {}})
 
     async def versions(request):
         return web.json_response({
@@ -189,6 +212,9 @@ def make_fakes():
         web.post("/jsonrpc", nzbget),
         web.post("/sync", rescan),
         web.post("/bot{token}/sendMessage", telegram),
+        web.post("/bot{token}/getUpdates", telegram_updates),
+        web.post("/bot{token}/answerCallbackQuery", telegram_answer),
+        web.post("/bot{token}/editMessageText", telegram_edit),
         web.get("/versions.json", versions),
     ])
     return app

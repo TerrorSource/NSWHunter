@@ -44,8 +44,9 @@
   .chip.bad, .badge.error { background: var(--bad-bg); color: var(--bad); }
   .badge.likely, .badge.sent { background: var(--info-bg); color: var(--info); }
   .badge.uncertain, .badge.review { background: var(--warn-bg); color: var(--warn); }
-  .notice { background: var(--bad-bg); color: var(--bad); border-radius: 9px; padding: 10px 14px; margin-bottom: 14px; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .notice { background: var(--bad-bg); color: var(--bad); border-radius: 9px; padding: 10px 14px; margin-bottom: 14px; overflow-wrap: anywhere; }
+  .notice.warn { background: var(--warn-bg); color: var(--warn); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); gap: 10px; margin-bottom: 16px; }
   /* Each tile is a button: it shows only the games that belong to it. */
   .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
           text-align: left; font-size: 15px; }
@@ -91,7 +92,18 @@
           background: color-mix(in srgb, var(--mute-bg) 45%, transparent); }
   .part b { font-weight: 600; }
   .rest { border-top: 1px solid var(--line); padding: 9px 14px; color: var(--soft); font-size: 13px; }
-  .more { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; }
+  .more { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; font-weight: 400; }
+  .confirm { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .authcard { max-width: 380px; margin: 8vh auto 0; background: var(--card); border: 1px solid var(--line);
+              border-radius: 12px; padding: 24px; display: grid; gap: 8px; }
+  .authcard h2 { font-size: 17px; margin: 6px 0 0; }
+  .authcard p { margin: 0 0 6px; }
+  .authcard label { color: var(--soft); font-size: 14px; margin-top: 6px; display: block; }
+  .authcard input { font: inherit; width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line);
+                    background: var(--bg); color: var(--text); }
+  .authcard input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .authcard button { margin-top: 10px; padding: 9px 12px; font-size: 15px; }
+  .authcard .testresult:empty { display: none; }
   .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .empty { color: var(--soft); text-align: center; padding: 40px 0; }
   .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
@@ -127,24 +139,46 @@
 </head>
 <body>
 <main>
-  <header>
-    <h1>NSWHunter <small id="version"></small></h1>
-    <span class="line grow" id="statusline">Loading…</span>
-    <button class="primary" id="sync">Sync now</button>
-  </header>
-  <nav class="views" id="views"></nav>
-  <div id="notice"></div>
-  <section id="view-updates">
-    <div class="stats" id="stats"></div>
-    <div class="tabs" id="tools"></div>
-    <div id="list"></div>
-  </section>
-  <section id="view-log" hidden>
-    <div class="log" id="log"></div>
-  </section>
-  <section id="view-config" hidden>
-    <div class="chips" id="chips"></div>
-    <form id="config" autocomplete="off"></form>
+  <div id="app" hidden>
+    <header>
+      <h1>NSWHunter <small id="version"></small></h1>
+      <span class="line grow" id="statusline">Loading…</span>
+      <button class="primary" id="sync">Sync now</button>
+      <button class="quiet" id="logout" title="Log out of the panel in this browser">Log out</button>
+    </header>
+    <nav class="views" id="views"></nav>
+    <div id="notice"></div>
+    <section id="view-updates">
+      <div class="stats" id="stats"></div>
+      <div class="tabs" id="tools"></div>
+      <div id="list"></div>
+    </section>
+    <section id="view-log" hidden>
+      <div class="tabs" id="logtools"></div>
+      <div class="log" id="log"></div>
+      <div class="empty" id="logmore"></div>
+    </section>
+    <section id="view-config" hidden>
+      <div class="chips" id="chips"></div>
+      <form id="config" autocomplete="off"></form>
+    </section>
+  </div>
+  <section id="auth" hidden>
+    <form id="authform" class="authcard">
+      <h1>NSWHunter</h1>
+      <h2 id="authtitle">Log in</h2>
+      <p class="line" id="authtext"></p>
+      <label for="auth-user">Username</label>
+      <input id="auth-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label for="auth-password">Password</label>
+      <input id="auth-password" type="password" autocomplete="current-password" required>
+      <div id="auth-repeat-row" hidden>
+        <label for="auth-repeat">Password again</label>
+        <input id="auth-repeat" type="password" autocomplete="new-password">
+      </div>
+      <div class="testresult bad" id="autherror" role="alert"></div>
+      <button class="primary" type="submit" id="authgo">Log in</button>
+    </form>
   </section>
 </main>
 <div id="toast"></div>
@@ -172,9 +206,67 @@ function remembered(key, fallback) {
 function remember(key, value) {
   try { localStorage.setItem("nswhunter-" + key, value); } catch (e) { /* private window */ }
 }
-let state = null, needle = "", busy = new Set(), expanded = new Set(), fallen = new Set();
-let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {};
+let state = null, needle = "", busy = new Set(), expanded = new Set(), fallen = new Set(), thrown = new Set();
+let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {}, confirming = false;
 let only = remembered("only", "choice"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
+let auth = null;  // "login" or "setup" while the login screen is up
+let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logShown = 100;
+const BULK = 9;  // "Download all" takes the best release of a game from this score on
+
+// Every call to the server. Without a login the server says so, and the login screen comes up.
+const LOGIN = new Error("login");
+async function request(path, body) {
+  const options = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, options);
+  const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
+  if (r.status === 401 && data.login) { needLogin(data.setup); throw LOGIN; }
+  return {status: r.status, ok: r.ok, data};
+}
+
+// ---------------------------------------------------------------- logging in
+function needLogin(setup) {
+  const mode = setup ? "setup" : "login";
+  if (auth === mode) return;
+  auth = mode;
+  $("app").hidden = true; $("auth").hidden = false;
+  $("authtitle").textContent = setup ? "Make your login" : "Log in";
+  $("authtext").textContent = setup
+    ? "The panel holds the keys of your services, so it needs a login. Choose a username and a password of at least 8 characters."
+    : "";
+  $("auth-repeat-row").hidden = !setup;
+  $("auth-password").setAttribute("autocomplete", setup ? "new-password" : "current-password");
+  $("authgo").textContent = setup ? "Make login" : "Log in";
+  $("autherror").textContent = "";
+  $("auth-password").value = ""; $("auth-repeat").value = "";
+  $("auth-user").focus();
+}
+$("authform").addEventListener("submit", async e => {
+  e.preventDefault();
+  const user = $("auth-user").value.trim(), password = $("auth-password").value;
+  const say = text => { $("autherror").textContent = text; };
+  if (auth === "setup" && password.length < 8) return say("Use at least 8 characters for the password.");
+  if (auth === "setup" && password !== $("auth-repeat").value) return say("The two passwords are not the same.");
+  $("authgo").disabled = true; say("");
+  try {
+    const r = await fetch(auth === "setup" ? "/api/setup" : "/api/login", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({user, password})});
+    const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
+    if (!data.ok) { say(data.error || "Failed"); $("auth-password").select(); return; }
+    auth = null; opened = false;
+    $("auth").hidden = true; $("app").hidden = false;
+    $("auth-password").value = ""; $("auth-repeat").value = "";
+    await load();
+  } catch (err) {
+    say("No connection to NSWHunter");
+  } finally {
+    $("authgo").disabled = false;
+  }
+});
+$("logout").addEventListener("click", async () => {
+  try { await request("/api/logout", {}); } catch (e) { /* the screen below comes up either way */ }
+  state = null;
+  needLogin(false);
+});
 
 // The score is the chance that a download is the right one, from 1 to 10.
 function score(value, title) {
@@ -186,6 +278,10 @@ const SERVICES = {slm: "Library", prowlarr: "Prowlarr", downloader: "Download cl
 // How a sent release is doing, as the download client tells it.
 const SENT = {sent: "added to queue", downloading: "downloading", done: "downloaded, waiting for the library",
               stuck: "downloaded, but not seen in your library"};
+function sentText(grab) {
+  const percent = grab.state === "downloading" && grab.percent !== null && grab.percent !== undefined ? " " + grab.percent + "%" : "";
+  return (SENT[grab.state] || SENT.sent) + percent;
+}
 function autoText(min) { return min ? "from score " + min : "off: everything awaits your choice"; }
 function plural(n, one, many) { return n + " " + (n === 1 ? one : many || one + "s"); }
 
@@ -201,6 +297,7 @@ function ago(ts) {
   if (s < 129600) return plural(Math.round(s / 3600), "hour") + " ago";
   return plural(Math.round(s / 86400), "day") + " ago";
 }
+function moment(ts) { return new Date(ts * 1000).toLocaleString(undefined, {dateStyle: "short", timeStyle: "short"}); }
 function size(bytes) {
   if (!bytes) return "";
   return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + " GB" : Math.round(bytes / 1048576) + " MB";
@@ -239,6 +336,7 @@ const SORTS = {
 // has: does a game belong to it; number: what the tile counts, if not those games.
 const live = g => g.items.filter(i => !i.ignored);
 const failed = g => g.items.flatMap(i => i.failed || []);
+const waiting = i => i.status === "review";
 const TILES = {
   all: {text: "games in your library", has: () => true, number: () => state.library.games,
         none: "Your library misses no updates. Or the first round is still running."},
@@ -246,12 +344,15 @@ const TILES = {
             none: "No game misses an update."},
   dlc: {text: "DLC missing", has: g => g.items.some(i => i.type === "dlc"), number: () => state.library.dlc,
         none: "No game misses DLC."},
-  choice: {text: "awaiting your choice", has: g => live(g).some(i => i.candidates.length && !i.grab),
+  choice: {text: "awaiting your choice", has: g => g.items.some(waiting),
            none: "Nothing awaits your choice. Releases that are found show up here."},
   queue: {text: "added to queue", has: g => live(g).some(i => i.grab),
           none: "Nothing is in the queue of the download client."},
   failed: {text: "download failed", has: g => failed(g).length > 0,
            none: "No download failed."},
+  // Not games but releases: what was sent and is now in the library.
+  arrived: {text: "arrived", has: () => false, number: () => state.arrived.length,
+            none: "Nothing that was sent has arrived in the last 30 days."},
   ignored: {text: "ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
 };
 function tiles(all) {
@@ -259,16 +360,19 @@ function tiles(all) {
   return Object.keys(TILES).filter(key =>
     (key !== "dlc" || state.settings.dlc) && (key !== "ignored" || count(key) > 0 || only === key));
 }
+// What "Download all" would send: the best release of every waiting item, if it scores high enough.
+function ready() {
+  return state.items.filter(i => waiting(i) && (i.candidates[0].score || 0) >= BULK && i.candidates[0].kind !== "bundle");
+}
 
 async function post(path, body, key) {
   busy.add(key); render();
   try {
-    const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-    const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
+    const {data} = await request(path, body);
     if (!data.ok) toast(data.error || "Failed");
     return data;
   } catch (e) {
-    toast("No connection to NSWHunter");
+    if (e !== LOGIN) toast("No connection to NSWHunter");
     return {ok: false};
   } finally {
     busy.delete(key); await load();
@@ -292,6 +396,11 @@ function link(release) {
   const safe = /^https?:\/\//.test(release.infoUrl || "");
   return safe ? h("a", {href: release.infoUrl, target: "_blank", rel: "noopener noreferrer"}, release.title) : release.title;
 }
+// A list that opens on a click: "▸ 3 releases ruled out".
+function fold(open, text, toggle) {
+  return h("div", {class: "rest"},
+    h("button", {class: "quiet", "aria-expanded": open ? "true" : "false", onclick: toggle}, (open ? "▾ " : "▸ ") + text));
+}
 
 function candidate(item, c, first) {
   const version = [c.display_version ? "v" + c.display_version : null,
@@ -310,8 +419,18 @@ function candidate(item, c, first) {
       sent ? h("span", {class: "badge sent"}, "sent") : null,
       h("button", {class: first && !sent ? "primary" : "", disabled: busy.has(c.guid), onclick: () => grab(item, c)},
         sent ? "Send again" : "Download"),
-      h("button", {class: "quiet", title: "Never show this release again",
+      h("button", {class: "quiet", title: "Do not show this release again. It can be restored below the list.",
                    onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Reject")));
+}
+// A release that is not a candidate: ruled out, or rejected by hand.
+function aside(release, badge, why, button) {
+  return h("div", {class: "cand fell"},
+    h("div", {}, h("span", {class: "badge"}, badge)),
+    h("div", {},
+      h("div", {class: "name"}, link(release)),
+      h("div", {class: "sub"}, [size(release.size), release.indexer, day(release.published)].filter(Boolean).join(" · ")),
+      why ? h("div", {class: "sub"}, why) : null),
+    h("div", {class: "acts"}, button));
 }
 
 // One missing thing of a game (the update, or one DLC) with its releases.
@@ -323,13 +442,14 @@ function part(item) {
       item.type === "update" && item.ladder && item.ladder.length > 1
         ? h("span", {class: "sub", title: "Which version in release names is which update"},
             "  " + item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (by date)" : "")).join(" · ")) : null),
+    item.asked ? h("span", {class: "badge", title: "The best release was put to you in Telegram, with buttons to decide there"}, "asked in Telegram") : null,
     item.ignored ? h("span", {class: "badge"}, "ignored") : null,
     h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
       item.ignored ? "Stop ignoring" : "Ignore"))];
   if (item.grab) {
     rows.push(h("div", {class: "sent-row"},
       h("span", {class: "badge " + (item.grab.state === "stuck" ? "review" : "sent")},
-        (item.grab.auto ? "automatically " : "") + (SENT[item.grab.state] || SENT.sent)),
+        (item.grab.auto ? "automatically " : "") + sentText(item.grab)),
       h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
       h("button", {class: "quiet", title: "Forget that this was sent, so it awaits your choice again",
                    onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Not sent")));
@@ -341,29 +461,36 @@ function part(item) {
       h("span", {class: "grow"}, f.title, h("span", {class: "sub"}, " · " + f.why + " · " + ago(f.failed_at))),
       h("button", {disabled: busy.has(f.guid), title: "Send this release to the download client once more",
                    onclick: () => grab(item, f)}, "Try again"),
-      h("button", {class: "quiet", title: "Take this off the list of failed downloads",
+      h("button", {class: "quiet", title: "Take this off the list of failed downloads. The release stays rejected.",
                    onclick: () => post("/api/dismiss", {key: item.key, guid: f.guid}, "d" + f.guid)}, "Dismiss")));
   }
   // The other releases stay in view after one was sent: another can still be chosen.
   if (!item.ignored) rows.push(...item.candidates.map((c, i) => candidate(item, c, i === 0 && !item.grab)));
+  if (item.ignored) return rows;
   // What was ruled out, and why: to see that nothing good was thrown away, and to overrule it.
   const rejected = item.rejected || [];
-  if (rejected.length && !item.ignored) {
+  if (rejected.length) {
     const open = fallen.has(item.key);
-    rows.push(h("div", {class: "rest"},
-      h("button", {class: "quiet", "aria-expanded": open ? "true" : "false",
-                   onclick: () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderList(); }},
-        (open ? "▾ " : "▸ ") + plural(rejected.length, "release") + " ruled out")));
-    if (open) rows.push(...rejected.map(r =>
-      h("div", {class: "cand fell"},
-        h("div", {}, h("span", {class: "badge"}, "ruled out")),
-        h("div", {},
-          h("div", {class: "name"}, link(r)),
-          h("div", {class: "sub"}, [size(r.size), r.indexer, day(r.published)].filter(Boolean).join(" · ")),
-          h("div", {class: "sub"}, r.reason)),
-        h("div", {class: "acts"},
-          h("button", {disabled: busy.has(r.guid), title: "Send this release to the download client after all",
-                       onclick: () => grab(item, r)}, "Download anyway")))));
+    rows.push(fold(open, plural(rejected.length, "release") + " ruled out",
+      () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderList(); }));
+    if (open) rows.push(...rejected.map(r => aside(r, "ruled out", r.reason,
+      h("button", {disabled: busy.has(r.guid), title: "Send this release to the download client after all",
+                   onclick: () => grab(item, r)}, "Download anyway"))));
+  }
+  // What you rejected yourself: it can be taken back.
+  const down = item.turned_down || [], count = down.length + (item.unnamed || 0);
+  if (count) {
+    const open = thrown.has(item.key);
+    rows.push(fold(open, plural(count, "release") + " you rejected",
+      () => { open ? thrown.delete(item.key) : thrown.add(item.key); renderList(); }));
+    if (open) {
+      rows.push(...down.map(r => aside(r, "rejected", "",
+        h("button", {disabled: busy.has(r.guid), title: "Put this release back in the list",
+                     onclick: () => post("/api/restore", {key: item.key, guid: r.guid}, r.guid)}, "Restore"))));
+      if (item.unnamed) rows.push(h("div", {class: "sent-row"},
+        h("span", {class: "grow sub"}, plural(item.unnamed, "release") + " rejected before their names were kept. Restored, they return at the next search."),
+        h("button", {disabled: busy.has("r" + item.key), onclick: () => post("/api/restore", {key: item.key}, "r" + item.key)}, "Restore all")));
+    }
   }
   return rows;
 }
@@ -372,8 +499,12 @@ function gameCard(game) {
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
   const review = live(game).filter(i => i.status === "review"), sent = live(game).filter(i => i.grab);
   const count = review.reduce((n, i) => n + i.candidates.length, 0);
-  const best = Math.max(0, ...review.flatMap(i => i.candidates.map(c => c.score || 0)));
-  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length;
+  // The best release of the game: the one a click on Download on the card sends.
+  // Of equal scores the update goes before DLC.
+  const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
+  const top = review.map(i => ({item: i, release: i.candidates[0]})).sort((a, b) => rank(b) - rank(a))[0];
+  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length
+    || (i.turned_down || []).length || i.unnamed;
   const withSomething = game.items.filter(something);
   const empty = game.items.filter(i => !something(i) && i.type !== "dlcpack");
   const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
@@ -381,9 +512,10 @@ function gameCard(game) {
   const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
   const label = allIgnored ? ["ignored", "ignored"] : sent.length ? ["sent", "in queue"]
     : game.items.some(i => i.status === "none") ? ["none", "nothing found"] : ["new", "not searched yet"];
-  // In the queue and the failed list the releases themselves are the point: name them on the card.
-  const more = only === "queue" ? sent.map(i => (SENT[i.grab.state] || SENT.sent) + ": " + i.grab.title)
-    : only === "failed" ? failed(game).map(f => "failed " + ago(f.failed_at) + ": " + f.title) : [];
+  // Named on the card, so it need not be opened: what is in the queue, what failed, or the best release.
+  const more = only === "queue" ? sent.map(i => sentText(i.grab) + ": " + i.grab.title)
+    : only === "failed" ? failed(game).map(f => "failed " + ago(f.failed_at) + ": " + f.title)
+    : top ? ["best: " + top.release.title] : [];
   const names = h("div", {},
     h("div", {class: "title"}, game.name),
     h("div", {class: "sub"}, h("span", {class: "mono"}, game.id),
@@ -401,7 +533,10 @@ function gameCard(game) {
       count ? h("span", {class: "sub"}, plural(count, "release")) : null,
       failed(game).length ? h("span", {class: "badge error"}, failed(game).length + " failed") : null,
       sent.length && count ? h("span", {class: "badge sent"}, sent.length + " in queue") : null,
-      count ? score(best, "Highest score of the releases that were found") : h("span", {class: "badge " + label[0]}, label[1]),
+      top ? score(top.release.score, "Score of the best release that was found") : h("span", {class: "badge " + label[0]}, label[1]),
+      top ? h("button", {class: "primary", disabled: busy.has(top.release.guid),
+                         title: "Send the best release to the download client: " + top.release.title,
+                         onclick: () => grab(top.item, top.release)}, "Download") : null,
       h("button", {disabled: searching,
                    onclick: () => post("/api/search", {key: game.items[0].key}, "s" + game.id).then(d => d.ok && toast(d.found ? plural(d.found, "new candidate release") : "Nothing new found"))},
         searching ? "Searching…" : "Search now"),
@@ -438,6 +573,9 @@ function render() {
   const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
   put($("notice"),
     !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is not set up yet. Fill in the Configuration tab.") : null,
+    // A round that broke is said on every page, not only in the log.
+    st.error ? h("div", {class: "notice"}, "The last round did not finish (" + ago(st.error.at) + "). " + st.error.text + " The Log tab has the details.") : null,
+    st.skipped ? h("div", {class: "notice warn"}, "The last round left out " + plural(st.skipped, "game or release", "games or releases") + " because of an error; the rest went on. The Log tab says which.") : null,
     ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.text)) : []));
 
   const all = games(), keys = tiles(all);
@@ -445,13 +583,25 @@ function render() {
   put($("stats"), ...keys.map(key => {
     const tile = TILES[key], number = tile.number ? tile.number() : all.filter(tile.has).length;
     return h("button", {class: "stat" + (only === key ? " on" : "") + (key === "failed" && number ? " alert" : ""),
-                        "aria-pressed": only === key ? "true" : "false", title: "Show only these games",
-                        onclick: () => { only = key; remember("only", key); render(); }},
+                        "aria-pressed": only === key ? "true" : "false", title: "Show only these",
+                        onclick: () => { only = key; confirming = false; remember("only", key); render(); }},
       h("b", {}, number), h("span", {}, tile.text));
   }));
 
+  const n = ready().length;
   put($("tools"),
     h("span", {class: "line grow", id: "shown"}),
+    // Many games waiting: send the best release of each in one go. Asked once more, in the page.
+    only === "choice" && n && !confirming ? h("button", {
+      title: "The best release of every game, if its score is " + BULK + " or 10. Bundles are left for a click of their own.",
+      onclick: () => { confirming = true; render(); }}, "Download all " + n + " with score " + BULK + "+") : null,
+    only === "choice" && n && confirming ? h("span", {class: "confirm"},
+      h("span", {}, "Send " + plural(n, "release") + " to the download client?"),
+      h("button", {class: "primary", disabled: busy.has("bulk"), onclick: () => {
+        confirming = false;
+        post("/api/grab-best", {min_score: BULK}, "bulk").then(d => d.ok && toast(plural(d.sent, "release") + " added to the queue"));
+      }}, "Yes, send"),
+      h("button", {onclick: () => { confirming = false; render(); }}, "Cancel")) : null,
     h("label", {for: "sort"}, "Sort by"),
     h("select", {id: "sort", onchange: e => { sortBy = e.target.value; flipped = false; remember("sort", sortBy); remember("flipped", ""); render(); }},
       Object.entries(SORTS).map(([key, v]) => h("option", {value: key, selected: key === sortBy}, v.text))),
@@ -462,20 +612,60 @@ function render() {
     h("input", {type: "search", placeholder: "Filter by name", value: needle, id: "filter",
                 oninput: e => { needle = e.target.value; renderList(); }}));
   renderList();
-
-  put($("log"), state.events.length ? state.events.map(e =>
-    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString(undefined, {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text)))
-    : h("div", {class: "line"}, "Nothing happened yet."));
 }
 
 function renderList() {
   const tile = TILES[only] || TILES.choice, word = needle.trim().toLowerCase();
+  if (only === "arrived") {
+    const mine = state.arrived, rows = mine.filter(a => !word || (a.name + " " + a.title).toLowerCase().includes(word));
+    $("shown").textContent = (word ? rows.length + " of " : "") + plural(mine.length, "release") + " arrived in the last 30 days";
+    put($("list"), rows.length ? h("div", {class: "log"}, rows.map(a =>
+      h("div", {}, h("time", {}, moment(a.at)),
+        h("span", {}, h("b", {}, a.name), " · " + a.what + (a.auto ? " · sent automatically" : ""),
+          h("div", {class: "more"}, a.title + (a.note ? " · " + a.note : ""))))))
+      : h("div", {class: "empty"}, word && mine.length ? "Nothing with that name in this list." : tile.none));
+    return;
+  }
   const mine = games().filter(tile.has);
   const items = mine.filter(g => !word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word));
   // The library tile counts every game; the list holds the ones that miss something.
   const what = only === "all" ? " that miss an update" + (state.settings.dlc ? " or DLC" : "") : " · " + tile.text;
   $("shown").textContent = (word ? items.length + " of " : "") + plural(mine.length, "game") + what;
   put($("list"), ...(items.length ? items.map(gameCard) : [h("div", {class: "empty"}, word && mine.length ? "No game with that name in this list." : tile.none)]));
+}
+
+// ---------------------------------------------------------------- Log
+const LEVELS = {all: "Everything", warn: "Warnings and errors", error: "Errors only"};
+async function loadLog() {
+  try {
+    const {data} = await request("/api/log");
+    events = data.events || [];
+    renderLog();
+  } catch (e) {
+    if (e !== LOGIN) toast("Could not load the log");
+  }
+}
+// The tools are built once, so typing in the search box is not interrupted by a refresh.
+function renderLogTools() {
+  put($("logtools"),
+    h("span", {class: "line grow", id: "logcount"}),
+    h("label", {for: "loglevel"}, "Show"),
+    h("select", {id: "loglevel", onchange: e => { logLevel = e.target.value; logShown = 100; remember("loglevel", logLevel); renderLog(); }},
+      Object.entries(LEVELS).map(([key, text]) => h("option", {value: key, selected: key === logLevel}, text))),
+    h("input", {type: "search", placeholder: "Search the log", value: logNeedle, id: "logfilter",
+                oninput: e => { logNeedle = e.target.value; logShown = 100; renderLog(); }}));
+}
+function renderLog() {
+  if (!events) return;
+  const word = logNeedle.trim().toLowerCase();
+  const rows = events.filter(e => (logLevel === "all" || e.level === "error" || (logLevel === "warn" && e.level === "warn"))
+    && (!word || e.text.toLowerCase().includes(word)));
+  $("logcount").textContent = rows.length === events.length ? plural(events.length, "line") : rows.length + " of " + plural(events.length, "line");
+  put($("log"), rows.length ? rows.slice(0, logShown).map(e =>
+    h("div", {class: e.level}, h("time", {}, moment(e.at)), h("span", {}, e.text)))
+    : h("div", {class: "line"}, events.length ? "No line in the log matches." : "Nothing happened yet."));
+  put($("logmore"), rows.length > logShown
+    ? h("button", {onclick: () => { logShown += 200; renderLog(); }}, "Show " + Math.min(200, rows.length - logShown) + " more") : null);
 }
 
 // ---------------------------------------------------------------- Configuration
@@ -514,11 +704,15 @@ const GROUPS = [
     {name: "TELEGRAM_BOT_TOKEN", label: "Bot token", secret: true,
      help: "Create a bot with @BotFather in Telegram; it gives you the token. Then send your bot one message yourself, or it is not allowed to message you."},
     {name: "TELEGRAM_CHAT_ID", label: "Chat ID", placeholder: "123456789",
-     help: "@userinfobot tells you your own ID. For a group it is a number with a minus in front. You get a message when something was sent automatically, something awaits your choice, a download failed or something arrived."}]},
+     help: "@userinfobot tells you your own ID. For a group it is a number with a minus in front. You get a message when something was sent automatically, a download failed, something arrived or a round broke."},
+    {name: "TELEGRAM_ASK", label: "Choose in Telegram", checkbox: true,
+     help: "For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round, the highest scores first. Only the chat above can press them. Switch this on only for a bot that NSWHunter has to itself: it then reads what the bot receives, and another program that reads the same bot would miss its messages. Switched off, you get one message that says how many await your choice."}]},
   {title: "Panel", fields: [
     {name: "PANEL_USER", label: "Username"},
-    {name: "PANEL_PASSWORD", label: "Password", secret: true,
-     help: "Without a password the panel has no login. After a change your browser asks you to log in again."}]},
+    {name: "PANEL_PASSWORD", label: "Password", secret: true, required: true,
+     help: "At least 8 characters; only a hash of it is kept. After a change every other browser has to log in again."},
+    {name: "PANEL_HOSTS", label: "Host names", placeholder: "nswhunter.example.com",
+     help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
 ];
 
 function fieldRow(f, client) {
@@ -534,7 +728,8 @@ function fieldRow(f, client) {
     control = h("div", {class: "row"},
       h("input", {id, name: f.name, type: "password", autocomplete: "new-password", disabled: wipe,
                   placeholder: wipe ? "will be cleared on save" : set ? "set; leave empty to keep it" : "not set"}),
-      set ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(f.name) : clearing.add(f.name); renderConfig(); }},
+      // A key can be emptied; the password of the panel can only be replaced.
+      set && !f.required ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(f.name) : clearing.add(f.name); renderConfig(); }},
         wipe ? "Keep it" : "Clear") : null);
   } else {
     control = h("input", {id, name: f.name, type: "text", value: settings.values[f.name] || "", placeholder: f.placeholder || "", spellcheck: "false"});
@@ -555,14 +750,12 @@ async function runTest(service) {
   const values = typed();
   tests[service] = {busy: true}; renderConfig();
   try {
-    const r = await fetch("/api/test", {method: "POST", headers: {"Content-Type": "application/json"},
-                                       body: JSON.stringify({service, values, clear: [...clearing]})});
-    const data = await r.json();
+    const {data} = await request("/api/test", {service, values, clear: [...clearing]});
     tests[service] = {ok: data.ok === true, text: data.text || "Failed"};
   } catch (e) {
-    tests[service] = {ok: false, text: "No connection to NSWHunter"};
+    tests[service] = {ok: false, text: e === LOGIN ? "Log in first" : "No connection to NSWHunter"};
   }
-  renderConfig();
+  if (!auth) renderConfig();
 }
 
 // Typed but not yet saved values survive a rebuild of the form (switching client, "Clear").
@@ -585,7 +778,7 @@ function renderConfig(client) {
       g.test ? testRow(g.test, g.testText) : null)),
     h("div", {class: "savebar"},
       h("button", {class: "primary", type: "submit", id: "save"}, "Save and test the connections"),
-      h("span", {class: "line"}, "Saved settings are kept in /data/settings.json and take precedence over the values in your compose file.")),
+      h("span", {class: "line"}, "Saved settings are kept in /data/settings.json and take precedence over the values in your compose file. A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.")),
     h("div", {class: "results", id: "results"}));
   for (const [name, value] of Object.entries(keep)) {
     const el = $("config").elements[name];
@@ -595,14 +788,14 @@ function renderConfig(client) {
 
 async function openConfig() {
   try {
-    const r = await fetch("/api/settings");
-    if (!r.ok) throw new Error();
-    settings = await r.json();
+    const {data, ok} = await request("/api/settings");
+    if (!ok) throw new Error();
+    settings = data;
     clearing.clear(); tests = {};
     put($("config"));
     renderConfig();
   } catch (e) {
-    toast("Could not load the settings");
+    if (e !== LOGIN) toast("Could not load the settings");
   }
 }
 
@@ -612,6 +805,7 @@ function show(name) {
   $("view-log").hidden = name !== "log";
   $("view-config").hidden = name !== "config";
   if (name === "config") openConfig();
+  if (name === "log") { renderLogTools(); renderLog(); loadLog(); }
   render();
 }
 
@@ -620,9 +814,7 @@ $("config").addEventListener("submit", async e => {
   const values = typed();
   $("save").disabled = true; $("save").textContent = "Saving and testing…";
   try {
-    const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
-                                           body: JSON.stringify({values, clear: [...clearing]})});
-    const data = await r.json();
+    const {data} = await request("/api/settings", {values, clear: [...clearing]});
     if (!data.ok) { toast(data.error || "Saving failed"); return; }
     settings = {values: data.values, secrets: data.secrets};
     clearing.clear();
@@ -634,28 +826,35 @@ $("config").addEventListener("submit", async e => {
     toast("Settings saved");
     load();
   } catch (err) {
-    toast("No connection to NSWHunter");
+    if (err !== LOGIN) toast("No connection to NSWHunter");
   } finally {
     if ($("save")) { $("save").disabled = false; $("save").textContent = "Save and test the connections"; }
   }
 });
 
 async function load() {
+  if (auth) return;  // the login screen is up: nothing to fetch until it is passed
   try {
-    const r = await fetch("/api/state");
-    if (!r.ok) throw new Error();
-    state = await r.json();
+    const {data, ok} = await request("/api/state");
+    if (!ok) throw new Error();
+    state = data;
+    $("app").hidden = false;
     // First visit without settings: go straight to where they are filled in.
-    if (!opened) { opened = true; if (!state.configured) { show("config"); return; } }
+    if (!opened) { opened = true; if (!state.configured) { show("config"); return; } show(view); return; }
     // Keep typing in the filter box and keep the sort list open: only rebuild around them.
     if (["filter", "sort"].includes(document.activeElement && document.activeElement.id)) renderList(); else render();
+    if (view === "log") loadLog();
   } catch (e) {
-    $("statusline").textContent = "No connection to NSWHunter";
+    if (e !== LOGIN) { $("app").hidden = false; $("statusline").textContent = "No connection to NSWHunter"; }
   }
 }
 $("sync").addEventListener("click", async () => {
-  await fetch("/api/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-  toast("Round started"); setTimeout(load, 1500);
+  try {
+    await request("/api/sync", {});
+    toast("Round started"); setTimeout(load, 1500);
+  } catch (e) {
+    if (e !== LOGIN) toast("No connection to NSWHunter");
+  }
 });
 load();
 setInterval(load, 8000);

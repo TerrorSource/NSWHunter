@@ -1,12 +1,13 @@
 """The Configuration tab: saving, validating and never handing a secret back."""
 import asyncio
-import base64
 import os
 import stat
 
+import aiohttp
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+import auth
 import config
 import main
 
@@ -17,9 +18,11 @@ def clean_settings():
     yield
     for name, value in before.items():
         setattr(config, name, value)
-    for path in (config.SETTINGS_FILE, config.STATE_FILE):
+    for path in (config.SETTINGS_FILE, config.STATE_FILE, config.SESSIONS_FILE):
         if os.path.exists(path):
             os.remove(path)
+    auth.sessions.clear()
+    auth.failures.clear()
 
 
 def test_update_saves_and_applies():
@@ -62,6 +65,8 @@ def test_empty_secret_keeps_the_old_one_and_clear_removes_it():
     {"PROWLARR_CATEGORIES": ""},
     {"AUTO_DOWNLOAD": "11"},
     {"TZ": "UTC"},                           # not a setting of the Configuration tab
+    {"PANEL_PASSWORD": "short"},             # at least 8 characters
+    {"PANEL_HOSTS": "http://nas.example"},   # names only
     {"SLM_URL": "http://ok", "AUTO_DOWNLOAD": "nee"},
 ])
 def test_wrong_values_change_nothing(values):
@@ -97,15 +102,21 @@ def test_api_test_button_reports_instead_of_failing():
 
 
 def test_secrets_never_leave():
-    config.update({"SLM_API_KEY": "slm_abc", "PANEL_PASSWORD": "pw"})
+    config.update({"SLM_API_KEY": "slm_abc", "PANEL_PASSWORD": "correct horse"})
     shown = config.editable()
-    assert "slm_abc" not in str(shown) and "pw" not in str(shown["values"])
+    assert "slm_abc" not in str(shown) and "correct horse" not in str(shown)
     assert shown["secrets"]["SLM_API_KEY"] is True and shown["secrets"]["NZBGET_PASSWORD"] is False
 
 
-def api(test):
+def api(test, login=True):
+    """Run `test(client)` against the panel; with `login` the client has made a login first."""
     async def body():
-        async with TestClient(TestServer(main.make_app())) as client:
+        # The test server is an IP address: a browser keeps its cookies, this client must be told to.
+        jar = aiohttp.CookieJar(unsafe=True)
+        async with TestClient(TestServer(main.make_app()), cookie_jar=jar) as client:
+            if login:
+                r = await client.post("/api/setup", json={"user": "hunter", "password": "correct horse"})
+                assert r.status == 200
             await test(client)
     asyncio.run(body())
 
@@ -134,27 +145,44 @@ def test_api_refuses_a_wrong_value():
     api(test)
 
 
-def test_panel_password_works_at_once_and_can_be_removed():
-    async def test(client):
-        r = await client.post("/api/settings", json={"values": {"PANEL_USER": "hunter", "PANEL_PASSWORD": "pw"}})
-        assert r.status == 200
-        assert (await client.get("/api/settings")).status == 401
-        assert (await client.get("/health")).status == 200
-        login = {"Authorization": "Basic " + base64.b64encode(b"hunter:pw").decode()}
-        assert (await client.get("/api/settings", headers=login)).status == 200
-        wrong = {"Authorization": "Basic " + base64.b64encode(b"hunter:fout").decode()}
-        assert (await client.get("/api/settings", headers=wrong)).status == 401
-        r = await client.post("/api/settings", json={"values": {}, "clear": ["PANEL_PASSWORD"]}, headers=login)
-        assert r.status == 200 and (await client.get("/api/settings")).status == 200
-    api(test)
-
-
-def test_panel_password_is_kept_as_a_hash():
-    config.update({"PANEL_PASSWORD": "hunter2"})
+def test_panel_password_is_kept_as_a_hash_and_cannot_be_removed():
+    config.update({"PANEL_PASSWORD": "hunter2hunter2"})
     assert config.PANEL_PASSWORD.startswith("scrypt$") and "hunter2" not in open(config.SETTINGS_FILE).read()
-    assert config.check_password("hunter2") and not config.check_password("hunter3")
-    config.update({}, clear=["PANEL_PASSWORD"])
-    assert config.PANEL_PASSWORD == "" and not config.check_password("")
+    assert config.check_password("hunter2hunter2") and not config.check_password("hunter3hunter3")
+    with pytest.raises(ValueError):
+        config.update({}, clear=["PANEL_PASSWORD"])
+    assert config.check_password("hunter2hunter2")
+
+
+def test_a_saved_key_is_only_sent_to_its_own_address():
+    config.update({"PROWLARR_URL": "http://nas:9696", "PROWLARR_API_KEY": "key123",
+                   "NZBGET_URL": "http://nas:6789", "NZBGET_PASSWORD": "geheim"})
+    # Another host, port or scheme with the saved key: refused, for testing and for saving.
+    for elsewhere in ("http://evil.example:9696", "http://nas:9697", "https://nas:9696"):
+        with pytest.raises(ValueError, match="PROWLARR_API_KEY: fill it in again"):
+            config.overlay({"PROWLARR_URL": elsewhere, "PROWLARR_API_KEY": ""})
+        with pytest.raises(ValueError, match="PROWLARR_API_KEY: fill it in again"):
+            config.update({"PROWLARR_URL": elsewhere})
+    assert config.PROWLARR_URL == "http://nas:9696"
+    with pytest.raises(ValueError, match="NZBGET_PASSWORD"):
+        config.overlay({"NZBGET_URL": "http://evil.example"})
+    # The key typed again, the key emptied, the same server, or no address at all: fine.
+    assert config.overlay({"PROWLARR_URL": "http://other:9696", "PROWLARR_API_KEY": "new"}).PROWLARR_API_KEY == "new"
+    assert config.overlay({"PROWLARR_URL": "http://other:9696"}, clear=["PROWLARR_API_KEY"]).PROWLARR_API_KEY == ""
+    assert config.overlay({"PROWLARR_URL": "http://NAS:9696/prowlarr/"}).PROWLARR_API_KEY == "key123"
+    assert config.overlay({"PROWLARR_URL": ""}).PROWLARR_URL == ""
+    # An address without a saved key has nothing to give away.
+    assert config.overlay({"SLM_URL": "http://anywhere:3000"}).SLM_URL == "http://anywhere:3000"
+
+
+def test_the_test_button_does_not_send_a_saved_key_elsewhere():
+    async def test(client):
+        await client.post("/api/settings", json={"values": {"PROWLARR_URL": "http://nas:9696", "PROWLARR_API_KEY": "key123"}})
+        r = await client.post("/api/test", json={"service": "prowlarr", "values": {
+            "PROWLARR_URL": str(client.make_url("")).rstrip("/"), "PROWLARR_API_KEY": ""}})
+        data = await r.json()
+        assert data["ok"] is False and "fill it in again" in data["text"]
+    api(test)
 
 
 def test_password_saved_by_an_older_version_is_hashed_at_start():

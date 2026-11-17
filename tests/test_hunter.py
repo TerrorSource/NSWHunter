@@ -32,7 +32,8 @@ def run(test, **settings):
             "AUTO_DOWNLOAD": "off", "AUTO_BUNDLES": False, "INCLUDE_DLC": False,
             "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 0, "SEARCH_INTERVAL_HOURS": 24,
             "SEARCH_BY_TITLE_ID": False, "GRAB_WAIT_MINUTES": 60, "WATCH_SECONDS": 120,
-            "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "", "TELEGRAM_API_URL": base, **settings}
+            "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "", "TELEGRAM_API_URL": base,
+            "TELEGRAM_ASK": False, **settings}
         saved = {k: getattr(config, k) for k in values}
         for path in (config.STATE_FILE, config.VERSIONS_FILE):
             if os.path.exists(path):
@@ -485,14 +486,200 @@ def test_release_unknown_to_the_client_is_listed_as_failed():
     run(test)
 
 
-def test_dismiss_takes_a_failed_download_off_the_list_and_keeps_it_skipped():
-    import main
-
+def test_dismiss_takes_a_failed_download_off_the_list_and_keeps_it_rejected():
     async def test(hunter, fakes):
         first = await send_best(hunter)
         fakes["downloads"]["1"] = "FAILURE/PAR"
         await hunter.watch()
-        await main.do_dismiss(hunter, {"key": ALAN, "guid": first})
+        hunter.dismiss(ALAN, first)
         item = hunter.state["items"][ALAN]
         assert item["failed"] == [] and first in item["blocked"]
+        # It moved to what the user rejected, so it can still be restored.
+        assert [r["guid"] for r in item["turned_down"]] == [first]
     run(test)
+
+
+def test_a_round_that_breaks_is_told_and_the_next_good_one_clears_it():
+    async def test(hunter, fakes):
+        real = hunter.check_services
+
+        async def broken():
+            raise TypeError("boom")
+        hunter.check_services = broken
+        await hunter.round()
+        await hunter.round()
+        assert hunter.status["error"]["text"] == "Round failed: TypeError('boom')" and not hunter.status["running"]
+        assert [e["text"] for e in hunter.state["events"]][:2] == ["Round failed: TypeError('boom')"] * 2
+        # Told once, however many rounds break the same way.
+        assert [t for t in fakes["telegram"] if "Round failed" in t] == [
+            "NSWHunter\nRound failed: TypeError('boom'). The round did not finish; "
+            "the Log tab of the panel has the details."]
+        hunter.check_services = real
+        await hunter.round()
+        assert hunter.status["error"] is None and ALAN in hunter.state["items"]
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42")
+
+
+def test_one_game_that_breaks_does_not_stop_the_others(monkeypatch=None):
+    async def test(hunter, fakes):
+        real = hunter_module.matcher.evaluate
+
+        def picky(game, *args, **kwargs):
+            if game.name == "Hades":
+                raise ValueError("cannot judge this one")
+            return real(game, *args, **kwargs)
+        hunter_module.matcher.evaluate = picky
+        try:
+            await hunter.round()
+        finally:
+            hunter_module.matcher.evaluate = real
+        assert hunter.status["error"] is None and hunter.status["skipped"] > 0
+        assert len(titles(hunter, ALAN)) == 4 and titles(hunter, HADES) == []
+        skipped = [e["text"] for e in hunter.state["events"] if e["text"].startswith("Skipped")]
+        # Written to the log once, not once per release.
+        assert skipped == ["Skipped a release of Hades: ValueError('cannot judge this one')"]
+    run(test)
+
+
+def test_a_broken_title_in_the_library_keeps_what_was_known_about_it():
+    async def test(hunter, fakes):
+        await send_best(hunter)
+        fakes["library"][0]["localUpdate"] = "not a number"
+        await hunter.round()
+        # Not "arrived": the title could not be read, so nothing is concluded from it.
+        assert hunter.state["items"][ALAN]["grab"] is not None and hunter.state["arrived"] == []
+        assert hunter.status["skipped"] == 1 and HADES in hunter.state["items"]
+    run(test)
+
+
+def test_download_all_sends_the_best_of_each_game_from_a_score():
+    async def test(hunter, fakes):
+        await hunter.round()
+        assert await hunter.grab_best(9) == 2
+        sent = sorted(name for name, _, _ in fakes["sent"])
+        assert sent == ["Alan Wake Remastered [0100623017A58800][v196608].nsz.nzb",
+                        "NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS Update v1.7.1 NSW-SUXXORS.nzb"]
+        # Hades and Scarlet score 7: they wait for a click of their own.
+        assert hunter.state["items"][HADES]["grab"] is None
+        assert await hunter.grab_best(9) == 0
+    run(test)
+
+
+def test_rejected_release_is_kept_and_can_be_restored():
+    async def test(hunter, fakes):
+        await hunter.round()
+        best = hunter.state["items"][ALAN]["candidates"][0]
+        hunter.reject(ALAN, best["guid"])
+        item = hunter.state["items"][ALAN]
+        assert best["title"] not in titles(hunter, ALAN) and [r["title"] for r in item["turned_down"]] == [best["title"]]
+        await hunter.round()  # found again by the search, and still left out
+        assert best["title"] not in titles(hunter, ALAN)
+        shown = next(i for i in hunter.view()["items"] if i["key"] == ALAN)
+        assert shown["turned_down"][0]["title"] == best["title"] and "downloadUrl" not in shown["turned_down"][0]
+        hunter.restore(ALAN, best["guid"])
+        assert titles(hunter, ALAN)[0] == best["title"] and item["turned_down"] == [] and item["blocked"] == []
+    run(test)
+
+
+def test_rejections_of_an_older_version_are_restored_together():
+    async def test(hunter, fakes):
+        await hunter.round()
+        item = hunter.state["items"][ALAN]
+        best = item["candidates"][0]
+        item["blocked"].append(best["guid"])  # as an older version left it: the id only
+        hunter.reevaluate()
+        shown = next(i for i in hunter.view()["items"] if i["key"] == ALAN)
+        assert shown["unnamed"] == 1 and best["title"] not in titles(hunter, ALAN)
+        hunter.restore(ALAN)
+        await hunter.search_game(ALAN)
+        assert titles(hunter, ALAN)[0] == best["title"]
+    run(test)
+
+
+def test_progress_of_a_download_is_kept():
+    async def test(hunter, fakes):
+        await send_best(hunter)
+        fakes["progress"]["1"] = (400, 100)
+        await hunter.watch()
+        grab = hunter.state["items"][ALAN]["grab"]
+        assert (grab["state"], grab["percent"]) == ("downloading", 75)
+    run(test)
+
+
+def test_what_arrived_is_remembered():
+    async def test(hunter, fakes):
+        await send_best(hunter)
+        fakes["library"][0].update(localUpdate=196608, updateMissing=False)
+        await hunter.round()
+        arrived = hunter.view()["arrived"]
+        assert [(a["name"], a["what"], a["title"], a["note"]) for a in arrived] == [
+            ("Alan Wake Remastered", "update", "Alan Wake Remastered [0100623017A58800][v196608].nsz", "")]
+        # Older than thirty days: no longer shown.
+        hunter.state["arrived"][0]["at"] -= 31 * 86400
+        assert hunter.view()["arrived"] == []
+    run(test)
+
+
+def asked(fakes):
+    """(game line, button data) of every question the fake Telegram got."""
+    return [(text.split("\n")[1], [b["callback_data"][:2] for b in markup["inline_keyboard"][0]])
+            for text, markup in zip(fakes["telegram"], fakes["buttons"]) if markup]
+
+
+def test_choosing_in_telegram_downloads_and_rejects():
+    async def test(hunter, fakes):
+        hunter_module.ASK_DELAY = 0
+        await hunter.round()
+        # One question per item that waits, the highest score first, each asked once.
+        assert asked(fakes) == [
+            ("Alan Wake Remastered (update)", ["d:", "r:"]),
+            ("NARUTO X BORUTO Ultimate Ninja STORM CONNECTIONS (update)", ["d:", "r:"]),
+            ("Hades (update)", ["d:", "r:"]), ("Pokémon™ Scarlet (update)", ["d:", "r:"])]
+        assert "10/10 · Alan Wake Remastered [0100623017A58800][v196608].nsz" in fakes["telegram"][0]
+        await hunter.round()
+        assert len(asked(fakes)) == 4
+        shown = next(i for i in hunter.view()["items"] if i["key"] == ALAN)
+        assert shown["asked"] is True and "ask" not in shown  # the token of the buttons stays inside
+
+        def press(n, button, chat=42):
+            data = fakes["buttons"][n]["inline_keyboard"][0][button]["callback_data"]
+            fakes["updates"].append({"update_id": 100 + len(fakes["updates"]), "callback_query": {
+                "id": "q", "data": data, "message": {"message_id": n + 1, "chat": {"id": chat}}}})
+
+        press(0, 0, chat=666)  # someone else: not obeyed, not even answered
+        await hunter.telegram_answers(wait=0)
+        assert fakes["sent"] == [] and fakes["answers"] == []
+        press(0, 0)  # Download
+        press(2, 1)  # Reject for Hades
+        await hunter.telegram_answers(wait=0)
+        assert [name for name, _, _ in fakes["sent"]] == ["Alan Wake Remastered [0100623017A58800][v196608].nsz.nzb"]
+        assert hunter.state["items"][ALAN]["grab"]["title"].startswith("Alan Wake Remastered [")
+        assert titles(hunter, HADES) == [] and len(hunter.state["items"][HADES]["turned_down"]) == 1
+        assert fakes["answers"] == ["✓ Sent to the download client.", "✕ Rejected."]
+        assert fakes["edits"][0]["message_id"] == 1 and fakes["edits"][0]["text"].endswith("✓ Sent to the download client.")
+        assert "reply_markup" not in fakes["edits"][0]  # the buttons are gone
+        # The same press again, and a press on a question that is settled: nothing happens twice.
+        press(0, 0)
+        await hunter.telegram_answers(wait=0)
+        assert len(fakes["sent"]) == 1 and fakes["answers"][-1] == "This release no longer awaits a choice."
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42", TELEGRAM_ASK=True)
+
+
+def test_telegram_is_not_asked_for_presses_without_an_open_question():
+    async def test(hunter, fakes):
+        assert await hunter.telegram_answers(wait=0) is False
+        await hunter.round()
+        assert await hunter.telegram_answers(wait=0) is False  # asking is switched off
+    run(test, TELEGRAM_BOT_TOKEN="TESTTOKEN", TELEGRAM_CHAT_ID="42")
+
+
+def test_dlc_pack_does_not_ask_while_the_dlc_itself_is_on_its_way():
+    async def test(hunter, fakes):
+        await hunter.round()
+        pack = hunter.state["items"][ALAN + ":pack"]
+        assert pack["candidates"] and hunter.awaits(pack)
+        await hunter.grab(ALAN_DLC, hunter.state["items"][ALAN_DLC]["candidates"][0]["guid"])
+        assert not hunter.awaits(pack)
+        shown = {i["key"]: i["status"] for i in hunter.view()["items"]}
+        assert (shown[ALAN_DLC], shown[ALAN + ":pack"]) == ("sent", "covered")
+    run(test, INCLUDE_DLC=True)
