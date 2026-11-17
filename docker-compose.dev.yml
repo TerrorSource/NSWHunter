@@ -1,4 +1,4 @@
-# Lokaal ontwikkelen: bouwt het image uit deze map, instellingen uit .env (cp .env.example .env).
+# Local development: builds the image from this folder, settings from .env (cp .env.example .env).
 #   docker compose -f docker-compose.dev.yml up -d --build
 services:
   nswhunter:

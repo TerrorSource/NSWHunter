@@ -356,7 +356,7 @@ def test_title_without_any_platform_scores_lower():
     marked = evaluate(alan(), "Alan_Wake_Remastered_Update_v1.0.3_NSW-VENOM", AFTER_LATEST)
     bare = evaluate(alan(), "Alan Wake Remastered Update v1.0.3", AFTER_LATEST)
     assert (marked.score, bare.score) == (7, 6)
-    assert "het platform staat niet in de titel" in bare.reasons
+    assert "the title names no platform" in bare.reasons
     # An internal version number is a Switch thing: no doubt about the platform.
     assert evaluate(alan(), "Alan Wake Remastered Update v196608").score == 9
 
@@ -382,15 +382,16 @@ def sized(update_size=380_000_000, base_size=12_000_000_000):
 @pytest.mark.parametrize("size, score, said", [
     (400_000_000, 9, None),                              # about the size of the update in the library
     (1_500_000_000, 9, None),                            # four times: still fine (compression, extra files)
-    (2_400_000_000, 7, "wijkt sterk af"),                # six times
-    (30_000_000, 7, "wijkt sterk af"),                   # a twelfth
-    (12_900_000_000, 7, "zo groot als het hele spel"),   # the game itself is in it
+    (2_400_000_000, 7, "the size is far from"),          # six times
+    (30_000_000, 7, "the size is far from"),             # a twelfth
+    (12_900_000_000, 7, "as big as the whole game"),     # the game itself is in it
     (0, 9, None),                                        # size unknown
 ])
 def test_size_weighs_in(size, score, said):
     result = evaluate(sized(), "Alan.Wake.Remastered.Update.v196608.NSW-GRP", AFTER_LATEST, size=size)
     assert result.score == score
-    assert (said is None) == (not any("groot" in r for r in result.reasons)), result.reasons
+    about_size = [r for r in result.reasons if r.startswith(("the size is", "as big as"))]
+    assert [r[:len(said)] for r in about_size] == ([said] if said else []), result.reasons
 
 
 def test_size_says_nothing_without_an_update_in_the_library():

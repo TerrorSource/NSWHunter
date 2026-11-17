@@ -1,4 +1,4 @@
-"""Settings. The ones in EDITABLE can be changed on the Configuratie tab of the panel and are
+"""Settings. The ones in EDITABLE can be changed on the Configuration tab of the panel and are
 then kept in /data/settings.json; a saved value wins from the environment variable of the same
 name. Everything else comes from environment variables only (see .env.example)."""
 import hashlib
@@ -123,14 +123,14 @@ def check_password(password):
 
 PANEL_USER = env("PANEL_USER", "admin")
 PANEL_PASSWORD = hash_password(env("PANEL_PASSWORD"))
-# Notifications: Telegram from the Configuratie tab, and Apprise URLs for anything else.
+# Notifications: Telegram from the Configuration tab, and Apprise URLs for anything else.
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
 TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
 NOTIFY_URLS = env("NOTIFY_URLS")
 
 
-# ---------------------------------------------------------------- the Configuratie tab
+# ---------------------------------------------------------------- the Configuration tab
 
 CLIENTS = ("nzbget", "sabnzbd", "prowlarr")
 # name -> kind: "url", "text", "secret", "bool", or the tuple of allowed values.
@@ -160,33 +160,33 @@ def normalize(name, value):
         except ValueError:
             number_value = None
         if number_value not in kind:
-            raise ValueError(f"{name}: kies uit {', '.join(map(str, kind))}")
+            raise ValueError(f"{name}: choose from {', '.join(map(str, kind))}")
         return number_value
     if kind == "numbers":
         parts = value if isinstance(value, list) else str(value or "").replace(" ", "").split(",")
         parts = [str(p) for p in parts if str(p)]
         if not parts or not all(p.isdigit() and len(p) <= 6 for p in parts):
-            raise ValueError(f"{name}: vul nummers in, gescheiden door komma's (1000 = Console)")
+            raise ValueError(f"{name}: fill in numbers, separated by commas (1000 = Console)")
         return parts
     value = str(value if value is not None else "").strip()
     if name == "AUTO_DOWNLOAD":
         value = LEGACY_LEVELS.get(value.lower(), value)
     if len(value) > 500 or any(ord(c) < 32 for c in value):
-        raise ValueError(f"{name}: ongeldige waarde")
+        raise ValueError(f"{name}: invalid value")
     if kind == "url":
         value = value.rstrip("/")
         if value and not value.lower().startswith(("http://", "https://")):
-            raise ValueError(f"{name}: begin het adres met http:// of https://")
+            raise ValueError(f"{name}: start the address with http:// or https://")
     elif isinstance(kind, tuple):
         value = value.lower()
         if value not in kind:
-            raise ValueError(f"{name}: kies uit {', '.join(kind)}")
+            raise ValueError(f"{name}: choose from {', '.join(kind)}")
     elif name == "PANEL_USER" and (not value or ":" in value):
-        raise ValueError("PANEL_USER: vul een naam in, zonder dubbele punt")
+        raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
         value = hash_password(value)
     elif name == "TELEGRAM_CHAT_ID" and value and not (value.lstrip("-").isdigit() or value.startswith("@")):
-        raise ValueError("TELEGRAM_CHAT_ID: een chat-ID is een getal (voor een groep met een min ervoor) of @kanaalnaam")
+        raise ValueError("TELEGRAM_CHAT_ID: a chat ID is a number (with a minus in front for a group) or @channelname")
     return value
 
 
@@ -222,20 +222,20 @@ def load_saved():
 
 
 def update(values, clear=()):
-    """Save settings from the Configuratie tab and use them from now on.
+    """Save settings from the Configuration tab and use them from now on.
 
     An empty secret means "keep what is there": the panel never gets a secret back, so it
     cannot send it again. A name in `clear` empties that secret. Returns what really changed."""
     new = {}
     for name, value in values.items():
         if name not in EDITABLE:
-            raise ValueError(f"Onbekende instelling: {name}")
+            raise ValueError(f"Unknown setting: {name}")
         if name in SECRETS and str(value or "").strip() == "":
             continue
         new[name] = normalize(name, value)
     for name in clear:
         if name not in SECRETS:
-            raise ValueError(f"Onbekende instelling: {name}")
+            raise ValueError(f"Unknown setting: {name}")
         new[name] = ""
     write({**saved(), **new})
     changed = sorted(name for name, value in new.items() if globals()[name] != value)
@@ -250,7 +250,7 @@ def overlay(values, clear=()):
     result = types.SimpleNamespace(**{name: globals()[name] for name in EDITABLE})
     for name, value in values.items():
         if name not in EDITABLE:
-            raise ValueError(f"Onbekende instelling: {name}")
+            raise ValueError(f"Unknown setting: {name}")
         if name in SECRETS and str(value or "").strip() == "":
             continue
         setattr(result, name, normalize(name, value))
@@ -261,7 +261,7 @@ def overlay(values, clear=()):
 
 
 def editable():
-    """What the Configuratie tab shows: values, and for secrets only whether one is set."""
+    """What the Configuration tab shows: values, and for secrets only whether one is set."""
     return {
         "values": {n: ",".join(globals()[n]) if EDITABLE[n] == "numbers" else globals()[n]
                    for n in EDITABLE if n not in SECRETS},
@@ -278,13 +278,13 @@ def problems():
     """What is missing before anything can run."""
     missing = []
     if not SLM_URL:
-        missing.append("SLM_URL ontbreekt")
+        missing.append("SLM_URL is missing")
     if not PROWLARR_URL or not PROWLARR_API_KEY:
-        missing.append("PROWLARR_URL of PROWLARR_API_KEY ontbreekt")
+        missing.append("PROWLARR_URL or PROWLARR_API_KEY is missing")
     if DOWNLOAD_CLIENT == "nzbget" and not NZBGET_URL:
-        missing.append("NZBGET_URL ontbreekt")
+        missing.append("NZBGET_URL is missing")
     elif DOWNLOAD_CLIENT == "sabnzbd" and not (SABNZBD_URL and SABNZBD_API_KEY):
-        missing.append("SABNZBD_URL of SABNZBD_API_KEY ontbreekt")
+        missing.append("SABNZBD_URL or SABNZBD_API_KEY is missing")
     elif DOWNLOAD_CLIENT not in ("nzbget", "sabnzbd", "prowlarr"):
-        missing.append("DOWNLOAD_CLIENT moet nzbget, sabnzbd of prowlarr zijn")
+        missing.append("DOWNLOAD_CLIENT must be nzbget, sabnzbd or prowlarr")
     return missing

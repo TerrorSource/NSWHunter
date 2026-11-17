@@ -1,13 +1,13 @@
-# Dependabot: stelt wekelijks updates voor van Python-pakketten, de base-image en GitHub Actions.
-# Let op: de code op GitHub wordt bijgewerkt via commit-git.sh vanuit de werkmap. Neem updates daarom
-# daar over (dan sluiten de pull requests vanzelf) in plaats van ze op GitHub samen te voegen.
+# Dependabot: proposes weekly updates of the Python packages, the base image and GitHub Actions.
+# Note: the code on GitHub is updated through commit-git.sh from the working folder. So take the
+# updates over there (the pull requests then close by themselves) instead of merging them on GitHub.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
     groups:
-      python-pakketten:
+      python-packages:
         patterns: ["*"]
   - package-ecosystem: docker
     directory: /

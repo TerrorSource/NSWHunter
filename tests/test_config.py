@@ -1,4 +1,4 @@
-"""The Configuratie tab: saving, validating and never handing a secret back."""
+"""The Configuration tab: saving, validating and never handing a secret back."""
 import asyncio
 import base64
 import os
@@ -61,7 +61,7 @@ def test_empty_secret_keeps_the_old_one_and_clear_removes_it():
     {"PROWLARR_CATEGORIES": "console"},      # numbers only
     {"PROWLARR_CATEGORIES": ""},
     {"AUTO_DOWNLOAD": "11"},
-    {"TZ": "UTC"},                           # not a setting of the Configuratie tab
+    {"TZ": "UTC"},                           # not a setting of the Configuration tab
     {"SLM_URL": "http://ok", "AUTO_DOWNLOAD": "nee"},
 ])
 def test_wrong_values_change_nothing(values):
@@ -90,8 +90,8 @@ def test_api_test_button_reports_instead_of_failing():
     async def test(client):
         r = await client.post("/api/test", json={"service": "prowlarr", "values": {"PROWLARR_URL": ""}})
         data = await r.json()
-        assert r.status == 200 and data["ok"] is False and "adres" in data["text"]
-        r = await client.post("/api/test", json={"service": "slm", "values": {"SLM_URL": "geen-adres"}})
+        assert r.status == 200 and data["ok"] is False and "address" in data["text"]
+        r = await client.post("/api/test", json={"service": "slm", "values": {"SLM_URL": "no-address"}})
         assert (await r.json())["ok"] is False
     api(test)
 

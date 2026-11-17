@@ -324,7 +324,7 @@ def observe(game, title):
     return result if isinstance(result, str) else None
 
 
-NOT_THIS_GAME = ("title ID van een andere game", "naam komt niet overeen")
+NOT_THIS_GAME = ("title ID of another game", "name does not match")
 
 
 def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, seen=None,
@@ -337,7 +337,7 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
     """
     result = _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size)
     if isinstance(result, Rejection):
-        result.known = not (result.reason in NOT_THIS_GAME or result.reason.startswith("andere game"))
+        result.known = not (result.reason in NOT_THIS_GAME or result.reason.startswith("another game"))
     return result
 
 
@@ -362,7 +362,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     ids = [m.group(1).upper() for m in TID_RE.finditer(text)]
     own_ids = [i for i in ids if family(i) == family(game.id)]
     if ids and not own_ids:
-        return Rejection("title ID van een andere game")
+        return Rejection("title ID of another game")
 
     name_tokens = [t for t, _, _ in tokens(clean(game.name))]
     rest = text
@@ -382,15 +382,15 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
             before = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", text[:toks[at][1]])
             prefix = [t for t, _, _ in tokens(before) if not _is_noise(t)]
             if gap and (re.fullmatch(r"\d{1,2}", gap[0]) or gap[0] in ROMAN):
-                return Rejection(f"andere game (vervolgdeel '{gap[0]}')")
+                return Rejection(f"another game (sequel '{gap[0]}')")
             extras = prefix + gap
             # A one-word name ("Hades", "Inside") turns up inside many other titles.
             if extras and want != "dlc" and (len(name_tokens) == 1 or len(game.name) <= 5):
-                return Rejection("andere game (korte naam met extra woorden)")
+                return Rejection("another game (short name with extra words)")
     if own_ids:
         name_match = "tid"
         extras = []
-        reasons.append("title ID komt overeen")
+        reasons.append("title ID matches")
     elif name_match is None:
         name_part = " ".join(t for t, s, _ in toks if s < _marker_offset(text, toks))
         wanted = " ".join(name_tokens)
@@ -399,13 +399,13 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         # "FIFA 22" and "FIFA 23" are almost the same text and not the same game.
         numbers = lambda ws: {w for w in ws if w.isdigit() or w in ROMAN}  # noqa: E731
         if (ratio < 0.85 and not shortened) or numbers(name_part.split()) != numbers(name_tokens):
-            return Rejection("naam komt niet overeen")
+            return Rejection("name does not match")
         name_match = "fuzzy"
-        reasons.append("naam lijkt erop, maar is niet gelijk")
+        reasons.append("name is close, but not the same")
     elif extras:
-        reasons.append("extra woorden in de titel: " + " ".join(extras))
+        reasons.append("extra words in the title: " + " ".join(extras))
     else:
-        reasons.append("naam komt overeen")
+        reasons.append("name matches")
 
     # ---- which platform
     # Words of the game's own name do not count ("Wii Sports" would otherwise never match).
@@ -413,10 +413,10 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     if not own_ids:
         other = sorted(outside & OTHER_PLATFORMS) or [m.group() for m in [OTHER_CODE_RE.search(text)] if m]
         if other:
-            return Rejection(f"voor een ander platform ({other[0].upper()}), niet voor de Switch")
+            return Rejection(f"for another platform ({other[0].upper()}), not for the Switch")
         # Switch 2 releases are left alone on purpose: only the first Switch.
         if SWITCH2_RE.search(rest) or any(i.startswith("04") for i in ids):
-            return Rejection("voor de Switch 2, niet voor de Switch")
+            return Rejection("for the Switch 2, not for the Switch")
 
     # ---- what it is
     has_update = bool(words & UPDATE_WORDS) or any(re.fullmatch(r"upd\d+", w) for w in words)
@@ -440,9 +440,9 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
                              bool(outside & SWITCH_WORDS), pack=want == "dlcpack")
     if kind == "dlc":
-        return Rejection("alleen DLC, geen update")
+        return Rejection("DLC only, not an update")
     if kind == "base":
-        return Rejection("basisspel, geen update")
+        return Rejection("base game, not an update")
 
     # ---- which version
     internal, display = _versions(text, rest)
@@ -454,7 +454,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
             vermap[display] = internal  # both in one title: remember the translation
     elif internal is None and display and vermap and display in vermap:
         internal = vermap[display]
-        reasons.append(f"v{display} is eerder gezien als v{internal}")
+        reasons.append(f"v{display} was seen before as v{internal}")
 
     is_latest = None
     estimated = None  # the internal version this release is taken to be when its title has none
@@ -463,22 +463,22 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     local, latest = game.local_version, game.latest_version
     if internal is not None:
         if internal == 0:
-            return Rejection("basisspel (v0), geen update")
+            return Rejection("base game (v0), not an update")
         if internal <= local:
-            return Rejection(f"v{internal} is niet nieuwer dan je eigen versie")
+            return Rejection(f"v{internal} is not newer than your own version")
         is_latest = bool(latest) and internal >= latest
         chance = 1.0 if is_latest else 0.5
-        reasons.append("is de nieuwste versie" if is_latest else
-                       f"nieuwer dan je eigen versie, maar niet de nieuwste ({update_name(latest)})")
+        reasons.append("is the latest version" if is_latest else
+                       f"newer than your own version, but not the latest ({update_name(latest)})")
     elif display:
         parsed = version_tuple(display)
         if parsed <= (1, 0, 0) and kind != "update":
-            return Rejection("versie 1.0.0 is het basisspel")
+            return Rejection("version 1.0.0 is the base game")
         newer_than_own = False
         if game.local_display:
             try:
                 if parsed <= version_tuple(game.local_display):
-                    return Rejection(f"v{display} is niet nieuwer dan je eigen versie")
+                    return Rejection(f"v{display} is not newer than your own version")
                 newer_than_own = True
             except ValueError:
                 pass
@@ -489,30 +489,30 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         if step and step.version is None:
             is_latest, deduced = True, step.solid
             chance = 0.9 if deduced else 0.8
-            reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), de nieuwste update die bekend is")
+            reasons.append(f"v{display} is higher than v{step.after} ({update_name(step.floor)}), the latest update that is known")
         elif step and step.version > local:
             estimated, deduced = step.version, step.solid
             if step.how == "order":
                 # The next update at least; more only if a version was never posted.
                 is_latest = True if latest and estimated >= latest else None
                 chance = (0.97 if deduced else 0.78) if is_latest else 0.45
-                reasons.append(f"v{display} is hoger dan v{step.after} ({update_name(step.floor)}), dus "
-                               + ("" if is_latest else "minstens ") + update_name(estimated))
+                reasons.append(f"v{display} is higher than v{step.after} ({update_name(step.floor)}), so "
+                               + ("" if is_latest else "at least ") + update_name(estimated))
             elif step.how == "pattern":
                 is_latest = bool(latest) and estimated >= latest
                 chance = 0.85 if is_latest else 0.4
-                reasons.append(f"deze game telt de update in de versie: je eigen v{game.local_display} is "
-                               f"{update_name(local)}, dus v{display} is {update_name(estimated)}")
+                reasons.append(f"this game counts the update in its version: your own v{game.local_display} is "
+                               f"{update_name(local)}, so v{display} is {update_name(estimated)}")
             else:
                 is_latest = bool(latest) and estimated >= latest
                 chance = (0.97 if deduced else 0.78) if is_latest else 0.4
-                reasons.append(f"v{display} is voor het eerst geplaatst toen {update_name(estimated)} de nieuwste was")
+                reasons.append(f"v{display} was first posted when {update_name(estimated)} was the latest")
         elif step and not newer_than_own:
             if step.version < local or _before_any_newer(game, first):
-                return Rejection(f"v{display} is {update_name(step.version)}: niet nieuwer dan je eigen versie")
-            reasons.append("geplaatst na je eigen update; kan die update zijn of een nieuwere")
+                return Rejection(f"v{display} is {update_name(step.version)}: not newer than your own version")
+            reasons.append("posted after your own update; can be that update or a newer one")
     elif kind == "unknown":
-        return Rejection("geen versie en geen 'update' in de titel")
+        return Rejection("no version and no 'update' in the title")
     else:
         # No version at all: only the posting date says something.
         chance = 0.25
@@ -521,31 +521,31 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
             estimated = by_date
             is_latest = bool(latest) and estimated >= latest
             chance = 0.6 if is_latest else 0.3
-            reasons.append(f"geplaatst toen {update_name(estimated)} de nieuwste was")
+            reasons.append(f"posted when {update_name(estimated)} was the latest")
         elif by_date is not None and (by_date < local or _before_any_newer(game, published)):
-            return Rejection("geplaatst voordat er een nieuwere update bestond")
+            return Rejection("posted before a newer update existed")
     if is_latest is None:
-        reasons.append("niet te zien of dit de nieuwste versie is")
+        reasons.append("cannot tell whether this is the latest version")
     elif internal is None and estimated and not is_latest:
-        reasons.append(f"de nieuwste is {update_name(latest)}")
+        reasons.append(f"the latest is {update_name(latest)}")
 
     # ---- the score
     crack = bool(words & CRACK_WORDS)
     # A title ID and an internal version number (v131072) exist on the Switch only.
     if not (own_ids or internal is not None and internal >= 65536 or outside & SWITCH_WORDS):
         chance *= UNMARKED
-        reasons.append("het platform staat niet in de titel")
+        reasons.append("the title names no platform")
     if kind == "bundle":
-        reasons.append("bundel: bevat ook het basisspel of DLC")
+        reasons.append("bundle: also holds the base game or DLC")
     elif size and game.base_size and size >= 0.8 * game.base_size and size > 3 * game.update_size:
         chance *= WHOLE_GAME
-        reasons.append(f"zo groot als het hele spel ({size_text(size)}): waarschijnlijk zit het basisspel erbij")
+        reasons.append(f"as big as the whole game ({size_text(size)}): the base game is probably included")
     elif size and game.update_size and not 0.15 <= size / game.update_size <= 5:
         chance *= ODD_SIZE
-        reasons.append(f"de grootte wijkt sterk af van je eigen update ({size_text(size)} tegenover "
+        reasons.append(f"the size is far from that of your own update ({size_text(size)} against "
                        f"{size_text(game.update_size)})")
     if crack:
-        reasons.append("met crack: de bestanden zijn aangepast")
+        reasons.append("with crack: the files were changed")
     identity = "tid" if name_match == "tid" else "fuzzy" if name_match == "fuzzy" else "extras" if extras else "exact"
     return Candidate(mark(identity, chance, kind, crack), kind, name_match, internal, display, is_latest,
                      reasons, estimated, deduced)
@@ -583,15 +583,15 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
     """A missing DLC: only its own title ID makes it certain; a name is a guess."""
     dlc_id = (dlc or {}).get("id", "").upper()
     if own_ids and pack:
-        return Rejection("heeft de title ID van één DLC: staat bij die DLC")
+        return Rejection("has the title ID of one DLC: listed under that DLC")
     if own_ids:
         if dlc_id in own_ids:
-            return Candidate(10, "dlc", "tid", None, None, None, ["title ID van deze DLC komt overeen"])
-        return Rejection("title ID van een ander onderdeel van deze game")
+            return Candidate(10, "dlc", "tid", None, None, None, ["title ID of this DLC matches"])
+        return Rejection("title ID of another part of this game")
     if kind not in ("dlc", "bundle"):
-        return Rejection("geen DLC")
+        return Rejection("not DLC")
     if name_match == "fuzzy":
-        return Rejection("naam komt niet overeen")
+        return Rejection("name does not match")
     words = {t for t, _, _ in tokens(text)}
     own = [] if pack else _dlc_words(game, (dlc or {}).get("name", ""))
     mine = _named(words, own)
@@ -601,26 +601,26 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
               for other in game.dlc if pack or str(other.get("id", "")).upper() != dlc_id]
     rival = max(others, default=((0.0, 0), ""))
     if rival[0][0] >= NAMED and rival[0] > mine:
-        return Rejection(f"is een andere DLC van deze game: {rival[1]}")
+        return Rejection(f"is another DLC of this game: {rival[1]}")
     # Words of the DLC's name between the game's name and "DLC" are not extra words.
     whole = _dlc_words(game, (dlc or {}).get("name", ""), telling=False)
     left = [e for e in extras if e not in whole]
-    reasons = ["extra woorden in de titel: " + " ".join(left)] if left else ["naam komt overeen"]
+    reasons = ["extra words in the title: " + " ".join(left)] if left else ["name matches"]
     if pack:
         # "DLC Unlocker", "DLC Pack": listed once per game, not under every missing DLC.
         if mine[0] >= NAMED or rival[0][0] >= NAMED:
-            return Rejection("noemt één DLC: staat bij die DLC")
+            return Rejection("names one DLC: listed under that DLC")
         chance = PACK
-        reasons.append("pakket met DLC van deze game; niet te zien welke erin zitten")
+        reasons.append("pack with DLC of this game; cannot tell which are in it")
     elif mine[0] >= NAMED:
         only = rival[0] < mine
         chance = 0.85 if only else 0.6
-        reasons.append("naam van de DLC staat in de titel" + ("" if only else "; past ook bij een andere DLC"))
+        reasons.append("the title names the DLC" + ("" if only else "; also fits another DLC"))
     else:
-        return Rejection("noemt geen DLC: staat bij het DLC-pakket van deze game")
+        return Rejection("names no DLC: listed under the DLC pack of this game")
     if not switch:
         chance *= UNMARKED
-        reasons.append("het platform staat niet in de titel")
+        reasons.append("the title names no platform")
     kind = "bundle" if kind == "bundle" else "dlcpack" if pack else "dlc"
     return Candidate(mark("extras" if left else "exact", chance, kind), "dlcpack" if pack else "dlc",
                      name_match, None, None, None, reasons)

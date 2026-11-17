@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="nl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,9 +46,14 @@
   .badge.uncertain, .badge.review { background: var(--warn-bg); color: var(--warn); }
   .notice { background: var(--bad-bg); color: var(--bad); border-radius: 9px; padding: 10px 14px; margin-bottom: 14px; }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
-  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  /* Each tile is a button: it shows only the games that belong to it. */
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+          text-align: left; font-size: 15px; }
   .stat b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--soft); font-size: 13px; }
+  .stat.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .stat.on span { color: var(--text); }
+  .stat.alert b { color: var(--bad); }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; align-items: center; }
   .tabs button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
   .tabs input, .tabs select { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
@@ -81,11 +86,12 @@
   .cand.fell { grid-template-columns: 96px 1fr auto; opacity: .85; }
   .rest button.quiet { padding: 2px 4px; }
   .cand a { color: inherit; }
-  .cand .acts { display: flex; gap: 4px; }
+  .cand .acts { display: flex; gap: 4px; align-items: center; }
   .part { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
           background: color-mix(in srgb, var(--mute-bg) 45%, transparent); }
   .part b { font-weight: 600; }
   .rest { border-top: 1px solid var(--line); padding: 9px 14px; color: var(--soft); font-size: 13px; }
+  .more { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; }
   .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .empty { color: var(--soft); text-align: center; padding: 40px 0; }
   .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
@@ -116,28 +122,28 @@
   .results { margin-top: 12px; display: grid; gap: 6px; }
   .results div { padding: 8px 12px; border-radius: 8px; background: var(--good-bg); color: var(--good); font-size: 14px; }
   .results div.bad { background: var(--bad-bg); color: var(--bad); }
-  @media (max-width: 640px) { .cand { grid-template-columns: 1fr; } .field { grid-template-columns: 1fr; } .field .help { grid-column: 1; } }
+  @media (max-width: 640px) { #shown { flex-basis: 100%; } .cand { grid-template-columns: 1fr; } .field { grid-template-columns: 1fr; } .field .help { grid-column: 1; } }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>NSWHunter <small id="version"></small></h1>
-    <span class="line grow" id="statusline">Laden…</span>
-    <button class="primary" id="sync">Nu synchroniseren</button>
+    <span class="line grow" id="statusline">Loading…</span>
+    <button class="primary" id="sync">Sync now</button>
   </header>
   <nav class="views" id="views"></nav>
-  <div class="chips" id="chips"></div>
   <div id="notice"></div>
   <section id="view-updates">
     <div class="stats" id="stats"></div>
-    <div class="tabs" id="tabs"></div>
+    <div class="tabs" id="tools"></div>
     <div id="list"></div>
   </section>
   <section id="view-log" hidden>
     <div class="log" id="log"></div>
   </section>
   <section id="view-config" hidden>
+    <div class="chips" id="chips"></div>
     <form id="config" autocomplete="off"></form>
   </section>
 </main>
@@ -159,33 +165,41 @@ const $ = id => document.getElementById(id);
 function put(el, ...children) {
   el.replaceChildren(...children.flat().filter(c => c !== null && c !== undefined && c !== false));
 }
-let state = null, tab = "review", filter = "", busy = new Set(), expanded = new Set(), fallen = new Set();
+// The choice is kept in this browser; without storage it is simply the default again.
+function remembered(key, fallback) {
+  try { return localStorage.getItem("nswhunter-" + key) || fallback; } catch (e) { return fallback; }
+}
+function remember(key, value) {
+  try { localStorage.setItem("nswhunter-" + key, value); } catch (e) { /* private window */ }
+}
+let state = null, needle = "", busy = new Set(), expanded = new Set(), fallen = new Set();
 let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {};
+let only = remembered("only", "choice"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
 
-const TABS = [["review", "Te beoordelen"], ["sent", "Verstuurd"], ["open", "Nog niets gevonden"], ["ignored", "Genegeerd"], ["all", "Alles"]];
 // The score is the chance that a download is the right one, from 1 to 10.
 function score(value, title) {
   const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
-  return h("span", {class: "score " + level, title: title || "Kans dat deze download de juiste is"}, String(value || "?"), h("small", {}, "/10"));
+  return h("span", {class: "score " + level, title: title || "The chance that this download is the right one"}, String(value || "?"), h("small", {}, "/10"));
 }
-const KIND = {update: "update", bundle: "bundel", dlc: "DLC", dlcpack: "DLC-pakket", unknown: ""};
-const SERVICES = {slm: "Bibliotheek", prowlarr: "Prowlarr", downloader: "Downloadclient", titledb: "Versielijst", telegram: "Telegram", config: "Instellingen"};
+const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unknown: ""};
+const SERVICES = {slm: "Library", prowlarr: "Prowlarr", downloader: "Download client", titledb: "Version list", telegram: "Telegram", config: "Settings"};
 // How a sent release is doing, as the download client tells it.
-const SENT = {sent: "verstuurd", downloading: "wordt gedownload", done: "gedownload, wacht op de bibliotheek",
-              stuck: "gedownload, maar niet in je bibliotheek gezien"};
-function autoText(min) { return min ? "vanaf score " + min : "uit: alles wacht op je keuze"; }
+const SENT = {sent: "added to queue", downloading: "downloading", done: "downloaded, waiting for the library",
+              stuck: "downloaded, but not seen in your library"};
+function autoText(min) { return min ? "from score " + min : "off: everything awaits your choice"; }
+function plural(n, one, many) { return n + " " + (n === 1 ? one : many || one + "s"); }
 
 function toast(text) {
   const t = $("toast"); t.textContent = text; t.classList.add("show");
   clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 4000);
 }
 function ago(ts) {
-  if (!ts) return "nooit";
+  if (!ts) return "never";
   const s = Math.max(0, state.now - ts);
-  if (s < 90) return "zojuist";
-  if (s < 5400) return Math.round(s / 60) + " min geleden";
-  if (s < 129600) return Math.round(s / 3600) + " uur geleden";
-  return Math.round(s / 86400) + " dagen geleden";
+  if (s < 90) return "just now";
+  if (s < 5400) return Math.round(s / 60) + " min ago";
+  if (s < 129600) return plural(Math.round(s / 3600), "hour") + " ago";
+  return plural(Math.round(s / 86400), "day") + " ago";
 }
 function size(bytes) {
   if (!bytes) return "";
@@ -200,10 +214,10 @@ function games() {
     byGame.get(item.game_id).items.push(item);
   }
   const value = SORTS[sortBy] || SORTS.score, way = (value.down ? -1 : 1) * (flipped ? -1 : 1);
-  const byName = (a, b) => a.name.localeCompare(b.name, "nl", {sensitivity: "base"});
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"});
   return [...byGame.values()].sort((a, b) => {
     const x = value.of(a), y = value.of(b);
-    return (typeof x === "string" ? x.localeCompare(y, "nl", {sensitivity: "base"}) : x - y) * way || byName(a, b);
+    return (typeof x === "string" ? x.localeCompare(y, undefined, {sensitivity: "base"}) : x - y) * way || byName(a, b);
   });
 }
 
@@ -211,29 +225,39 @@ function games() {
 const releases = g => g.items.filter(i => !i.ignored).flatMap(i => i.candidates);
 const SORTS = {
   score: {text: "Score", down: true, of: g => Math.max(0, ...releases(g).map(c => c.score || 0))},
-  name: {text: "Naam", down: false, of: g => g.name},
-  newest: {text: "Nieuwste release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
-  count: {text: "Aantal releases", down: true, of: g => releases(g).length},
-  behind: {text: "Updates achter", down: true, of: g => {
+  name: {text: "Name", down: false, of: g => g.name},
+  newest: {text: "Newest release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
+  count: {text: "Number of releases", down: true, of: g => releases(g).length},
+  behind: {text: "Updates behind", down: true, of: g => {
     const u = g.items.find(i => i.type === "update");
     return u ? Math.round((u.latest_version - u.local_version) / 65536) : 0; }},
-  missing: {text: "Aantal ontbrekende DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
-  searched: {text: "Laatst gezocht", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
+  missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
+  searched: {text: "Last searched", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
 };
-// The choice is kept in this browser; without storage it is simply the default again.
-function remembered(key, fallback) {
-  try { return localStorage.getItem("nswhunter-" + key) || fallback; } catch (e) { return fallback; }
-}
-function remember(key, value) {
-  try { localStorage.setItem("nswhunter-" + key, value); } catch (e) { /* private window */ }
-}
-let sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
-function inTab(game, name) {
-  const has = status => game.items.some(i => i.status === status);
-  if (name === "all") return true;
-  if (name === "review" || name === "sent") return has(name);
-  if (name === "ignored") return game.items.every(i => i.status === "ignored");
-  return !has("review") && !has("sent") && (has("new") || has("none"));
+
+// The tiles at the top. A click on one shows only the games that belong to it.
+// has: does a game belong to it; number: what the tile counts, if not those games.
+const live = g => g.items.filter(i => !i.ignored);
+const failed = g => g.items.flatMap(i => i.failed || []);
+const TILES = {
+  all: {text: "games in your library", has: () => true, number: () => state.library.games,
+        none: "Your library misses no updates. Or the first round is still running."},
+  updates: {text: "updates missing", has: g => g.items.some(i => i.type === "update"),
+            none: "No game misses an update."},
+  dlc: {text: "DLC missing", has: g => g.items.some(i => i.type === "dlc"), number: () => state.library.dlc,
+        none: "No game misses DLC."},
+  choice: {text: "awaiting your choice", has: g => live(g).some(i => i.candidates.length && !i.grab),
+           none: "Nothing awaits your choice. Releases that are found show up here."},
+  queue: {text: "added to queue", has: g => live(g).some(i => i.grab),
+          none: "Nothing is in the queue of the download client."},
+  failed: {text: "download failed", has: g => failed(g).length > 0,
+           none: "No download failed."},
+  ignored: {text: "ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
+};
+function tiles(all) {
+  const count = key => all.filter(TILES[key].has).length;
+  return Object.keys(TILES).filter(key =>
+    (key !== "dlc" || state.settings.dlc) && (key !== "ignored" || count(key) > 0 || only === key));
 }
 
 async function post(path, body, key) {
@@ -241,117 +265,132 @@ async function post(path, body, key) {
   try {
     const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
     const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
-    if (!data.ok) toast(data.error || "Mislukt");
+    if (!data.ok) toast(data.error || "Failed");
     return data;
   } catch (e) {
-    toast("Geen verbinding met NSWHunter");
+    toast("No connection to NSWHunter");
     return {ok: false};
   } finally {
     busy.delete(key); await load();
   }
 }
+function grab(item, release) {
+  return post("/api/grab", {key: item.key, guid: release.guid}, release.guid).then(d => d.ok && toast("Added to the queue of the download client"));
+}
 
 // Nintendo numbers updates in steps of 65536: v720896 is update 11.
 function upd(version) {
-  if (!version) return "geen update";
+  if (!version) return "no update";
   return version % 65536 === 0 ? "update " + version / 65536 : "v" + version;
 }
 function versions(item) {
   if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
   const local = upd(item.local_version) + (item.local_display ? " (v" + item.local_display + ")" : "");
-  return "je hebt " + local + " → nieuwste is " + upd(item.latest_version) + (item.latest_date ? " van " + item.latest_date : "");
+  return "you have " + local + " → latest is " + upd(item.latest_version) + (item.latest_date ? " of " + item.latest_date : "");
+}
+function link(release) {
+  const safe = /^https?:\/\//.test(release.infoUrl || "");
+  return safe ? h("a", {href: release.infoUrl, target: "_blank", rel: "noopener noreferrer"}, release.title) : release.title;
 }
 
 function candidate(item, c, first) {
   const version = [c.display_version ? "v" + c.display_version : null,
     c.internal_version != null ? upd(c.internal_version) + " (v" + c.internal_version + ")" : null,
-    c.estimated_version ? (c.deduced ? "" : "waarschijnlijk ") + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
+    c.estimated_version ? (c.deduced ? "" : "probably ") + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
   const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
-  const safe = /^https?:\/\//.test(c.infoUrl || "");
   const sent = (item.sent || []).includes(c.guid);
   return h("div", {class: "cand" + (first ? " first" : "")},
     h("div", {}, score(c.score),
-      c.guid === item.auto_guid ? h("div", {class: "sub"}, "gaat vanzelf") : null),
+      c.guid === item.auto_guid ? h("div", {class: "sub", title: "Goes to the download client by itself in the next round"}, "automatic") : null),
     h("div", {},
-      h("div", {class: "name"}, safe ? h("a", {href: c.infoUrl, target: "_blank", rel: "noopener noreferrer"}, c.title) : c.title),
+      h("div", {class: "name"}, link(c)),
       h("div", {class: "sub"}, meta),
       h("div", {class: "sub"}, c.reasons.join("; "))),
     h("div", {class: "acts"},
-      sent ? h("span", {class: "badge sent"}, "verstuurd") : null,
-      h("button", {class: first && !sent ? "primary" : "", disabled: busy.has(c.guid),
-                   onclick: () => post("/api/grab", {key: item.key, guid: c.guid}, c.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))},
-        sent ? "Nog eens" : "Download"),
-      h("button", {class: "quiet", title: "Deze release nooit meer tonen",
-                   onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Verwerp")));
+      sent ? h("span", {class: "badge sent"}, "sent") : null,
+      h("button", {class: first && !sent ? "primary" : "", disabled: busy.has(c.guid), onclick: () => grab(item, c)},
+        sent ? "Send again" : "Download"),
+      h("button", {class: "quiet", title: "Never show this release again",
+                   onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Reject")));
 }
 
 // One missing thing of a game (the update, or one DLC) with its releases.
 function part(item) {
   const what = item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id)
-    : item.type === "dlcpack" ? "DLC-pakket (voor alle ontbrekende DLC van deze game)" : "Update";
+    : item.type === "dlcpack" ? "DLC pack (for all missing DLC of this game)" : "Update";
   const rows = [h("div", {class: "part"},
     h("span", {class: "grow"}, h("b", {}, what),
       item.type === "update" && item.ladder && item.ladder.length > 1
-        ? h("span", {class: "sub", title: "Welke versie in releasenamen bij welke update hoort"},
-            "  " + item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (op datum)" : "")).join(" · ")) : null),
-    item.ignored ? h("span", {class: "badge"}, "genegeerd") : null,
+        ? h("span", {class: "sub", title: "Which version in release names is which update"},
+            "  " + item.ladder.map(r => "v" + r.display + " = " + r.update + (r.how === "date" ? " (by date)" : "")).join(" · ")) : null),
+    item.ignored ? h("span", {class: "badge"}, "ignored") : null,
     h("button", {class: "quiet", onclick: () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key)},
-      item.ignored ? "Niet meer negeren" : "Negeer"))];
+      item.ignored ? "Stop ignoring" : "Ignore"))];
   if (item.grab) {
     rows.push(h("div", {class: "sent-row"},
       h("span", {class: "badge " + (item.grab.state === "stuck" ? "review" : "sent")},
-        (item.grab.auto ? "vanzelf " : "") + (SENT[item.grab.state] || "verstuurd")),
+        (item.grab.auto ? "automatically " : "") + (SENT[item.grab.state] || SENT.sent)),
       h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
-      h("button", {class: "quiet", title: "Vergeet dat dit verstuurd is, zodat het weer bij Te beoordelen staat",
-                   onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Niet verstuurd")));
+      h("button", {class: "quiet", title: "Forget that this was sent, so it awaits your choice again",
+                   onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Not sent")));
+  }
+  // Downloads that failed, as the download client reported them.
+  for (const f of item.failed || []) {
+    rows.push(h("div", {class: "sent-row"},
+      h("span", {class: "badge error"}, "download failed"),
+      h("span", {class: "grow"}, f.title, h("span", {class: "sub"}, " · " + f.why + " · " + ago(f.failed_at))),
+      h("button", {disabled: busy.has(f.guid), title: "Send this release to the download client once more",
+                   onclick: () => grab(item, f)}, "Try again"),
+      h("button", {class: "quiet", title: "Take this off the list of failed downloads",
+                   onclick: () => post("/api/dismiss", {key: item.key, guid: f.guid}, "d" + f.guid)}, "Dismiss")));
   }
   // The other releases stay in view after one was sent: another can still be chosen.
   if (!item.ignored) rows.push(...item.candidates.map((c, i) => candidate(item, c, i === 0 && !item.grab)));
-  // What fell off, and why: to see that nothing good was thrown away, and to overrule it.
+  // What was ruled out, and why: to see that nothing good was thrown away, and to overrule it.
   const rejected = item.rejected || [];
   if (rejected.length && !item.ignored) {
     const open = fallen.has(item.key);
     rows.push(h("div", {class: "rest"},
       h("button", {class: "quiet", "aria-expanded": open ? "true" : "false",
                    onclick: () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderList(); }},
-        (open ? "▾ " : "▸ ") + rejected.length + " afgevallen " + (rejected.length === 1 ? "release" : "releases"))));
-    if (open) rows.push(...rejected.map(r => {
-      const safe = /^https?:\/\//.test(r.infoUrl || "");
-      return h("div", {class: "cand fell"},
-        h("div", {}, h("span", {class: "badge"}, "afgevallen")),
+        (open ? "▾ " : "▸ ") + plural(rejected.length, "release") + " ruled out")));
+    if (open) rows.push(...rejected.map(r =>
+      h("div", {class: "cand fell"},
+        h("div", {}, h("span", {class: "badge"}, "ruled out")),
         h("div", {},
-          h("div", {class: "name"}, safe ? h("a", {href: r.infoUrl, target: "_blank", rel: "noopener noreferrer"}, r.title) : r.title),
+          h("div", {class: "name"}, link(r)),
           h("div", {class: "sub"}, [size(r.size), r.indexer, day(r.published)].filter(Boolean).join(" · ")),
           h("div", {class: "sub"}, r.reason)),
         h("div", {class: "acts"},
-          h("button", {disabled: busy.has(r.guid), title: "Deze release toch naar de downloadclient sturen",
-                       onclick: () => post("/api/grab", {key: item.key, guid: r.guid}, r.guid).then(d => d.ok && toast("Verstuurd naar de downloadclient"))},
-            "Toch downloaden")));
-    }));
+          h("button", {disabled: busy.has(r.guid), title: "Send this release to the download client after all",
+                       onclick: () => grab(item, r)}, "Download anyway")))));
   }
   return rows;
 }
 
 function gameCard(game) {
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
-  const live = game.items.filter(i => !i.ignored);
-  const review = live.filter(i => i.status === "review"), sent = live.filter(i => i.status === "sent");
+  const review = live(game).filter(i => i.status === "review"), sent = live(game).filter(i => i.grab);
   const count = review.reduce((n, i) => n + i.candidates.length, 0);
   const best = Math.max(0, ...review.flatMap(i => i.candidates.map(c => c.score || 0)));
-  const something = i => i.candidates.length || i.grab || (i.rejected || []).length;
+  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length;
   const withSomething = game.items.filter(something);
   const empty = game.items.filter(i => !something(i) && i.type !== "dlcpack");
   const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
   const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
-  const label = allIgnored ? ["ignored", "genegeerd"] : sent.length ? ["sent", "verstuurd"]
-    : game.items.some(i => i.status === "none") ? ["none", "niets gevonden"] : ["new", "nog niet gezocht"];
+  const label = allIgnored ? ["ignored", "ignored"] : sent.length ? ["sent", "in queue"]
+    : game.items.some(i => i.status === "none") ? ["none", "nothing found"] : ["new", "not searched yet"];
+  // In the queue and the failed list the releases themselves are the point: name them on the card.
+  const more = only === "queue" ? sent.map(i => (SENT[i.grab.state] || SENT.sent) + ": " + i.grab.title)
+    : only === "failed" ? failed(game).map(f => "failed " + ago(f.failed_at) + ": " + f.title) : [];
   const names = h("div", {},
     h("div", {class: "title"}, game.name),
     h("div", {class: "sub"}, h("span", {class: "mono"}, game.id),
       update ? " · " + versions(update) : "",
-      dlc.length ? " · " + dlc.length + " DLC " + (dlc.length === 1 ? "ontbreekt" : "ontbreken") : "",
-      searched ? " · gezocht " + ago(searched) : ""));
+      dlc.length ? " · " + dlc.length + " DLC missing" : "",
+      searched ? " · searched " + ago(searched) : ""),
+    more.map(text => h("div", {class: "more"}, text)));
   const card = h("div", {class: "item"},
     h("div", {class: "head"},
       // Collapsed by default: a click on the name shows what is missing and the releases.
@@ -359,21 +398,22 @@ function gameCard(game) {
                          onclick: () => { shown ? expanded.delete(game.id) : expanded.add(game.id); renderList(); }},
               h("span", {class: "arrow"}, "▸"), names)
           : h("div", {class: "grow"}, names),
-      count ? h("span", {class: "sub"}, count + (count === 1 ? " release" : " releases")) : null,
-      sent.length && count ? h("span", {class: "badge sent"}, sent.length + " verstuurd") : null,
-      count ? score(best, "Hoogste score van de gevonden releases") : h("span", {class: "badge " + label[0]}, label[1]),
+      count ? h("span", {class: "sub"}, plural(count, "release")) : null,
+      failed(game).length ? h("span", {class: "badge error"}, failed(game).length + " failed") : null,
+      sent.length && count ? h("span", {class: "badge sent"}, sent.length + " in queue") : null,
+      count ? score(best, "Highest score of the releases that were found") : h("span", {class: "badge " + label[0]}, label[1]),
       h("button", {disabled: searching,
-                   onclick: () => post("/api/search", {key: game.items[0].key}, "s" + game.id).then(d => d.ok && toast(d.found ? d.found + " nieuwe kandidaat-release(s)" : "Niets nieuws gevonden"))},
-        searching ? "Zoeken…" : "Zoek nu"),
-      h("button", {class: "quiet", title: "Alles van deze game negeren",
+                   onclick: () => post("/api/search", {key: game.items[0].key}, "s" + game.id).then(d => d.ok && toast(d.found ? plural(d.found, "new candidate release") : "Nothing new found"))},
+        searching ? "Searching…" : "Search now"),
+      h("button", {class: "quiet", title: "Ignore everything of this game",
                    onclick: () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + game.id)},
-        allIgnored ? "Niet meer negeren" : "Negeer")));
+        allIgnored ? "Stop ignoring" : "Ignore")));
   if (shown) {
     const first = i => (i.type === "update" ? 0 : 1) * 100 - Math.max(0, ...i.candidates.map(c => c.score || 0));
     for (const item of withSomething.sort((a, b) => first(a) - first(b))) card.append(...part(item));
     if (empty.length) {
-      card.append(h("div", {class: "rest"}, "Nog niets gevonden voor: " +
-        empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "de update").join(" · ")));
+      card.append(h("div", {class: "rest"}, "Nothing found yet for: " +
+        empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "the update").join(" · ")));
     }
   }
   return card;
@@ -383,100 +423,102 @@ function render() {
   if (!state) return;
   $("version").textContent = "v" + state.version;
   const st = state.status;
-  $("statusline").textContent = st.running ? "Bezig: " + (st.phase || "…")
-    : "Laatste ronde " + ago(st.last_run) + (st.next_run ? " · volgende over " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
+  $("statusline").textContent = st.running ? "Busy: " + (st.phase || "…")
+    : "Last round " + ago(st.last_run) + (st.next_run ? " · next in " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
   $("sync").disabled = st.running || !state.configured;
-  put($("views"), ...[["updates", "Updates"], ["log", "Logboek"], ["config", "Configuratie"]].map(([name, text]) =>
+  put($("views"), ...[["updates", "Updates"], ["log", "Log"], ["config", "Configuration"]].map(([name, text]) =>
     h("button", {class: view === name ? "on" : "", onclick: () => show(name)}, text)));
 
+  // The checks of the services: on the Configuration tab only.
   put($("chips"), ...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
     h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
-    h("span", {class: "chip"}, "Automatisch downloaden " + autoText(state.settings.auto)),
-    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "aan" : "uit")),
-    h("span", {class: "chip"}, "Zoekt elke " + state.settings.search_hours + " uur"));
+    h("span", {class: "chip"}, "Automatic download " + autoText(state.settings.auto)),
+    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "on" : "off")),
+    h("span", {class: "chip"}, "Searches every " + state.settings.search_hours + " hours"));
   const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
-  put($("notice"), 
-    !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is nog niet ingesteld. Vul de tab Configuratie in.") : null,
+  put($("notice"),
+    !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is not set up yet. Fill in the Configuration tab.") : null,
     ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.text)) : []));
 
-  const all = games(), count = name => all.filter(g => inTab(g, name)).length;
-  put($("stats"), 
-    h("div", {class: "stat"}, h("b", {}, state.library.games), h("span", {}, "games in je bibliotheek")),
-    h("div", {class: "stat"}, h("b", {}, state.library.updates), h("span", {}, "updates ontbreken")),
-    state.settings.dlc ? h("div", {class: "stat"}, h("b", {}, state.library.dlc), h("span", {}, "DLC ontbreken")) : null,
-    h("div", {class: "stat"}, h("b", {}, count("review")), h("span", {}, "games wachten op je keuze")),
-    h("div", {class: "stat"}, h("b", {}, count("sent")), h("span", {}, "games met iets onderweg")));
+  const all = games(), keys = tiles(all);
+  if (!keys.includes(only)) only = "choice";
+  put($("stats"), ...keys.map(key => {
+    const tile = TILES[key], number = tile.number ? tile.number() : all.filter(tile.has).length;
+    return h("button", {class: "stat" + (only === key ? " on" : "") + (key === "failed" && number ? " alert" : ""),
+                        "aria-pressed": only === key ? "true" : "false", title: "Show only these games",
+                        onclick: () => { only = key; remember("only", key); render(); }},
+      h("b", {}, number), h("span", {}, tile.text));
+  }));
 
-  put($("tabs"), ...TABS.map(([name, text]) =>
-    h("button", {class: tab === name ? "on" : "", onclick: () => { tab = name; render(); }}, text + " (" + count(name) + ")")),
-    h("span", {class: "grow"}),
-    h("label", {for: "sort"}, "Sorteer op"),
+  put($("tools"),
+    h("span", {class: "line grow", id: "shown"}),
+    h("label", {for: "sort"}, "Sort by"),
     h("select", {id: "sort", onchange: e => { sortBy = e.target.value; flipped = false; remember("sort", sortBy); remember("flipped", ""); render(); }},
       Object.entries(SORTS).map(([key, v]) => h("option", {value: key, selected: key === sortBy}, v.text))),
-    h("button", {id: "flip", title: "Volgorde omkeren",
-                 "aria-label": "Volgorde omkeren, nu " + ((SORTS[sortBy] || SORTS.score).down !== flipped ? "aflopend" : "oplopend"),
+    h("button", {id: "flip", title: "Reverse the order",
+                 "aria-label": "Reverse the order, now " + ((SORTS[sortBy] || SORTS.score).down !== flipped ? "descending" : "ascending"),
                  onclick: () => { flipped = !flipped; remember("flipped", flipped ? "1" : ""); render(); }},
       (SORTS[sortBy] || SORTS.score).down !== flipped ? "↓" : "↑"),
-    h("input", {type: "search", placeholder: "Filter op naam", value: filter, id: "filter",
-                oninput: e => { filter = e.target.value; renderList(); }}));
+    h("input", {type: "search", placeholder: "Filter by name", value: needle, id: "filter",
+                oninput: e => { needle = e.target.value; renderList(); }}));
   renderList();
 
   put($("log"), state.events.length ? state.events.map(e =>
-    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString("nl-NL", {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text)))
-    : h("div", {class: "line"}, "Nog niets gebeurd."));
+    h("div", {class: e.level}, h("time", {}, new Date(e.at * 1000).toLocaleString(undefined, {dateStyle: "short", timeStyle: "short"})), h("span", {}, e.text)))
+    : h("div", {class: "line"}, "Nothing happened yet."));
 }
 
 function renderList() {
-  const needle = filter.trim().toLowerCase();
-  const items = games().filter(g => inTab(g, tab) && (!needle || g.name.toLowerCase().includes(needle) || g.id.toLowerCase().includes(needle)));
-  const empty = {
-    review: "Niets te beoordelen. Gevonden releases verschijnen hier.",
-    sent: "Er is niets onderweg.", open: "Voor alle ontbrekende updates is iets gevonden.",
-    ignored: "Je negeert geen games.", all: "Je bibliotheek mist geen updates. Of de eerste ronde loopt nog."}[tab];
-  put($("list"), ...(items.length ? items.map(gameCard) : [h("div", {class: "empty"}, needle ? "Geen game met die naam in dit lijstje." : empty)]));
+  const tile = TILES[only] || TILES.choice, word = needle.trim().toLowerCase();
+  const mine = games().filter(tile.has);
+  const items = mine.filter(g => !word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word));
+  // The library tile counts every game; the list holds the ones that miss something.
+  const what = only === "all" ? " that miss an update" + (state.settings.dlc ? " or DLC" : "") : " · " + tile.text;
+  $("shown").textContent = (word ? items.length + " of " : "") + plural(mine.length, "game") + what;
+  put($("list"), ...(items.length ? items.map(gameCard) : [h("div", {class: "empty"}, word && mine.length ? "No game with that name in this list." : tile.none)]));
 }
 
-// ---------------------------------------------------------------- Configuratie
+// ---------------------------------------------------------------- Configuration
 const GROUPS = [
-  {title: "Bibliotheek (Switch-library-manager-web)", test: "slm", fields: [
-    {name: "SLM_URL", label: "Adres", placeholder: "http://192.168.1.10:3000"},
+  {title: "Library (Switch-library-manager-web)", test: "slm", fields: [
+    {name: "SLM_URL", label: "Address", placeholder: "http://192.168.1.10:3000"},
     {name: "SLM_API_KEY", label: "API key", secret: true,
-     help: "Maak hem in Switch-library-manager-web onder My account > API keys > Make a key, met het recht Read only. De key begint met slm_ en wordt maar één keer getoond. Staat inloggen daar uit, laat dit veld dan leeg."}]},
+     help: "Make it in Switch-library-manager-web under My account > API keys > Make a key. Read only is enough; with the Editor role NSWHunter can also ask for a scan right after a download. The key starts with slm_ and is shown only once. If login is switched off there, leave this field empty."}]},
   {title: "Prowlarr", test: "prowlarr", fields: [
-    {name: "PROWLARR_URL", label: "Adres", placeholder: "http://192.168.1.10:9696"},
-    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "Staat in Prowlarr onder Settings > General > API Key."},
-    {name: "PROWLARR_CATEGORIES", label: "Categorieën", placeholder: "1000",
-     help: "Alleen in deze categorieën wordt gezocht. 1000 is Console met alle subcategorieën; meerdere nummers scheid je met een komma, bijvoorbeeld 1090 voor alleen Console/Other."}]},
-  {title: "Downloadclient", test: "downloader", fields: [
-    {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "De downloadclient van Prowlarr"]]},
-    {name: "DOWNLOAD_CATEGORY", label: "Categorie", placeholder: "games", unless: "prowlarr",
-     help: "De categorie die de download in je client krijgt."},
-    {name: "NZBGET_URL", label: "Adres NZBGet", placeholder: "http://192.168.1.10:6789", only: "nzbget"},
-    {name: "NZBGET_USER", label: "Gebruikersnaam", only: "nzbget", help: "ControlUsername in NZBGet onder Settings > Security."},
-    {name: "NZBGET_PASSWORD", label: "Wachtwoord", secret: true, only: "nzbget", help: "ControlPassword in NZBGet."},
-    {name: "SABNZBD_URL", label: "Adres SABnzbd", placeholder: "http://192.168.1.10:8080", only: "sabnzbd"},
-    {name: "SABNZBD_API_KEY", label: "API key", secret: true, only: "sabnzbd", help: "Staat in SABnzbd onder Config > General > API Key."}]},
-  {title: "Gedrag", fields: [
-    {name: "AUTO_DOWNLOAD", label: "Automatisch downloaden", options: [
-      ["off", "Uit: ik kies zelf"], ["10", "Alleen score 10"], ["9", "Vanaf score 9"], ["8", "Vanaf score 8"],
-      ["7", "Vanaf score 7"], ["6", "Vanaf score 6"], ["5", "Vanaf score 5"]],
-     help: "De score is de kans dat een download de juiste is, van 1 tot 10. Per game gaat de beste release vanzelf als zijn score minstens zo hoog is. 10: title ID en versienummer kloppen. 9: naam en versie kloppen zeker. 7-8: de versie is afgeleid van datums of van de nummering."},
-    {name: "SEARCH_INTERVAL_HOURS", label: "Automatisch zoeken", options: [
-      ["6", "Elke 6 uur"], ["12", "Elke 12 uur"], ["24", "Elke 24 uur"], ["48", "Elke 48 uur"]],
-     help: "Zo vaak wordt elke game die iets mist op naam gezocht. Dat kost per game één API-call per indexer; kies 24 of 48 uur als een indexer een daglimiet heeft."},
-    {name: "INCLUDE_DLC", label: "Ook ontbrekende DLC zoeken", checkbox: true},
-    {name: "GRAB_WAIT_MINUTES", label: "Wachten op de bibliotheek", options: [
-      ["30", "30 minuten"], ["60", "60 minuten"], ["120", "2 uur"], ["360", "6 uur"], ["1440", "24 uur"]],
-     help: "Zo lang mag het duren voordat een verstuurde release in je bibliotheek staat. Mislukt de download, dan is de volgende release meteen aan de beurt. Zolang de downloadclient nog bezig is, loopt de tijd niet."}]},
-  {title: "Meldingen (Telegram)", test: "telegram", testText: "Stuur testbericht", fields: [
-    {name: "TELEGRAM_BOT_TOKEN", label: "Bot-token", secret: true,
-     help: "Maak een bot bij @BotFather in Telegram; die geeft het token. Stuur je bot daarna zelf één bericht, anders mag hij jou niets sturen."},
-    {name: "TELEGRAM_CHAT_ID", label: "Chat-ID", placeholder: "123456789",
-     help: "Je eigen ID krijg je van @userinfobot. Voor een groep is het een getal met een min ervoor. Je krijgt een bericht als er iets vanzelf is verstuurd, iets op je keuze wacht, een download mislukt of iets binnen is."}]},
-  {title: "Paneel", fields: [
-    {name: "PANEL_USER", label: "Gebruikersnaam"},
-    {name: "PANEL_PASSWORD", label: "Wachtwoord", secret: true,
-     help: "Zonder wachtwoord heeft het paneel geen inlog. Na een wijziging vraagt je browser opnieuw om in te loggen."}]},
+    {name: "PROWLARR_URL", label: "Address", placeholder: "http://192.168.1.10:9696"},
+    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "In Prowlarr under Settings > General > API Key."},
+    {name: "PROWLARR_CATEGORIES", label: "Categories", placeholder: "1000",
+     help: "Only these categories are searched. 1000 is Console with all its subcategories; separate several numbers with a comma, for example 1090 for Console/Other only."}]},
+  {title: "Download client", test: "downloader", fields: [
+    {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "The download client of Prowlarr"]]},
+    {name: "DOWNLOAD_CATEGORY", label: "Category", placeholder: "games", unless: "prowlarr",
+     help: "The category the download gets in your client."},
+    {name: "NZBGET_URL", label: "NZBGet address", placeholder: "http://192.168.1.10:6789", only: "nzbget"},
+    {name: "NZBGET_USER", label: "Username", only: "nzbget", help: "ControlUsername in NZBGet under Settings > Security."},
+    {name: "NZBGET_PASSWORD", label: "Password", secret: true, only: "nzbget", help: "ControlPassword in NZBGet."},
+    {name: "SABNZBD_URL", label: "SABnzbd address", placeholder: "http://192.168.1.10:8080", only: "sabnzbd"},
+    {name: "SABNZBD_API_KEY", label: "API key", secret: true, only: "sabnzbd", help: "In SABnzbd under Config > General > API Key."}]},
+  {title: "Behaviour", fields: [
+    {name: "AUTO_DOWNLOAD", label: "Automatic download", options: [
+      ["off", "Off: I choose myself"], ["10", "Score 10 only"], ["9", "From score 9"], ["8", "From score 8"],
+      ["7", "From score 7"], ["6", "From score 6"], ["5", "From score 5"]],
+     help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
+    {name: "SEARCH_INTERVAL_HOURS", label: "Automatic search", options: [
+      ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
+     help: "How often every game that misses something is searched by name. That costs one API call per indexer per game; choose 24 or 48 hours if an indexer has a daily limit."},
+    {name: "INCLUDE_DLC", label: "Also search for missing DLC", checkbox: true},
+    {name: "GRAB_WAIT_MINUTES", label: "Wait for the library", options: [
+      ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
+     help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."}]},
+  {title: "Notifications (Telegram)", test: "telegram", testText: "Send test message", fields: [
+    {name: "TELEGRAM_BOT_TOKEN", label: "Bot token", secret: true,
+     help: "Create a bot with @BotFather in Telegram; it gives you the token. Then send your bot one message yourself, or it is not allowed to message you."},
+    {name: "TELEGRAM_CHAT_ID", label: "Chat ID", placeholder: "123456789",
+     help: "@userinfobot tells you your own ID. For a group it is a number with a minus in front. You get a message when something was sent automatically, something awaits your choice, a download failed or something arrived."}]},
+  {title: "Panel", fields: [
+    {name: "PANEL_USER", label: "Username"},
+    {name: "PANEL_PASSWORD", label: "Password", secret: true,
+     help: "Without a password the panel has no login. After a change your browser asks you to log in again."}]},
 ];
 
 function fieldRow(f, client) {
@@ -491,9 +533,9 @@ function fieldRow(f, client) {
     const set = settings.secrets[f.name], wipe = clearing.has(f.name);
     control = h("div", {class: "row"},
       h("input", {id, name: f.name, type: "password", autocomplete: "new-password", disabled: wipe,
-                  placeholder: wipe ? "wordt gewist bij opslaan" : set ? "ingesteld; laat leeg om te behouden" : "niet ingesteld"}),
+                  placeholder: wipe ? "will be cleared on save" : set ? "set; leave empty to keep it" : "not set"}),
       set ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(f.name) : clearing.add(f.name); renderConfig(); }},
-        wipe ? "Toch houden" : "Wis") : null);
+        wipe ? "Keep it" : "Clear") : null);
   } else {
     control = h("input", {id, name: f.name, type: "text", value: settings.values[f.name] || "", placeholder: f.placeholder || "", spellcheck: "false"});
   }
@@ -506,7 +548,7 @@ function testRow(service, text) {
   const t = tests[service];
   return h("div", {class: "field"}, h("span", {}),
     h("div", {class: "row"},
-      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Bezig…" : (text || "Test")),
+      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Busy…" : (text || "Test")),
       t && !t.busy ? h("span", {class: "testresult " + (t.ok ? "ok" : "bad")}, (t.ok ? "✓ " : "✕ ") + t.text) : null));
 }
 async function runTest(service) {
@@ -516,14 +558,14 @@ async function runTest(service) {
     const r = await fetch("/api/test", {method: "POST", headers: {"Content-Type": "application/json"},
                                        body: JSON.stringify({service, values, clear: [...clearing]})});
     const data = await r.json();
-    tests[service] = {ok: data.ok === true, text: data.text || "Mislukt"};
+    tests[service] = {ok: data.ok === true, text: data.text || "Failed"};
   } catch (e) {
-    tests[service] = {ok: false, text: "Geen verbinding met NSWHunter"};
+    tests[service] = {ok: false, text: "No connection to NSWHunter"};
   }
   renderConfig();
 }
 
-// Typed but not yet saved values survive a rebuild of the form (switching client, "Wis").
+// Typed but not yet saved values survive a rebuild of the form (switching client, "Clear").
 function typed() {
   const values = {};
   for (const el of $("config").elements) {
@@ -537,13 +579,13 @@ function renderConfig(client) {
   const keep = typed();
   for (const [name, value] of Object.entries(keep)) if (name in settings.values) settings.values[name] = value;
   if (client) settings.values.DOWNLOAD_CLIENT = client;
-  put($("config"), 
+  put($("config"),
     ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title),
       g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)),
       g.test ? testRow(g.test, g.testText) : null)),
     h("div", {class: "savebar"},
-      h("button", {class: "primary", type: "submit", id: "save"}, "Opslaan en verbindingen testen"),
-      h("span", {class: "line"}, "Opgeslagen instellingen staan in /data/settings.json en gaan voor op de waarden in je compose.")),
+      h("button", {class: "primary", type: "submit", id: "save"}, "Save and test the connections"),
+      h("span", {class: "line"}, "Saved settings are kept in /data/settings.json and take precedence over the values in your compose file.")),
     h("div", {class: "results", id: "results"}));
   for (const [name, value] of Object.entries(keep)) {
     const el = $("config").elements[name];
@@ -557,10 +599,10 @@ async function openConfig() {
     if (!r.ok) throw new Error();
     settings = await r.json();
     clearing.clear(); tests = {};
-    put($("config"), );
+    put($("config"));
     renderConfig();
   } catch (e) {
-    toast("Instellingen ophalen mislukt");
+    toast("Could not load the settings");
   }
 }
 
@@ -576,25 +618,25 @@ function show(name) {
 $("config").addEventListener("submit", async e => {
   e.preventDefault();
   const values = typed();
-  $("save").disabled = true; $("save").textContent = "Opslaan en testen…";
+  $("save").disabled = true; $("save").textContent = "Saving and testing…";
   try {
     const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json"},
                                            body: JSON.stringify({values, clear: [...clearing]})});
     const data = await r.json();
-    if (!data.ok) { toast(data.error || "Opslaan mislukt"); return; }
+    if (!data.ok) { toast(data.error || "Saving failed"); return; }
     settings = {values: data.values, secrets: data.secrets};
     clearing.clear();
-    put($("config"), );
+    put($("config"));
     renderConfig();
     const order = ["config", "slm", "prowlarr", "downloader"];
     put($("results"), ...order.filter(n => data.services[n]).map(n =>
       h("div", {class: data.services[n].ok ? "" : "bad"}, (data.services[n].ok ? "✓ " : "✕ ") + SERVICES[n] + ": " + data.services[n].text)));
-    toast("Instellingen opgeslagen");
+    toast("Settings saved");
     load();
   } catch (err) {
-    toast("Geen verbinding met NSWHunter");
+    toast("No connection to NSWHunter");
   } finally {
-    if ($("save")) { $("save").disabled = false; $("save").textContent = "Opslaan en verbindingen testen"; }
+    if ($("save")) { $("save").disabled = false; $("save").textContent = "Save and test the connections"; }
   }
 });
 
@@ -608,12 +650,12 @@ async function load() {
     // Keep typing in the filter box and keep the sort list open: only rebuild around them.
     if (["filter", "sort"].includes(document.activeElement && document.activeElement.id)) renderList(); else render();
   } catch (e) {
-    $("statusline").textContent = "Geen verbinding met NSWHunter";
+    $("statusline").textContent = "No connection to NSWHunter";
   }
 }
 $("sync").addEventListener("click", async () => {
   await fetch("/api/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-  toast("Ronde gestart"); setTimeout(load, 1500);
+  toast("Round started"); setTimeout(load, 1500);
 });
 load();
 setInterval(load, 8000);

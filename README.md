@@ -1,18 +1,18 @@
 # NSWHunter
 
-Zoekt de Switch-updates die in je bibliotheek ontbreken op usenet en stuurt ze naar je downloadclient.
+Searches usenet for the Switch updates that your library misses and sends them to your download client.
 
-1. Haalt de export van [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) op (`/export/library.json`) en neemt alle games met `updateMissing: true`.
-2. Zoekt via Prowlarr naar releases van die games.
-3. Beoordeelt elke release: is het de juiste game, is de versie nieuwer dan de jouwe, is het een update?
-4. Toont de kandidaten in een webpaneel. Jij klikt op **Download**, of je laat zekere releases vanzelf gaan.
-5. Stuurt de NZB naar NZBGet (categorie `games`), SABnzbd of de downloadclient van Prowlarr.
+1. Fetches the export of [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) (`/export/library.json`) and takes all games with `updateMissing: true`.
+2. Searches for releases of those games through Prowlarr.
+3. Judges each release: is it the right game, is the version newer than yours, is it an update?
+4. Shows the candidates in a web panel. You click **Download**, or you let certain releases be sent automatically.
+5. Sends the NZB to NZBGet (category `games`), SABnzbd or the download client of Prowlarr.
 
-Staat de update daarna in je bibliotheek, dan verdwijnt het item vanzelf.
+Once the update is in your library, the item disappears by itself.
 
-## Installeren
+## Installing
 
-Het image staat op `ghcr.io/<account>/nswhunter`. In Portainer: **Stacks > Add stack** en plak [docker-compose.yml](docker-compose.yml):
+The image is at `ghcr.io/<account>/nswhunter`. In Portainer: **Stacks > Add stack** and paste [docker-compose.yml](docker-compose.yml):
 
 ```yaml
 services:
@@ -31,107 +31,120 @@ services:
       - /path/to/nswhunter/data:/data
 ```
 
-De repo is privé, en daarmee het image ook. Portainer heeft dan een registry nodig om het op te halen: **Registries > Add registry > Custom**, URL `ghcr.io`, gebruikersnaam `<account>` en als wachtwoord een GitHub-token met het recht `read:packages`. Of zet het pakket op openbaar onder GitHub > Packages > nswhunter > Package settings.
+The repo is private, and so is the image. Portainer then needs a registry to pull it: **Registries > Add registry > Custom**, URL `ghcr.io`, username `<account>` and as password a GitHub token with the `read:packages` scope. Or make the package public under GitHub > Packages > nswhunter > Package settings.
 
-## Instellen
+## Setting up
 
-Open `http://<nas>:3033`. Zonder instellingen kom je op de tab **Configuratie**:
+Open `http://<nas>:3033`. Without settings you land on the **Configuration** tab:
 
-| Instelling | Waar je hem vindt |
+| Setting | Where to find it |
 |---|---|
-| Bibliotheek: adres en API key | Switch-library-manager-web > My account > API keys > Make a key, met het recht Read only. De key begint met `slm_` en wordt één keer getoond. Staat inloggen daar uit, dan is er geen key nodig. |
-| Prowlarr: adres en API key | Prowlarr > Settings > General > API Key |
-| Prowlarr: categorieën | `1000` is Console met alle subcategorieën. Alleen daarin wordt gezocht. Releases die de indexer onder een andere console heeft ingedeeld (PS4, Xbox, Wii, …) of die een ander platform in de naam hebben, vallen af: de Switch heeft geen eigen categorie. |
-| Downloadclient | NZBGet (adres, ControlUsername, ControlPassword), SABnzbd (adres, API key) of de downloadclient die in Prowlarr is ingesteld |
-| Automatisch downloaden | Zie [Automatisch downloaden](#automatisch-downloaden) |
-| Automatisch zoeken | Elke 6, 12, 24 of 48 uur, zie [Zoeken en API-limieten](#zoeken-en-api-limieten) |
-| Wachten op de bibliotheek | Hoe lang een verstuurde release mag doen over het verschijnen in je bibliotheek, zie [Na het versturen](#na-het-versturen) |
-| Meldingen (Telegram) | Bot-token van @BotFather en je chat-ID (van @userinfobot). Stuur je bot eerst zelf één bericht. Je krijgt een bericht als er iets vanzelf is verstuurd, iets op je keuze wacht, een download mislukt of iets binnen is. |
-| Paneel | Gebruikersnaam en wachtwoord. Zonder wachtwoord heeft het paneel geen inlog. Van het wachtwoord wordt alleen een hash bewaard. |
+| Library: address and API key | Switch-library-manager-web > My account > API keys > Make a key, with the Read only role. The key starts with `slm_` and is shown once. If login is switched off there, no key is needed. |
+| Prowlarr: address and API key | Prowlarr > Settings > General > API Key |
+| Prowlarr: categories | `1000` is Console with all its subcategories. Only those are searched. Releases that the indexer filed under another console (PS4, Xbox, Wii, …) or that have another platform in the name are ruled out: the Switch has no category of its own. |
+| Download client | NZBGet (address, ControlUsername, ControlPassword), SABnzbd (address, API key) or the download client that is set up in Prowlarr |
+| Automatic download | See [Automatic download](#automatic-download) |
+| Automatic search | Every 6, 12, 24 or 48 hours, see [Searching and API limits](#searching-and-api-limits) |
+| Wait for the library | How long a sent release may take to show up in your library, see [After sending](#after-sending) |
+| Notifications (Telegram) | Bot token from @BotFather and your chat ID (from @userinfobot). First send your bot one message yourself. You get a message when something was sent automatically, something awaits your choice, a download failed or something arrived. |
+| Panel | Username and password. Without a password the panel has no login. Only a hash of the password is stored. |
 
-Elke service heeft een **Test**-knop die de verbinding probeert met wat er in het formulier staat, ook als het nog niet is opgeslagen. **Opslaan en verbindingen testen** bewaart de instellingen, probeert elke service en start een ronde. De instellingen staan in `/data/settings.json`, alleen leesbaar voor de app-gebruiker. Keys en wachtwoorden gaan nooit terug naar de browser: een leeg veld betekent "houden wat er staat", met **Wis** maak je er een leeg.
+Each service has a **Test** button that tries the connection with what is in the form, even if it has not been saved yet. **Save and test the connections** stores the settings, tries each service and starts a round. The settings are in `/data/settings.json`, readable only by the app user. Keys and passwords never go back to the browser: an empty field means "keep what is there", and **Clear** empties one.
 
-Dezelfde instellingen kunnen ook als omgevingsvariabele in de compose staan (`SLM_URL`, `PROWLARR_API_KEY`, …). Dat is dan de beginwaarde; een opgeslagen waarde gaat voor. De overige instellingen (tempo, indexers, meldingen) staan alleen in de compose, zie [.env.example](.env.example).
+The same settings can also be environment variables in the compose file (`SLM_URL`, `PROWLARR_API_KEY`, …). That is then the initial value; a saved value takes precedence. The other settings (timing, indexers, notifications through Apprise) are in the compose file only, see [.env.example](.env.example).
 
-## Hoe een release beoordeeld wordt
+## The panel
 
-Releasenamen hebben geen vast format, dus NSWHunter zoekt drie dingen ergens in de titel:
+The tiles at the top of the **Updates** tab are buttons. A click on one shows only the games that belong to it:
 
-- **Welke game.** Een title ID (`0100623017A58800`) is doorslaggevend. Anders moet de gamenaam er als geheel in staan. Staat er een vervolgnummer achter (`Hades II`), dan is het een andere game. Staan er andere extra woorden bij, dan is het een twijfelgeval.
-- **Welke versie.** Een intern nummer (`v131072`) wordt direct vergeleken met `localUpdate` en `latestUpdate` uit de export. Een zichtbare versie (`v1.7.1`) wordt vertaald met de versieladder, zie hieronder.
-- **Wat het is.** Alleen DLC, het basisspel (`v0`, `1.0.0`) en versies die je al hebt vallen af. Een bundel (basisspel + update) blijft kandidaat, maar staat lager.
+- **games in your library**: the number is your whole library; the list holds every game that misses an update or DLC.
+- **updates missing** and **DLC missing**; the DLC tile is only shown when missing DLC is searched.
+- **awaiting your choice**: games with a candidate release that has not been sent.
+- **added to queue**: games with a release that was sent to the download client.
+- **download failed**: downloads that the download client reported as failed, or that it did not know and that had not arrived in the library after the waiting time. Each can be sent once more with **Try again** or taken off the list with **Dismiss**.
+- **ignored**: only shown when you ignore something.
 
-### De versieladder
+The row with the service checks (Library, Prowlarr, Download client, Version list, …) is on the **Configuration** tab only.
 
-Geen enkele bron heeft van een update zowel het zichtbare als het interne versienummer. NSWHunter legt het verband zelf, per game:
+## How a release is judged
 
-1. **Het vaste punt is je eigen versie.** De bibliotheek kent van jouw update beide nummers, bijvoorbeeld 1.7.0 = update 10.
-2. **Hogere versies zijn latere updates.** Staat er in releasenamen een `v1.7.1`, dan is dat de volgende update die bekend is: update 11.
-3. **Zonder vast punt bepaalt de datum de onderste trede.** Een versie die voor het eerst is geplaatst toen update 10 de nieuwste was, is update 10. Daarboven telt weer de volgorde.
+Release names have no fixed format, so NSWHunter looks for three things anywhere in the title:
 
-De volgorde is betrouwbaarder dan de datum: de lijsten met updates zetten een nieuwe update er vaak weken te laat in. Daarom onthoudt NSWHunter elke versie die in releasenamen voorkomt, ook van releases die afvallen. Het paneel toont de ladder per game: "v1.7.0 = update 10 · v1.7.1 = update 11".
+- **Which game.** A title ID (`0100623017A58800`) is decisive. Otherwise the game name must be in it as a whole. If a sequel number follows it (`Hades II`), it is another game. If there are other extra words, it is a doubtful case.
+- **Which version.** An internal number (`v131072`) is compared directly with `localUpdate` and `latestUpdate` from the export. A visible version (`v1.7.1`) is translated with the version ladder, see below.
+- **What it is.** DLC only, the base game (`v0`, `1.0.0`) and versions you already have are ruled out. A bundle (base game + update) stays a candidate, but ranks lower.
 
-### De score
+### The version ladder
 
-Elke release krijgt een score van 1 tot 10: de kans dat de download de juiste is. De score is het product van drie kansen: dat het deze game is, dat het de nieuwste update is, en dat het een update is en niets anders.
+No single source has both the visible and the internal version number of an update. NSWHunter makes the link itself, per game:
 
-| Score | Wat het meestal is |
+1. **The fixed point is your own version.** The library knows both numbers of your update, for example 1.7.0 = update 10.
+2. **Higher versions are later updates.** If release names contain a `v1.7.1`, that is the next update that is known: update 11.
+3. **Without a fixed point the date sets the bottom rung.** A version that was first posted when update 10 was the latest, is update 10. Above that the order counts again.
+
+The order is more reliable than the date: the lists of updates often add a new update weeks late. That is why NSWHunter remembers every version that occurs in release names, also of releases that are ruled out. The panel shows the ladder per game: "v1.7.0 = update 10 · v1.7.1 = update 11".
+
+### The score
+
+Each release gets a score from 1 to 10: the chance that the download is the right one. The score is the product of three chances: that it is this game, that it is the latest update, and that it is an update and nothing else.
+
+| Score | What it usually is |
 |---|---|
-| 10 | Title ID van de game en het interne versienummer van de nieuwste update |
-| 9 | Exacte naam met het interne versienummer, of een zichtbare versie die via je eigen versie als nieuwste update is afgeleid |
-| 7-8 | Exacte naam; de versie is afgeleid van plaatsingsdatums of van de nummering (1.0.35.0 = update 35) |
-| 4-6 | Een tussenversie, een bundel, een update met crack, extra woorden in de naam, of niet te zien welke versie het is |
-| 1-3 | De naam lijkt er alleen op, of er staat geen versie in |
+| 10 | Title ID of the game and the internal version number of the latest update |
+| 9 | Exact name with the internal version number, or a visible version that is derived through your own version as the latest update |
+| 7-8 | Exact name; the version is derived from posting dates or from the numbering (1.0.35.0 = update 35) |
+| 4-6 | An in-between version, a bundle, an update with a crack, extra words in the name, or no way to see which version it is |
+| 1-3 | The name only resembles it, or there is no version in it |
 
-Wat de score verlaagt: een bundel met het basisspel (×0,75), een crack (×0,9), extra woorden in de naam (×0,5 in plaats van ×0,9), een titel zonder platform (×0,85) en een afwijkende grootte. Is een "update" zo groot als het hele spel, dan zit het basisspel er waarschijnlijk bij (×0,75); is hij meer dan vijf keer zo groot of zo klein als je eigen update, dan telt dat ook (×0,8). In het paneel staat bij elke release waarom.
+What lowers the score: a bundle with the base game (×0.75), a crack (×0.9), extra words in the name (×0.5 instead of ×0.9), a title without a platform (×0.85) and a deviating size. If an "update" is as big as the whole game, the base game is probably included (×0.75); if it is more than five times as big or as small as your own update, that counts too (×0.8). The panel shows the reason with each release.
 
-Onder de releases van een game staat **afgevallen**: de releases van die game die niet meedoen, met de reden (ander platform, niet nieuwer dan je eigen versie, basisspel). Met **Toch downloaden** stuur je er een alsnog.
+Below the releases of a game is **ruled out**: the releases of that game that do not take part, with the reason (another platform, not newer than your own version, base game). With **Download anyway** you send one after all.
 
-Binnen een game staan de releases op score, dan op leeftijd (nieuwste post eerst), dan op de prioriteit van de indexer in Prowlarr. Staat dezelfde release op meerdere indexers, dan blijft die van de indexer met de hoogste prioriteit over.
+Within a game the releases are ordered by score, then by age (newest post first), then by the priority of the indexer in Prowlarr. If the same release is on several indexers, the one from the indexer with the highest priority remains.
 
-## Automatisch downloaden
+## Automatic download
 
-Op de tab Configuratie kies je vanaf welke score de beste release van een game vanzelf gaat: uit (standaard), of vanaf 10, 9, 8, 7, 6 of 5.
+On the Configuration tab you choose from which score the best release of a game is sent automatically: off (default), or from 10, 9, 8, 7, 6 or 5.
 
-Bundels gaan alleen vanzelf met `AUTO_BUNDLES=true`. Per ronde gaan er hooguit `MAX_GRABS_PER_RUN` releases uit.
+Bundles are sent automatically only with `AUTO_BUNDLES=true`. Per round at most `MAX_GRABS_PER_RUN` releases are sent.
 
-Begin met uit en kijk een paar dagen of de scores kloppen met hoe updates op jouw indexers heten. Vanaf 9 is voorzichtig; vanaf 7 neemt ook releases mee waarvan de versie is afgeleid.
+Start with off and watch for a few days whether the scores match how updates are named on your indexers. From 9 is careful; from 7 also takes releases whose version is derived.
 
-## Na het versturen
+## After sending
 
-NSWHunter vraagt de downloadclient elke twee minuten hoe het met een verstuurde release gaat. Dat werkt met NZBGet en SABnzbd; gaat de download via Prowlarr, dan is er geen status en telt alleen de tijd.
+NSWHunter asks the download client every two minutes how a sent release is doing. That works with NZBGet and SABnzbd; if the download goes through Prowlarr, there is no status and only the time counts.
 
-| Wat de downloadclient zegt | Wat NSWHunter doet |
+| What the download client says | What NSWHunter does |
 |---|---|
-| Bezig of in de wachtrij | Wachten, hoe lang het ook duurt |
-| Mislukt | De release wordt overgeslagen en de volgende is meteen aan de beurt |
-| Gedownload | Switch-library-manager-web krijgt het verzoek om te scannen, en de bibliotheek wordt opnieuw gelezen |
-| Gedownload, maar na de wachttijd niet in de bibliotheek | Je krijgt een melding. Er gaat geen volgende release uit: de map van je downloadclient komt dan kennelijk niet bij de bibliotheek aan |
-| Kent de release niet | Na de wachttijd geldt hij als niet aangekomen en is de volgende aan de beurt |
+| Busy or in the queue | Wait, however long it takes |
+| Failed | The release is skipped and listed under **download failed**; the next one gets its turn at once |
+| Downloaded | Switch-library-manager-web gets the request to scan, and the library is read again |
+| Downloaded, but not in the library after the waiting time | You get a notification. No next release is sent: the folder of your download client apparently does not reach the library |
+| Does not know the release | After the waiting time it counts as not arrived: it is listed under **download failed** and the next one gets its turn |
 
-De wachttijd stel je in op de tab Configuratie (**Wachten op de bibliotheek**, standaard 60 minuten). Scannen op verzoek lukt alleen als de API key van Switch-library-manager-web het recht Editor heeft; met "Read only" wacht NSWHunter op de eigen scan van de bibliotheek.
+You set the waiting time on the Configuration tab (**Wait for the library**, default 60 minutes). Scanning on request only works if the API key of Switch-library-manager-web has the Editor role; with "Read only" NSWHunter waits for the library's own scan.
 
-## Zoeken en API-limieten
+## Searching and API limits
 
-Elk uur (`SYNC_INTERVAL_MINUTES`) haalt NSWHunter de bibliotheek op en doet het één zoekactie zonder zoekterm: de nieuwste posts van al je usenet-indexers, vergeleken met alles wat ontbreekt.
+Every hour (`SYNC_INTERVAL_MINUTES`) NSWHunter fetches the library and does one search without a search term: the newest posts of all your usenet indexers, compared with everything that is missing.
 
-Daarnaast wordt elke game die iets mist op naam gezocht. Hoe vaak stel je in op de tab Configuratie onder **Automatisch zoeken**: elke 6, 12, 24 of 48 uur. Dat kost per game één API-call per indexer. Met 40 games en 3 indexers is dat bij 6 uur 160 calls per indexer per dag; kies 24 of 48 uur als een indexer een daglimiet heeft. Met **Zoek nu** in het paneel zoek je één game direct.
+In addition, every game that misses something is searched by name. You set how often on the Configuration tab under **Automatic search**: every 6, 12, 24 or 48 hours. That costs one API call per indexer per game. With 40 games and 3 indexers that is 160 calls per indexer per day at 6 hours; choose 24 or 48 hours if an indexer has a daily limit. With **Search now** in the panel you search one game at once.
 
 ## DLC
 
-Met **Ook ontbrekende DLC zoeken** op de tab Configuratie worden ook de DLC's gezocht die je bibliotheek mist. Ze staan in de kaart van de game, onder de update.
+With **Also search for missing DLC** on the Configuration tab the DLC that your library misses is searched as well. It is in the card of the game, below the update.
 
-- Een release met de title ID van de DLC krijgt score 10.
-- Staat de naam van de DLC in de titel, dan is de score 8. Heeft een game meerdere DLC's met bijna dezelfde naam ("In-Game Commentary - Dutch", "... - Spanish"), dan hoort een release bij de DLC die hij het best noemt en valt hij bij de andere af.
-- Een release die geen DLC bij naam noemt ("DLC Unlocker", "DLC Pack") staat één keer per game, onder **DLC-pakket**, met score 5.
+- A release with the title ID of the DLC gets score 10.
+- If the name of the DLC is in the title, the score is 8. If a game has several DLC with almost the same name ("In-Game Commentary - Dutch", "... - Spanish"), a release belongs to the DLC it names best and is ruled out for the others.
+- A release that names no DLC ("DLC Unlocker", "DLC Pack") is listed once per game, under **DLC pack**, with score 5.
 
-## Ontwikkelen en testen
+## Developing and testing
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-De tests draaien tegen nagebootste versies van de bibliotheek, Prowlarr en NZBGet (`tests/fakes.py`). `commit-git.sh` draait ze vanzelf in het image. Los draaien:
+The tests run against fake versions of the library, Prowlarr and NZBGet (`tests/fakes.py`). `commit-git.sh` runs them by itself in the image. To run them separately:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -141,32 +154,32 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest
 ```
 
-## Nieuwe versie uitbrengen
+## Releasing a new version
 
-1. Verhoog `__version__` in `app/version.py`.
-2. Zet bovenaan in [CHANGELOG.md](CHANGELOG.md) een sectie `## [X.Y.Z] - JJJJ-MM-DD` met wat er veranderd is.
-3. Draai `./commit-git.sh -r "korte omschrijving"`.
+1. Raise `__version__` in `app/version.py`.
+2. Put a section `## [X.Y.Z] - YYYY-MM-DD` at the top of [CHANGELOG.md](CHANGELOG.md) with what changed.
+3. Run `./commit-git.sh -r "short description"`.
 
-Het script draait de tests, controleert op geheimen, pusht naar `main` en maakt release `vX.Y.Z` met de tekst uit de changelog. GitHub bouwt daarna de images:
+The script runs the tests, checks for secrets, pushes to `main` and creates release `vX.Y.Z` with the text from the changelog. GitHub then builds the images:
 
-| Gebeurtenis | Image |
+| Event | Image |
 |---|---|
-| Push naar `main` | `ghcr.io/<account>/nswhunter:latest` |
-| Release `vX.Y.Z` | `ghcr.io/<account>/nswhunter:X.Y.Z` en `:X.Y` |
+| Push to `main` | `ghcr.io/<account>/nswhunter:latest` |
+| Release `vX.Y.Z` | `ghcr.io/<account>/nswhunter:X.Y.Z` and `:X.Y` |
 
-Zonder `-r` pusht het script alleen; `latest` wordt dan opnieuw gebouwd, zonder nieuwe release. Haal daarna in Portainer de stack opnieuw op (**Pull and redeploy**).
+Without `-r` the script only pushes; `latest` is then rebuilt, without a new release. After that, pull the stack again in Portainer (**Pull and redeploy**).
 
-## Opbouw
+## Layout
 
-| Bestand | Inhoud |
+| File | Contents |
 |---|---|
-| `app/matcher.py` | Beoordeelt één releasenaam voor één game |
-| `app/clients.py` | Praat met de bibliotheek, Prowlarr, NZBGet en SABnzbd |
-| `app/hunter.py` | Een ronde: ophalen, zoeken, beoordelen, versturen |
-| `app/main.py` | Webpaneel en planning |
-| `app/config.py` | Instellingen uit omgevingsvariabelen |
-| `entrypoint.sh` | Start de app als `PUID`:`PGID` |
-| `commit-git.sh` | Zet de werkmap op GitHub en maakt een release |
-| `.github/workflows/docker.yml` | Test, scant en bouwt het image op GitHub |
+| `app/matcher.py` | Judges one release name for one game |
+| `app/clients.py` | Talks to the library, Prowlarr, NZBGet and SABnzbd |
+| `app/hunter.py` | One round: fetch, search, judge, send |
+| `app/main.py` | Web panel and scheduling |
+| `app/config.py` | Settings from environment variables |
+| `entrypoint.sh` | Starts the app as `PUID`:`PGID` |
+| `commit-git.sh` | Puts the working directory on GitHub and creates a release |
+| `.github/workflows/docker.yml` | Tests, scans and builds the image on GitHub |
 
-De toestand staat in `/data/state.json`. Verwijder dat bestand om opnieuw te beginnen.
+The state is in `/data/state.json`. Delete that file to start over.

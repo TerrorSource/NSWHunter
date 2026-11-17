@@ -34,7 +34,7 @@ async def notify(title, body):
             sender.add(target.strip())
         await sender.async_notify(title=title, body=body)
     except Exception as e:  # noqa: BLE001
-        log("Melding versturen mislukt:", e)
+        log("Sending the notification failed:", e)
 
 
 def spawn(coroutine):
@@ -51,9 +51,9 @@ async def scheduler(app):
         try:
             await hunter.round()
         except Exception as e:  # noqa: BLE001
-            hunter.event(f"Ronde mislukt: {e!r}", "error")
+            hunter.event(f"Round failed: {e!r}", "error")
         hunter.status["next_run"] = int(time.time() + config.SYNC_INTERVAL_MINUTES * 60)
-        # A click on "Nu synchroniseren" ends the wait early.
+        # A click on "Sync now" ends the wait early.
         app["wake"].clear()
         try:
             await asyncio.wait_for(app["wake"].wait(), config.SYNC_INTERVAL_MINUTES * 60)
@@ -93,11 +93,11 @@ async def guard(request, handler):
         return await handler(request)
     if config.PANEL_PASSWORD:
         if not allowed(request.headers.get("Authorization", "")):
-            return web.Response(status=401, text="Inloggen vereist",
+            return web.Response(status=401, text="Login required",
                                 headers={"WWW-Authenticate": 'Basic realm="NSWHunter"'})
     # A page on another site cannot send JSON here without the browser asking first.
     if request.method == "POST" and request.content_type != "application/json":
-        return web.Response(status=415, text="JSON vereist")
+        return web.Response(status=415, text="JSON required")
     return await handler(request)
 
 
@@ -130,7 +130,7 @@ def action(handler):
         except clients.ServiceError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=502)
         except (KeyError, ValueError, TypeError):
-            return web.json_response({"ok": False, "error": "Ongeldig verzoek"}, status=400)
+            return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
     return wrapped
 
 
@@ -164,12 +164,19 @@ async def do_unsend(hunter, body):
     hunter.save()
 
 
+async def do_dismiss(hunter, body):
+    """Take a failed download off the list. The release stays skipped."""
+    item = hunter.state["items"][str(body["key"])]
+    item["failed"] = [f for f in item.get("failed", []) if f["guid"] != str(body["guid"])]
+    hunter.save()
+
+
 async def api_settings(request):
     return web.json_response(config.editable())
 
 
 async def api_settings_save(request):
-    """Save the Configuratie tab, test the connections with the new values, start a round."""
+    """Save the Configuration tab, test the connections with the new values, start a round."""
     hunter = request.app["hunter"]
     try:
         body = await request.json()
@@ -177,8 +184,8 @@ async def api_settings_save(request):
     except ValueError as e:
         return web.json_response({"ok": False, "error": str(e)}, status=400)
     except (AttributeError, TypeError):
-        return web.json_response({"ok": False, "error": "Ongeldig verzoek"}, status=400)
-    hunter.event("Instellingen opgeslagen: " + (", ".join(changed) or "niets gewijzigd"))
+        return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
+    hunter.event("Settings saved: " + (", ".join(changed) or "nothing changed"))
     services = await hunter.test_connections()
     request.app["wake"].set()
     return web.json_response({"ok": True, "services": services, **config.editable()})
@@ -195,7 +202,7 @@ async def api_test(request):
     except ValueError as e:
         return web.json_response({"ok": False, "text": str(e)})
     except (AttributeError, TypeError):
-        return web.json_response({"ok": False, "text": "Ongeldig verzoek"}, status=400)
+        return web.json_response({"ok": False, "text": "Invalid request"}, status=400)
     return web.json_response({"ok": True, "text": text})
 
 
@@ -206,7 +213,7 @@ async def watcher(app):
         try:
             await app["hunter"].watch()
         except Exception as e:  # noqa: BLE001
-            app["hunter"].event(f"Downloads volgen mislukt: {e!r}", "error")
+            app["hunter"].event(f"Following the downloads failed: {e!r}", "error")
 
 
 async def start(app):
@@ -240,13 +247,14 @@ def make_app():
         web.post("/api/ignore", action(do_ignore)),
         web.post("/api/block", action(do_block)),
         web.post("/api/unsend", action(do_unsend)),
+        web.post("/api/dismiss", action(do_dismiss)),
     ])
     return app
 
 
 if __name__ == "__main__":
     config.load_saved()
-    log(f"NSWHunter {__version__} start op poort {config.PORT}")
+    log(f"NSWHunter {__version__} starting on port {config.PORT}")
     if config.problems():
-        log(f"Nog niet ingesteld. Open het paneel op poort {config.PORT} en vul de tab Configuratie in.")
+        log(f"Not set up yet. Open the panel on port {config.PORT} and fill in the Configuration tab.")
     web.run_app(make_app(), port=config.PORT, print=None, access_log=None)

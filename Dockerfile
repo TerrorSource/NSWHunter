@@ -1,7 +1,7 @@
 FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="NSWHunter" \
-      org.opencontainers.image.description="Zoekt ontbrekende Switch-updates uit switch-library-manager-web via Prowlarr en stuurt ze naar je usenet-client" \
+      org.opencontainers.image.description="Finds the Switch updates that switch-library-manager-web misses through Prowlarr and sends them to your usenet client" \
       org.opencontainers.image.source="https://github.com/<account>/NSWHunter"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
