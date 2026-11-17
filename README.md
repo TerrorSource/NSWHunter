@@ -72,11 +72,13 @@ The menu on the left has the settings, laid out as in Sonarr and Radarr:
 | **Media Management** | Automatic download (see [Automatic download](#automatic-download)), how long to wait for the library (see [After sending](#after-sending)), how often to search (see [Searching and API limits](#searching-and-api-limits)), and whether missing DLC is searched |
 | **Indexers** | Where releases are searched: your Prowlarr (address and API key, from Prowlarr > Settings > General), or a Newznab (usenet) or Torznab (torrent) indexer directly. Per indexer the categories: `1000` is Console with all its subcategories |
 | **Download Clients** | NZBGet, SABnzbd, qBittorrent, Transmission, uTorrent, or the download client of Prowlarr. A usenet release goes to the first usenet client in the list that is switched on, a torrent to the first torrent client |
-| **Connect** | The library: the address of Switch-library-manager-web and an API key (My account > API keys > Make a key; Read only is enough, with the Editor role NSWHunter can also ask for a scan). And the notifications: Telegram, Discord (a webhook) and Apprise |
-| **General** | Security (username, password, host names; see [Security](#security)), Logging (log level and the size of a log file) and Backups (see [Backups](#backups)) |
+| **Connect** | The library: the address of Switch-library-manager-web and an API key (My account > API keys > Make a key; Read only is enough, with the Editor role NSWHunter can also ask for a scan). And the connections for notifications: Telegram, Discord (a webhook) and Apprise, each with its own notification triggers |
+| **General** | Security (username, password, host names; see [Security](#security)), Logging (log level and the size of a log file) and Backups (folder, interval and retention) |
 | **UI** | Light or dark, the format of dates and times, and whether "3 hours ago" or the date is shown |
 
-Indexers, download clients and connections are cards. **+** adds one, a click on a card changes it; the window that opens has **Test**, **Save** and **Delete**. A card says whether its service answers. Keys and passwords never go back to the browser: an empty field means "keep what is there". A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
+The pages with single settings have **Save Changes** in the toolbar; it lights up when something was changed. Indexers, download clients and connections are cards. **+** opens a window to choose what to add, a click on a card changes it; the window has **Delete**, **Test**, **Cancel** and **Save**. A card says whether its service answers, and **Test All** in the toolbar asks all of them.
+
+A connection has **Notification Triggers**: On Grab (a release was sent automatically), On Arrival, On Download Failure, On Manual Interaction Required (releases await your choice) and On Health Issue (a round broke). Each connection is only told what is ticked. Keys and passwords never go back to the browser: an empty field means "keep what is there". A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
 
 Releases that an indexer filed under another console (PS4, Xbox, Wii, …) or that have another platform in the name are ruled out: the Switch has no category of its own.
 
@@ -86,23 +88,32 @@ An older version had one Prowlarr and one download client, set on one page or wi
 
 ## The panel
 
-- **Games** lists every game of your library: the version you have, the latest, the DLC, the size, and whether it is complete. It can be filtered, searched and sorted. A game that misses something leads to its card on the Wanted page.
-- **Wanted** has every game that misses an update or DLC, with the releases that were found.
-- **System > Status** says what every service last answered, and **System > Log** holds the last 1000 lines; the log can be limited to warnings and errors, and searched.
+The panel is laid out as Sonarr and Radarr are: a bar on top with a search box that finds a game from any page, the menu on the left, and a toolbar per page.
+
+| Menu | What is there |
+|---|---|
+| **Games** | Every game of your library: the version you have, the latest, the DLC, the size, and whether it is complete. It can be filtered and sorted. A game that misses something leads to its row on the Wanted page |
+| **Activity > Queue** | What was sent to a download client and is not in the library yet, with the client, the indexer and how far the download is |
+| **Activity > History** | What was sent, what arrived and what failed |
+| **Activity > Blocklist** | Releases that are not offered or sent again: the ones you rejected and the downloads that failed. **Remove** takes a release off the list, **Try again** sends a failed one once more |
+| **Wanted** | Every game that misses an update or DLC, with the releases that were found |
+| **Settings** | An overview of the settings pages, see [Setting up](#setting-up) |
+| **System > Status** | Health (what does not work), every service with what it last answered, and facts about this installation |
+| **System > Backup** | The backups, see [Backups](#backups) |
+| **System > Events** | The last 1000 things NSWHunter did; can be limited to warnings and errors, and searched |
+| **System > Log Files** | The log files in `/data/logs`, to download |
+
+The numbers in the menu are what waits: downloads in the queue, games awaiting your choice, and things that do not work.
 
 The tiles at the top of the **Wanted** page are buttons. A click on one shows only the games that belong to it:
 
 - **missing something**: every game that misses an update or DLC.
 - **updates missing** and **DLC missing**; the DLC tile is only shown when missing DLC is searched.
 - **awaiting your choice**: games with a candidate release that has not been sent.
-- **added to queue**: games with a release that was sent to a download client, with how far the download is.
-- **download failed**: downloads that the download client reported as failed, or that it did not know and that had not arrived in the library after the waiting time. Each can be sent once more with **Try again** or taken off the list with **Dismiss**.
-- **arrived**: what was sent and is now in your library, of the last 30 days.
 - **ignored**: only shown when you ignore something.
+- **in queue**, **download failed** and **arrived** lead to the Queue, the Blocklist and the History.
 
-A card shows the best release of its game with a **Download** button, so it need not be opened. With many games waiting, **Download all with score 9+** sends the best release of every game that scores 9 or 10 in one go; it asks once more before it does, and leaves bundles for a click of their own.
-
-**Reject** takes a release out of the list. Below the releases of a game is what you rejected, with **Restore** to take it back.
+A row shows the best release of its game with a **Download** button, so it need not be opened. A click on the name opens it: the releases in columns (score, release, indexer, size, date), each with **Download** and **Reject**. In the toolbar, **Sync Now** starts a round, **Search All** searches every game by name now, and **Download All** sends the best release of every game that scores 9 or 10; both ask once more before they do, and Download All leaves bundles for a click of their own.
 
 If a round breaks, every page says so in a red bar, you get a notification and the health check of the container turns red. If one game cannot be handled, it is left out and the rest of the round goes on; a yellow bar says how many were left out.
 
@@ -166,7 +177,7 @@ You set the waiting time on the Media Management page (**Wait for the library**,
 
 ## Choosing in Telegram
 
-**Choose in Telegram** is a setting of a Telegram connection (Settings > Connect) and is off until you switch it on. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
+**Choose in Telegram** is a setting of a Telegram connection (Settings > Connect) and is off until you switch it on. It also needs the trigger On Manual Interaction Required. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
 
 - At most 10 questions per round, the highest scores first; the rest follow in the next rounds. Every release is asked about once.
 - Only the chat that is set as Chat ID can press the buttons. A press from anywhere else is ignored.
@@ -187,7 +198,7 @@ Forgot the password? Stop the container, remove `PANEL_PASSWORD` from `/data/set
 
 ## Backups
 
-A backup is a zip of the settings (with their keys and passwords) and the state. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. That page also lists the backups, with **Backup now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
+A backup is a zip of the settings (with their keys and passwords) and the state. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
 
 ## Searching and API limits
 

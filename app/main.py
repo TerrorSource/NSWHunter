@@ -194,6 +194,47 @@ async def api_state(request):
     return web.json_response(view)
 
 
+async def api_history(request):
+    return web.json_response({"history": request.app["hunter"].history(), "now": int(time.time())})
+
+
+async def api_search_all(request):
+    """Search every game by name in a round that starts now."""
+    games = request.app["hunter"].search_all()
+    request.app["wake"].set()
+    return web.json_response({"ok": True, "games": games})
+
+
+async def api_test_all(request):
+    """Ask the library, every indexer and every download client whether it answers."""
+    await request.app["hunter"].test_connections()
+    return web.json_response({"ok": True})
+
+
+LOG_FILE = re.compile(r"nswhunter\.txt(\.\d)?")
+
+
+async def api_logfiles(request):
+    """The log files in /data/logs: the current one and the older ones next to it."""
+    try:
+        names = [n for n in os.listdir(config.LOG_DIR) if LOG_FILE.fullmatch(n)]
+    except OSError:
+        names = []
+    files = [{"name": n, "size": os.path.getsize(os.path.join(config.LOG_DIR, n)),
+              "at": int(os.path.getmtime(os.path.join(config.LOG_DIR, n)))} for n in sorted(names)]
+    return web.json_response({"ok": True, "folder": config.LOG_DIR, "files": files})
+
+
+async def api_logfile(request):
+    name = request.query.get("name", "")
+    full = os.path.join(config.LOG_DIR, name)
+    # Only a name of a log file: nothing else can be reached through it.
+    if not LOG_FILE.fullmatch(name) or not os.path.isfile(full):
+        return refuse(404, "That log file is not there")
+    return web.FileResponse(full, headers={
+        "Content-Disposition": f'attachment; filename="{name}"', "Content-Type": "text/plain; charset=utf-8"})
+
+
 async def api_games(request):
     return web.json_response({"games": request.app["hunter"].library(), "now": int(time.time())})
 
@@ -454,6 +495,11 @@ def make_app():
         web.get("/api/state", api_state),
         web.get("/api/log", api_log),
         web.get("/api/games", api_games),
+        web.get("/api/history", api_history),
+        web.post("/api/search-all", api_search_all),
+        web.post("/api/test-all", api_test_all),
+        web.get("/api/logfiles", api_logfiles),
+        web.get("/api/logfile", api_logfile),
         web.post("/api/sync", api_sync),
         web.get("/api/settings", api_settings),
         web.post("/api/settings", api_settings_save),

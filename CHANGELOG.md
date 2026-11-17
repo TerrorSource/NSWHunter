@@ -2,6 +2,27 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.1.0] - 2026-11-17
+
+### Changed
+
+- **The panel now really looks and works like Sonarr and Radarr.** A bar on top with a search box that finds a game from any page; the menu on the left with drawings, numbers for what waits, and groups that open (Activity, Settings, System); a toolbar per page; lists as tables; settings with the name on the left and the field on the right.
+- **Settings** opens on an overview of its pages. The pages with single settings have **Save Changes** in the toolbar, which lights up when something was changed.
+- **Adding** an indexer, a download client or a connection opens a window with what can be added, grouped under Usenet and Torrents. The window to change one has Delete on the left and Test, Cancel and Save on the right.
+- The **Wanted** page lists the games as rows; an opened game shows its releases in columns. Sync Now, Search All and Download All are in the toolbar.
+- The backups moved from the General page to **System > Backup**; their settings stay under General. The log is **System > Events**.
+
+### Added
+
+- **Activity > Queue:** what was sent to a download client and is not in the library yet, with the client, the indexer and a progress bar.
+- **Activity > History:** what was sent, what arrived and what failed. It starts empty: earlier versions did not keep it.
+- **Activity > Blocklist:** the releases you rejected and the downloads that failed, in one list, with Remove and Try again.
+- **Notification triggers** per connection, as in Sonarr and Radarr: On Grab, On Arrival, On Download Failure, On Manual Interaction Required and On Health Issue. All are on until you switch one off.
+- **Search All** searches every game that misses something by name now, not only the ones whose turn it is.
+- **Test All** on the pages with cards and on the Status page.
+- **System > Log Files:** the log files, to download.
+- **System > Status** starts with Health: what does not work, or that nothing is wrong.
+
 ## [3.0.0] - 2026-11-17
 
 Version 3 because the panel has a new layout and the settings a new shape. Your settings are taken over at the first start: the one Prowlarr, the download client and Telegram become the first entries of the new lists. Take the new [docker-compose.yml](docker-compose.yml) over in your stack: it has a second volume, `/backup`.

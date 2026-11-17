@@ -272,6 +272,14 @@ def normalize(name, value):
 # with their kind ("url", "text", "secret", "bool", "numbers", "chat" or "priority").
 INDEXER_FIELDS = {"url": "url", "api_key": "secret", "categories": "numbers", "priority": "priority"}
 TORRENT_FIELDS = {"url": "url", "username": "text", "password": "secret", "category": "text"}
+# What a connection is told about; each can be switched off per connection.
+TRIGGERS = {
+    "on_grab": "bool",    # a release was sent automatically
+    "on_arrive": "bool",  # what was sent is in the library
+    "on_fail": "bool",    # a download failed, did not arrive, or was downloaded but never seen
+    "on_choice": "bool",  # releases await a choice
+    "on_health": "bool",  # a round broke
+}
 PROVIDERS = {
     "INDEXERS": {
         # Prowlarr searches its own indexers and has a priority for each of them.
@@ -291,13 +299,13 @@ PROVIDERS = {
         "prowlarr": {"label": "The download client of Prowlarr", "protocol": "prowlarr", "fields": {}},
     },
     "CONNECTIONS": {
-        "telegram": {"label": "Telegram", "fields": {"bot_token": "secret", "chat_id": "chat", "ask": "bool"}},
-        "discord": {"label": "Discord", "fields": {"webhook": "secret"}},
-        "apprise": {"label": "Apprise", "fields": {"urls": "secret"}},
+        "telegram": {"label": "Telegram", "fields": {"bot_token": "secret", "chat_id": "chat", "ask": "bool", **TRIGGERS}},
+        "discord": {"label": "Discord", "fields": {"webhook": "secret", **TRIGGERS}},
+        "apprise": {"label": "Apprise", "fields": {"urls": "secret", **TRIGGERS}},
     },
 }
 KINDS = tuple(PROVIDERS)
-DEFAULTS = {"categories": ["1000"], "priority": 25, "category": "games", "ask": False}
+DEFAULTS = {"categories": ["1000"], "priority": 25, "category": "games", "ask": False, **{t: True for t in TRIGGERS}}
 INDEXERS, DOWNLOAD_CLIENTS, CONNECTIONS = [], [], []
 
 

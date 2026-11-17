@@ -109,7 +109,7 @@ def test_every_connection_gets_the_message_and_one_that_fails_says_so():
     telegram = {"id": "tg", "type": "telegram", "name": "Telegram", "enabled": True, "bot_token": "TESTTOKEN", "chat_id": "42"}
 
     async def test(hunter, fakes):
-        await hunter.tell("Arrived: something")
+        await hunter.tell("Arrived: something", "arrive")
         assert fakes["discord"] == ["Arrived: something"] and fakes["telegram"] == ["NSWHunter\nArrived: something"]
         services = hunter.state["services"]
         assert services["CONNECTIONS:dc"]["ok"] and services["CONNECTIONS:tg"]["ok"] and "CONNECTIONS:do" not in services
@@ -227,3 +227,57 @@ def test_debug_and_trace_say_what_a_round_does(capsys):
     assert "[debug] Prowlarr: ok - Prowlarr 2.0.0" in out and "[debug] Searched ['hades']" in out
     assert "[trace] Hades (update) <- Hades II Update v65536: ruled out, another game (sequel 'ii')" in out
     assert "[trace] Hades (update) <- Hades_Update_v1.0.2_NSW-GRP: score 7" in out
+
+
+def test_a_connection_only_hears_what_it_wants_to_hear():
+    quiet = {"id": "dq", "type": "discord", "name": "Only failures", "enabled": True, "webhook": "BASE/discord/good",
+             "on_grab": False, "on_arrive": False, "on_choice": False, "on_health": False}
+    telegram = {"id": "tg", "type": "telegram", "name": "Telegram", "enabled": True, "bot_token": "TESTTOKEN", "chat_id": "42",
+                "on_fail": False}
+
+    async def test(hunter, fakes):
+        await hunter.tell("Arrived: something", "arrive")
+        await hunter.tell("Download failed: something", "fail")
+        await hunter.tell("Round failed", "health")
+        assert fakes["discord"] == ["Download failed: something"]
+        # A trigger that is not named in an entry of an older version counts as switched on.
+        assert fakes["telegram"] == ["NSWHunter\nArrived: something", "NSWHunter\nRound failed"]
+    run(test, CONNECTIONS=[quiet, telegram])
+
+
+def test_what_was_sent_arrived_and_failed_is_history():
+    async def test(hunter, fakes):
+        await hunter.round()
+        best = hunter.state["items"][ALAN]["candidates"][0]
+        await hunter.grab(ALAN, best["guid"])
+        grab = hunter.state["items"][ALAN]["grab"]
+        assert (grab["protocol"], grab["indexer"]) == ("usenet", "FakeIndexer")
+        fakes["downloads"]["1"] = "FAILURE/PAR"
+        await hunter.watch()
+        second = hunter.state["items"][ALAN]["candidates"][0]
+        await hunter.grab(ALAN, second["guid"])
+        fakes["library"][0].update(localUpdate=196608, updateMissing=False)
+        await hunter.round()
+        history = [(e["kind"], e["name"], e["what"], e["title"]) for e in hunter.history()]
+        assert history == [
+            ("arrived", "Alan Wake Remastered", "update", second["title"]),
+            ("grabbed", "Alan Wake Remastered", "update", second["title"]),
+            ("failed", "Alan Wake Remastered", "update", best["title"]),
+            ("grabbed", "Alan Wake Remastered", "update", best["title"])]
+        first = hunter.history()[-1]
+        assert (first["client"], first["indexer"], first["protocol"], first["auto"], first["score"]) == (
+            "NZBGet", "FakeIndexer", "usenet", False, 10)
+        assert hunter.history()[1 + 1]["note"] == "the download client reports that the download failed"
+    run(test)
+
+
+def test_search_all_searches_every_game_in_the_next_round():
+    async def test(hunter, fakes):
+        await hunter.round()
+        searched = len(fakes["queries"])
+        await hunter.round()
+        assert len(fakes["queries"]) == searched + 1  # only the newest posts: nobody's turn
+        assert hunter.search_all() == 5
+        await hunter.round()
+        assert len(fakes["queries"]) == searched + 1 + 1 + 5
+    run(test)

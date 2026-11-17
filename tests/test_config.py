@@ -394,3 +394,40 @@ def test_api_lists_the_games_of_the_library():
         hunter.state["games"] = [{"id": "0100AAAA0000A000", "name": "Hades", "update_missing": True}]
         assert (await (await client.get("/api/games")).json())["games"][0]["name"] == "Hades"
     api(test)
+
+
+def test_a_connection_has_triggers_that_are_on_unless_switched_off():
+    saved = config.save_provider("CONNECTIONS", {"type": "telegram", "bot_token": "t", "chat_id": "42", "on_fail": False})
+    assert [saved[t] for t in config.TRIGGERS] == [True, True, False, True, True]
+    # An entry of an older version has no triggers: at the next start it gets them, all on.
+    config.write({"CONNECTIONS": [{"id": "old1", "type": "discord", "webhook": "https://discord.com/api/webhooks/1/x"}]})
+    config.load_saved()
+    assert all(config.CONNECTIONS[0][t] is True for t in config.TRIGGERS) and config.CONNECTIONS[0]["id"] == "old1"
+
+
+def test_api_history_search_all_test_all_and_log_files():
+    async def test(client):
+        hunter = client.server.app["hunter"]
+        hunter.state["history"] = [{"at": 1, "kind": "grabbed", "name": "Hades", "what": "update", "title": "Hades Update"}]
+        assert (await (await client.get("/api/history")).json())["history"][0]["title"] == "Hades Update"
+        hunter.state["searched"] = {"0100AAAA0000A000": 5}
+        assert (await (await client.post("/api/search-all", json={})).json())["ok"] and hunter.state["searched"] == {}
+        assert (await (await client.post("/api/test-all", json={})).json())["ok"]
+        # The log files: listed, downloaded by name, and nothing else reached through a name.
+        saved = config.LOG_DIR
+        config.LOG_DIR = os.path.join(config.DATA_DIR, "logs-api")
+        os.makedirs(config.LOG_DIR, exist_ok=True)
+        try:
+            for name, text in (("nswhunter.txt", "newest"), ("nswhunter.txt.1", "older"), ("notes.txt", "not a log")):
+                with open(os.path.join(config.LOG_DIR, name), "w") as f:
+                    f.write(text)
+            data = await (await client.get("/api/logfiles")).json()
+            assert [f["name"] for f in data["files"]] == ["nswhunter.txt", "nswhunter.txt.1"] and data["files"][0]["size"] == 6
+            r = await client.get("/api/logfile", params={"name": "nswhunter.txt.1"})
+            assert r.status == 200 and await r.text() == "older" and "attachment" in r.headers["Content-Disposition"]
+            for wrong in ("notes.txt", "../settings.json", "nswhunter.txt.22", ""):
+                assert (await client.get("/api/logfile", params={"name": wrong})).status == 404
+        finally:
+            shutil.rmtree(config.LOG_DIR, ignore_errors=True)
+            config.LOG_DIR = saved
+    api(test)

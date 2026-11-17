@@ -25,6 +25,7 @@ RELEASE_FIELDS = ("guid", "title", "size", "indexer", "indexerId", "published", 
 ELSEWHERE = ("is another DLC", "names no DLC", "names one DLC", "has the title ID of one DLC",
              "not DLC", "DLC only", "title ID of another part")
 MAX_EVENTS = 1000
+MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
 MAX_ASKS = 10  # questions in Telegram per round
@@ -86,6 +87,7 @@ class Hunter:
             "versions_fetched": 0,
             "arrived": [],  # what was sent and is now in the library, newest first
             "games": [],  # every game of the library, for the Games page
+            "history": [],  # what was sent, arrived and failed, newest first
             "telegram_offset": 0,  # the next update to ask Telegram for
         }
         self.load()
@@ -126,6 +128,16 @@ class Hunter:
     def library(self):
         """Every game of the library, for the Games page."""
         return self.state.get("games", [])
+
+    def history(self):
+        """What was sent, arrived and failed, for the History page."""
+        return self.state.get("history", [])
+
+    def search_all(self):
+        """The button "Search All": every game is searched by name in the next round, not only
+        the ones whose turn it is. Returns how many games that are."""
+        self.state["searched"] = {}
+        return len(self.games)
 
     def event(self, text, level="info"):
         log(text)
@@ -247,7 +259,7 @@ class Hunter:
         self.reevaluate()
         for text in arrived:
             self.event(text, "grab")
-            await self.tell(text)
+            await self.tell(text, "arrive")
         return True
 
     def read_title(self, title, games, wanted, listed):
@@ -309,11 +321,22 @@ class Hunter:
         return {"update_size": int(newest.get("size") or 0),
                 "base_size": int(base[0].get("size") or 0) if base else 0}
 
+    @staticmethod
+    def what(item):
+        return ("DLC: " + (item.get("dlc_name") or item["key"]) if item["type"] == "dlc"
+                else "DLC pack" if item["type"] == "dlcpack" else "update")
+
+    def record(self, kind, item, title, **more):
+        """One line of the History page. kind: "grabbed", "arrived" or "failed"."""
+        entry = {"at": int(time.time()), "kind": kind, "game_id": item["game_id"], "name": item["name"],
+                 "what": self.what(item), "title": title, **more}
+        self.state["history"] = [entry] + self.state.get("history", [])[:MAX_HISTORY - 1]
+
     def arrive(self, item, grab, note=""):
         """Remember that what was sent is now in the library, for the panel."""
         now = int(time.time())
-        what = ("DLC: " + (item.get("dlc_name") or item["key"]) if item["type"] == "dlc"
-                else "DLC pack" if item["type"] == "dlcpack" else "update")
+        what = self.what(item)
+        self.record("arrived", item, grab["title"], note=note, client=grab.get("client_name", ""))
         arrived = [a for a in self.state.setdefault("arrived", []) if a["at"] > now - ARRIVED_DAYS * 86400]
         self.state["arrived"] = [{
             "at": now, "game_id": item["game_id"], "name": item["name"], "what": what,
@@ -570,6 +593,7 @@ class Hunter:
             "guid": grab["guid"], "title": grab["title"]}
         failed = [f for f in item.get("failed", []) if f["guid"] != grab["guid"]]
         item["failed"] = [{**release, "failed_at": int(time.time()), "why": why}] + failed[:MAX_FAILED - 1]
+        self.record("failed", item, grab["title"], note=why, client=grab.get("client_name", ""))
         item["blocked"].append(grab["guid"])
         item["candidates"] = [c for c in item["candidates"] if c["guid"] != grab["guid"]]
         item["grab"] = None
@@ -609,7 +633,7 @@ class Hunter:
         if waiting and now - (self.state["library"].get("fetched") or 0) > config.WATCH_SECONDS:
             await self.sync_library()
         for text in tell:
-            await self.tell(text)
+            await self.tell(text, "fail")
         if dropped:
             await self.auto_grab()
 
@@ -662,9 +686,12 @@ class Hunter:
             await self.follow_grabs()
             self.save()
 
-    async def tell(self, text):
-        """A notification through every connection that is switched on."""
+    async def tell(self, text, about):
+        """A notification through every connection that is switched on and wants to hear of
+        this. about: "grab", "arrive", "fail", "choice" or "health" (see config.TRIGGERS)."""
         for connection in config.connections():
+            if not connection.get("on_" + about, True):
+                continue
             try:
                 await notify.send(self.session, connection, text)
                 self.provider("CONNECTIONS", connection, True, "last message sent")
@@ -705,7 +732,10 @@ class Hunter:
         item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto,
                         "local_version": item.get("local_version", 0),
                         "dlc_missing": item.get("dlc_missing", 0), "state": "sent",
-                        "client": client["id"], "client_name": client["name"], "client_id": client_id}
+                        "client": client["id"], "client_name": client["name"], "client_id": client_id,
+                        "protocol": candidate.get("protocol") or "usenet", "indexer": candidate.get("indexer") or ""}
+        self.record("grabbed", item, candidate["title"], client=client["name"], indexer=candidate.get("indexer") or "",
+                    protocol=candidate.get("protocol") or "usenet", auto=auto, score=candidate.get("score"))
         item["ask"] = None  # a question about it in Telegram is answered by this
         item.setdefault("sent", [])
         if guid not in item["sent"]:
@@ -718,7 +748,7 @@ class Hunter:
         self.event(f"{how}: {candidate['title']}", "grab")
         self.save()
         if auto:
-            await self.tell(f"Sent automatically: {candidate['title']}")
+            await self.tell(f"Sent automatically: {candidate['title']}", "grab")
 
     async def auto_grab(self):
         sent = 0
@@ -803,7 +833,7 @@ class Hunter:
     def asker(self):
         """The Telegram connection that puts the choices to the user, or None."""
         return next((c for c in config.connections() if c["type"] == "telegram" and c.get("ask")
-                     and c.get("bot_token") and c.get("chat_id")), None)
+                     and c.get("on_choice", True) and c.get("bot_token") and c.get("chat_id")), None)
 
     def asking(self):
         return self.asker() is not None
@@ -959,7 +989,7 @@ class Hunter:
             self.event(text, "error")
             if self.state.get("told_error") != text:
                 self.state["told_error"] = text
-                await self.tell(text + ". The round did not finish; the Log tab of the panel has the details.")
+                await self.tell(text + ". The round did not finish; the Events page of the panel has the details.", "health")
             self.save()
         else:
             self.status["error"] = None
@@ -992,7 +1022,7 @@ class Hunter:
                 if self.asking():
                     await self.ask()
                 elif now_waiting > waiting:
-                    await self.tell(f"{now_waiting} updates or DLC await your choice")
+                    await self.tell(f"{now_waiting} updates or DLC await your choice", "choice")
                 self.backups()
             finally:
                 self.status.update(running=False, phase=None, last_run=int(time.time()))

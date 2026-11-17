@@ -539,7 +539,7 @@ def test_a_round_that_breaks_is_told_and_the_next_good_one_clears_it():
         # Told once, however many rounds break the same way.
         assert [t for t in fakes["telegram"] if "Round failed" in t] == [
             "NSWHunter\nRound failed: TypeError('boom'). The round did not finish; "
-            "the Log tab of the panel has the details."]
+            "the Events page of the panel has the details."]
         hunter.check_services = real
         await hunter.round()
         assert hunter.status["error"] is None and ALAN in hunter.state["items"]
