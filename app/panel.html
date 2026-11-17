@@ -656,7 +656,7 @@ const SORTS = {
   missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
   searched: {text: "Last Search", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
   release: {text: "Best Release", down: false, of: g => { const top = topOf(g); return top ? top.release.title : "\uffff"; }},
-  status: {text: "Status", down: false, of: g => ["Awaiting Choice", "In Queue", "Nothing Found", "Not Searched", "Ignored"].indexOf(gameStatus(g)[1])},
+  status: {text: "Status", down: false, of: g => ["Awaiting Choice", "In Queue", "Already Tried", "Nothing Found", "Not Searched", "Ignored"].indexOf(gameStatus(g)[1])},
 };
 // The heads of the Wanted table and what each sorts on; the Sort menu of the toolbar does the same.
 const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
@@ -671,6 +671,9 @@ const hideFailed = () => state.settings.hide_failed !== false;
 const failedOf = item => hideFailed() ? [] : item.failed || [];
 const failed = g => g.items.flatMap(failedOf);
 const waiting = i => i.status === "review";
+// The releases of an item that were never sent: the others are no choice to make again.
+const untried = i => i.candidates.filter(c => !(i.sent || []).includes(c.guid));
+const TRIED = "Every release that was found for this was sent before, and it is still not in your library. Interactive Search can send one once more, or search with other words.";
 const queued = () => state.items.filter(i => i.grab && !i.ignored);
 // What the Missing page can be limited to, in the Filter menu of its toolbar.
 const WANTED = {
@@ -812,6 +815,7 @@ function gameStatus(game) {
   if (game.items.every(i => i.ignored)) return ["mute", "Ignored"];
   if (game.items.some(waiting)) return ["warn", "Awaiting Choice"];
   if (live(game).some(i => i.grab)) return ["info", "In Queue"];
+  if (live(game).some(i => i.status === "tried")) return ["mute", "Already Tried"];
   return game.items.some(i => i.status === "none") ? ["danger", "Nothing Found"] : ["mute", "Not Searched"];
 }
 function missingText(game) {
@@ -821,7 +825,7 @@ function missingText(game) {
 function wantedRow(game) {
   const top = topOf(game), [cls, text] = gameStatus(game), searching = busy.has("s" + game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
-  const count = live(game).filter(waiting).reduce((n, i) => n + i.candidates.length, 0);
+  const count = live(game).filter(waiting).reduce((n, i) => n + untried(i).length, 0);
   return h("tr", {class: selected.has(game.id) ? "picked" : ""},
     h("td", {class: "check"}, h("input", {type: "checkbox", checked: selected.has(game.id), "aria-label": "Select " + game.name,
       onchange: e => { e.target.checked ? selected.add(game.id) : selected.delete(game.id); render(); }})),
@@ -829,7 +833,7 @@ function wantedRow(game) {
     h("td", {class: "tight"}, missingText(game)),
     h("td", {class: "wrap"}, top ? [top.release.title, count > 1 ? h("span", {class: "sub"}, " · " + (count - 1) + " more") : null] : "–"),
     h("td", {class: "tight"}, top ? score(top.release.score, "Score of the best release that was found") : "–"),
-    h("td", {class: "tight"}, h("span", {class: "label wide " + cls}, text),
+    h("td", {class: "tight"}, h("span", {class: "label wide " + cls, ...(text === "Already Tried" ? {title: TRIED} : {})}, text),
       failed(game).length ? h("span", {class: "label error"}, failed(game).length + " failed") : null),
     h("td", {class: "tight"}, searched ? ago(searched) : "never"),
     h("td", {}, h("div", {class: "acts"},
@@ -1044,7 +1048,7 @@ function showGame(id) { closeModal(); show("game", id); }
 function itemStatus(item) {
   if (item.ignored) return ["mute", "Ignored"];
   if (item.grab) return [item.grab.state === "stuck" ? "warn" : "info", sentText(item.grab)];
-  return {review: ["warn", "Awaiting Choice"], covered: ["info", "Covered by the Queue"], none: ["danger", "Nothing Found"]}[item.status] || ["mute", "Not Searched"];
+  return {review: ["warn", "Awaiting Choice"], covered: ["info", "Covered by the Queue"], tried: ["mute", "Already Tried"], none: ["danger", "Nothing Found"]}[item.status] || ["mute", "Not Searched"];
 }
 const bestOf = item => item.status === "review" ? item.candidates[0] : null;
 const MISSING_COLUMNS = [
@@ -1076,9 +1080,9 @@ function renderGamePage() {
       const [cls, text] = itemStatus(item), best = bestOf(item);
       return h("tr", {},
         h("td", {}, whatOf(item), item.type === "update" ? h("div", {class: "sub"}, upd(item.local_version) + " → " + upd(item.latest_version)) : null),
-        h("td", {class: "tight"}, h("span", {class: "label wide " + cls}, text),
+        h("td", {class: "tight"}, h("span", {class: "label wide " + cls, ...(text === "Already Tried" ? {title: TRIED} : {})}, text),
           failedOf(item).length ? h("span", {class: "label error"}, failedOf(item).length + " failed") : null),
-        h("td", {class: "wrap"}, item.grab ? item.grab.title : best ? [best.title, item.candidates.length > 1 ? h("span", {class: "sub"}, " · " + (item.candidates.length - 1) + " more") : null] : "–"),
+        h("td", {class: "wrap"}, item.grab ? item.grab.title : best ? [best.title, untried(item).length > 1 ? h("span", {class: "sub"}, " · " + (untried(item).length - 1) + " more") : null] : "–"),
         h("td", {class: "tight"}, best ? score(best.score) : "–"),
         h("td", {class: "tight"}, item.last_search ? ago(item.last_search) : "never"),
         h("td", {}, h("div", {class: "acts"},
@@ -1611,6 +1615,7 @@ const FORMS = {
       {name: "PASSWORD_AGAIN", label: "Password Confirmation", secret: true, required: true, local: true},
       {name: "CURRENT_PASSWORD", label: "Current Password", secret: true, required: true, local: true, current: true,
        help: "Only needed to change the username or the password. Without it they stay as they are, whatever is in the fields above."},
+      {totp: true},
       {name: "SSL_ENABLED", label: "Enable HTTPS", checkbox: true, help: "Also serve the panel over HTTPS, on a port of its own. HTTP keeps working."},
       {name: "SSL_PORT", label: "HTTPS Port", number: true,
        help: "The container has to publish this port: add it under ports in your compose file, like 3443:3443."},
@@ -1722,7 +1727,7 @@ function renderForm() {
   const groups = FORMS[page];
   const build = keep => {
     for (const [name, value] of Object.entries(keep || {})) if (name in settings.values) settings.values[name] = value;
-    put($("config"), ...groups.map(g => [h("h2", {}, g.title), g.fields.map(f => fieldRow(f, settings.values, settings.secrets, "f"))]));
+    put($("config"), ...groups.map(g => [h("h2", {}, g.title), g.fields.map(f => f.totp ? totpRow() : fieldRow(f, settings.values, settings.secrets, "f"))]));
   };
   rerender = () => keepTyped(() => $("config"), build);
   build();
@@ -1888,17 +1893,22 @@ async function endSessions(body) {
     if (e !== LOGIN) toast("No connection to NSWHunter");
   }
 }
+// Two-step login, in the Security group right under the password: switched on and off in a
+// window of its own, not with Save Changes.
+function totpRow() {
+  const on = settings.totp;
+  return h("div", {class: "field", id: "totp-row"}, h("div", {class: "name"}, "Authenticator App"),
+    h("div", {class: "row"}, h("span", {class: "label wide " + (on ? "ok" : "mute")}, on ? "On" : "Off"),
+      on ? h("button", {type: "button", onclick: () => totpDialog("disable")}, "Switch Off")
+        : h("button", {type: "button", onclick: () => totpDialog("begin")}, "Set Up")),
+    h("div", {class: "help"}, on ? "Two-step login: logging in takes your password and a code of your authenticator app."
+      : "Two-step login, optional. With it, logging in takes your password and a six-digit code of an authenticator app on your phone (Google Authenticator, Aegis, 1Password and the like)."));
+}
 function renderSecurity() {
   if (page !== "general" || !settings) return;
-  const on = settings.totp, others = (logins || []).filter(l => !l.current).length;
+  const others = (logins || []).filter(l => !l.current).length;
+  if ($("totp-row")) $("totp-row").replaceWith(totpRow());  // switched on or off a moment ago
   put($("extra"),
-    h("h2", {}, "Two-Step Login"),
-    h("div", {class: "field"}, h("div", {class: "name"}, "Authenticator App"),
-      h("div", {class: "row"}, h("span", {class: "label wide " + (on ? "ok" : "mute")}, on ? "On" : "Off"),
-        on ? h("button", {type: "button", onclick: () => totpDialog("disable")}, "Switch Off")
-          : h("button", {type: "button", onclick: () => totpDialog("begin")}, "Set Up")),
-      h("div", {class: "help"}, on ? "Logging in takes your password and a code of your authenticator app."
-        : "Optional. With it, logging in takes your password and a six-digit code of an authenticator app on your phone (Google Authenticator, Aegis, 1Password and the like).")),
     h("h2", {}, "Sessions"),
     logins ? table(["Browser", "Address", "Logged In", "Last Used", ""], logins.map(l => h("tr", {},
         h("td", {title: l.agent || null}, browserOf(l.agent), l.current ? [" ", h("span", {class: "label ok"}, "this browser")] : null),

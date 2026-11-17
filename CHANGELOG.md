@@ -2,6 +2,18 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.13.1] - 2026-11-17
+
+### Fixed
+
+- **A game no longer awaits a choice when every release it has was sent before.** A release that was sent and then left the queue without arriving (taken out of the queue, or downloaded but never seen in the library) stayed a choice, so the game stood on Awaiting Choice while Interactive Search showed "sent" on everything. Such a game now says **Already Tried**; it is back on Awaiting Choice as soon as a release is found that was never sent.
+
+### Changed
+
+- With releases that were sent and releases that were not, the best one that was never sent is the one a download button, Download All, automatic download and the question in Telegram are about. Nothing is sent a second time without a click on that release in Interactive Search. Interactive Search lists what was never sent first.
+- A release that is taken off the blocklist is offered again, also if it was sent before.
+- **Authenticator App** (Settings > General) is right under Current Password, above Enable HTTPS, and no longer in a section of its own under the page.
+
 ## [3.13.0] - 2026-11-17
 
 ### Added

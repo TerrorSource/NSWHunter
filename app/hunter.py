@@ -517,10 +517,18 @@ class Hunter:
     def items_of(self, game_id):
         return [i for i in self.state["items"].values() if i["game_id"] == game_id]
 
+    def untried(self, item):
+        """The releases of an item that were never sent, the best first. One that was sent and
+        is in the queue no more (downloaded but never seen in the library, or taken out of the
+        queue) stays in the list with the label "sent", but is no choice to make again."""
+        sent = set(item.get("sent") or [])
+        return [c for c in item["candidates"] if c["guid"] not in sent]
+
     def awaits(self, item):
-        """Does this item wait for a choice? A DLC pack does not while every missing DLC of
-        its game is already on its way: the pack would bring the same."""
-        if item["ignored"] or item["grab"] or not item["candidates"]:
+        """Does this item wait for a choice? Not if every release it has was sent before. A
+        DLC pack does not while every missing DLC of its game is already on its way: the pack
+        would bring the same."""
+        if item["ignored"] or item["grab"] or not self.untried(item):
             return False
         if item["type"] == "dlcpack":
             dlc = [i for i in self.items_of(item["game_id"]) if i["type"] == "dlc"]
@@ -1019,7 +1027,7 @@ class Hunter:
         threshold = config.auto_min_score()
         if not threshold or not self.awaits(item):
             return None
-        best = item["candidates"][0]
+        best = self.untried(item)[0]  # what was sent before is not sent again without a click
         if best.get("score", 0) < threshold:
             return None
         if best["kind"] == "bundle" and not config.AUTO_BUNDLES:
@@ -1091,7 +1099,7 @@ class Hunter:
         for item in list(self.state["items"].values()):
             if not self.awaits(item):
                 continue
-            best = item["candidates"][0]
+            best = self.untried(item)[0]
             if best.get("score", 0) < min_score or best["kind"] == "bundle":
                 continue
             try:
@@ -1102,8 +1110,8 @@ class Hunter:
         return sent
 
     async def unsend(self, key, remove=False, block=False):
-        """Take a release out of the queue: forget that it was sent, so its item awaits a choice
-        again. `remove`: also take the download, with its files, out of the download client.
+        """Take a release out of the queue: its item awaits a choice again if it has a release
+        that was never sent. `remove`: also take the download, with its files, out of the download client.
         `block`: also reject the release, so it is not offered or sent again."""
         item = self.state["items"][key]
         grab = item.get("grab")
@@ -1159,6 +1167,8 @@ class Hunter:
             release = next((r for r in item.get("turned_down", []) if r["guid"] == guid), None)
             item["turned_down"] = [r for r in item.get("turned_down", []) if r["guid"] != guid]
             item["blocked"] = [g for g in item["blocked"] if g != guid]
+            # Taken off the blocklist to be offered again: also if it was sent before.
+            item["sent"] = [g for g in item.get("sent") or [] if g != guid]
             if release:
                 self.place(item, {k: release.get(k) for k in RELEASE_FIELDS})
         self.save()
@@ -1179,12 +1189,12 @@ class Hunter:
         messages per round, the highest scores first, the rest in the next rounds."""
         connection = self.asker()
         waiting = [i for i in self.state["items"].values()
-                   if self.awaits(i) and i.get("asked") != i["candidates"][0]["guid"]]
-        waiting.sort(key=lambda i: -i["candidates"][0].get("score", 0))
+                   if self.awaits(i) and i.get("asked") != self.untried(i)[0]["guid"]]
+        waiting.sort(key=lambda i: -self.untried(i)[0].get("score", 0))
         for n, item in enumerate(waiting[:MAX_ASKS]):
             if n:
                 await asyncio.sleep(ASK_DELAY)
-            best = item["candidates"][0]
+            best = self.untried(item)[0]
             facts = [f"{best['size'] / 2**20:.0f} MB" if best.get("size") else "", best.get("indexer") or "",
                      (best.get("published") or "")[:10]]
             text = "\n".join([self.label(item), f"{best.get('score', 0)}/10 · {best['title']}",
@@ -1404,7 +1414,10 @@ class Hunter:
         # Rejections of which an older version kept only the id.
         shown["unnamed"] = sum(1 for g in item["blocked"] if g not in named)
         shown["asked"] = bool(item.get("ask"))
-        shown["candidates"] = [{k: v for k, v in c.items() if k not in hidden} for c in item["candidates"]]
+        # What was never sent first: the first of the list is what a download button sends.
+        fresh = self.untried(item)
+        listed = fresh + [c for c in item["candidates"] if c not in fresh]
+        shown["candidates"] = [{k: v for k, v in c.items() if k not in hidden} for c in listed]
         shown["rejected"] = [{k: v for k, v in r.items() if k not in hidden} for r in item.get("rejected", [])]
         shown["failed"] = [{k: v for k, v in f.items() if k not in hidden} for f in item.get("failed", [])]
         if item["type"] == "update":
@@ -1417,6 +1430,8 @@ class Hunter:
             shown["status"] = "sent"
         elif self.awaits(item):
             shown["status"] = "review"
+        elif item["candidates"] and not fresh:
+            shown["status"] = "tried"  # every release it has was sent before
         elif item["candidates"]:
             shown["status"] = "covered"  # a DLC pack while the DLC itself is on its way
         elif item.get("last_search"):
@@ -1433,7 +1448,7 @@ class Hunter:
                 items.append(self.shown(item))
             except Exception as e:  # noqa: BLE001
                 self.skip(str(item.get("name") or item.get("key")), e, count=False)
-        order = {"review": 0, "sent": 1, "covered": 1, "new": 2, "none": 3, "ignored": 4}
+        order = {"review": 0, "sent": 1, "covered": 1, "tried": 2, "new": 2, "none": 3, "ignored": 4}
         items.sort(key=lambda i: (order[i["status"]], i["name"].lower(), i["type"]))
         return {
             "status": self.status,
