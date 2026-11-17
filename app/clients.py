@@ -172,8 +172,10 @@ async def nzbget(session, client, method, params):
     return data.get("result")
 
 
-async def sabnzbd(session, client, fields, nzb=None):
-    """One call to the API of a SABnzbd. client: its entry of the download clients."""
+async def sabnzbd(session, client, fields, nzb=None, strict=True):
+    """One call to the API of a SABnzbd. client: its entry of the download clients.
+    strict=False: "status": false without an error is an answer and not a refusal. Deleting
+    a job that is not in the queue gives that."""
     if not client.get("api_key"):
         raise ServiceError("SABnzbd: fill in the API key")
     form = aiohttp.FormData()
@@ -187,7 +189,7 @@ async def sabnzbd(session, client, fields, nzb=None):
             data = await _json(r, LARGE)
     except Exception as e:
         raise _wrap("SABnzbd", e) from e
-    if data.get("status") is False:
+    if data.get("status") is False and (strict or data.get("error")):
         raise ServiceError(f"SABnzbd: {data.get('error', 'refused')}")
     return data
 

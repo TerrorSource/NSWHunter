@@ -709,3 +709,56 @@ def test_dlc_pack_does_not_ask_while_the_dlc_itself_is_on_its_way():
         shown = {i["key"]: i["status"] for i in hunter.view()["items"]}
         assert (shown[ALAN_DLC], shown[ALAN + ":pack"]) == ("sent", "covered")
     run(test, INCLUDE_DLC=True)
+
+
+def test_search_with_words_of_your_own():
+    """Words of the user's own go to the indexers as they are, and the turn of the game in the
+    searches by name stays what it was."""
+    async def test(hunter, fakes):
+        await hunter.round()
+        searched, stamp = dict(hunter.state["searched"]), hunter.state["items"][ALAN]["last_search"]
+        fakes["queries"].clear()
+        await hunter.search_now(ALAN, "alan wake v196608")
+        assert set(fakes["queries"]) == {"alan wake v196608"}
+        assert hunter.state["searched"] == searched and hunter.state["items"][ALAN]["last_search"] == stamp
+        # Without words it is the name of the game again, and that search counts as its turn.
+        fakes["queries"].clear()
+        hunter.state["searched"].pop(ALAN[:16], None)
+        await hunter.search_now(ALAN)
+        assert "alan wake remastered" in fakes["queries"]
+    run(test)
+
+
+def test_removing_from_the_queue():
+    """Out of the queue is always: the item awaits a choice again. If asked the download also
+    leaves the download client, and the release goes on the blocklist."""
+    async def test(hunter, fakes):
+        await hunter.round()
+        best = hunter.state["items"][ALAN]["candidates"][0]["guid"]
+        # Only forgotten: the download client is left alone.
+        await hunter.grab(ALAN, best)
+        await hunter.unsend(ALAN)
+        item = hunter.state["items"][ALAN]
+        assert item["grab"] is None and fakes["removed"] == [] and best not in item["blocked"]
+        # Also out of the download client, with its files.
+        await hunter.grab(ALAN, best)
+        sent = item["grab"]["client_id"]
+        await hunter.unsend(ALAN, remove=True)
+        assert item["grab"] is None and ("nzbget", "GroupFinalDelete", str(sent)) in fakes["removed"]
+        assert any(c["guid"] == best for c in item["candidates"])  # it can be chosen again
+        # And never again: it is rejected, and can be restored from the blocklist.
+        await hunter.grab(ALAN, best)
+        await hunter.unsend(ALAN, remove=True, block=True)
+        assert best in item["blocked"] and all(c["guid"] != best for c in item["candidates"])
+        assert [r["guid"] for r in item["turned_down"]] == [best]
+        # Nothing in the queue: nothing happens, and nothing is asked of the client.
+        asked = len(fakes["removed"])
+        await hunter.unsend(ALAN, remove=True)
+        assert len(fakes["removed"]) == asked
+        # A client that was taken out of the settings cannot be asked: it says so, and the queue keeps the release.
+        await hunter.grab(HADES, hunter.state["items"][HADES]["candidates"][0]["guid"])
+        hunter.state["items"][HADES]["grab"]["client"] = "gone"
+        with pytest.raises(hunter_module.clients.ServiceError, match="no longer in the settings"):
+            await hunter.unsend(HADES, remove=True)
+        assert hunter.state["items"][HADES]["grab"]
+    run(test)

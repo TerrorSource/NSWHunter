@@ -28,6 +28,7 @@ OLD_NAMES = {
     "torrent_set": "torrent-set", "torrent_added": "torrent-added", "torrent_duplicate": "torrent-duplicate",
     "hash_string": "hashString", "percent_done": "percentDone", "left_until_done": "leftUntilDone",
     "size_when_done": "sizeWhenDone", "error_string": "errorString", "rpc_version": "rpc-version",
+    "torrent_remove": "torrent-remove", "delete_local_data": "delete-local-data",
 }
 
 
@@ -89,9 +90,13 @@ def make_torrent_fakes():
         "transmission3": False,  # True: like Transmission 3, where torrent-add knows no labels yet
         "delay": 0,  # seconds to wait before answering anything
         "broken": False,  # True: answer everything with an error page that repeats the request
+        "stuck": False,  # True: uTorrent refuses to remove a torrent and keeps it
     }
     app["logins"] = {"qbittorrent": 0, "transmission": 0, "utorrent": 0}  # logins and handshakes
     app["calls"] = []  # (client type, what was asked) of every call that was let in
+    # (client type, info hash, with the files or not) of every removal that was asked for,
+    # also of a torrent the client does not have.
+    app["removed"] = []
     live = {}  # the sessions that are valid now
 
     def expire():
@@ -185,6 +190,13 @@ def make_torrent_fakes():
                              "progress": torrent["progress"], "state": state, **torrent["native"]})
         return web.json_response(rows)
 
+    async def qbittorrent_delete(request):
+        form = await request.post()
+        for found in form.get("hashes", "").split("|"):
+            app["removed"].append(("qbittorrent", found, form.get("deleteFiles") == "true"))
+            app["torrents"]["qbittorrent"].pop(found, None)
+        return web.Response()  # 200 in every case, also for a hash it does not have
+
     # ------------------------------------------------------------ Transmission
 
     def spelled(name):
@@ -247,6 +259,11 @@ def make_torrent_fakes():
                        "labels": [torrent["category"]] if torrent["category"] else [], **torrent["native"]}
                 rows.append({spelled(k): v for k, v in row.items() if spelled(k) in arguments.get("fields", [])})
             return answer({"torrents": rows})
+        if method == spelled("torrent_remove"):
+            for found in arguments.get("ids") or []:
+                app["removed"].append(("transmission", found, arguments.get(spelled("delete_local_data")) is True))
+                torrents.pop(found, None)  # a hash it does not have is skipped without an error
+            return answer()
         return answer(error="Method not found" if mood["modern"] else "method name not recognized")
 
     # ------------------------------------------------------------ uTorrent
@@ -304,6 +321,16 @@ def make_torrent_fakes():
                     name = value
                 elif key == "v" and name == "label" and found in torrents:
                     torrents[found]["category"] = value
+        elif action in ("remove", "removedata"):
+            # As setprops: only hashes in capitals. What the real one answers for a hash it
+            # does not have is not documented; the strict choice here is an error.
+            for value in request.query.getall("hash", []):
+                found = value.lower() if value == value.upper() else ""
+                app["removed"].append(("utorrent", found, action == "removedata"))
+                if mood["stuck"]:
+                    answer["error"] = "Can't remove torrent: access denied"
+                elif torrents.pop(found, None) is None:
+                    answer["error"] = "Can't remove torrent: not in list"
         elif action == "list":
             labels = sorted({t["category"] for t in torrents.values() if t["category"]})
             answer.update(label=[[label, sum(t["category"] == label for t in torrents.values())] for label in labels],
@@ -315,6 +342,7 @@ def make_torrent_fakes():
         web.get("/qbt/api/v2/app/version", logged_in(qbittorrent_version)),
         web.post("/qbt/api/v2/torrents/add", logged_in(qbittorrent_add)),
         web.get("/qbt/api/v2/torrents/info", logged_in(qbittorrent_info)),
+        web.post("/qbt/api/v2/torrents/delete", logged_in(qbittorrent_delete)),
         web.post("/tr/transmission/rpc", transmission),
         web.get("/ut/gui/token.html", utorrent_token),
         web.get("/ut/gui/", utorrent),

@@ -1,6 +1,8 @@
-"""Handing a release to a download client, and asking the clients how the downloads are doing."""
+"""Handing a release to a download client, asking the clients how the downloads are doing, and
+taking a download out of a client again."""
 import asyncio
 import base64
+import re
 
 import clients
 import config
@@ -114,3 +116,39 @@ async def states(session, only=None):
         else:
             known[client["id"]] = result
     return known, errors
+
+
+async def remove(session, client, download_id, delete_files=True):
+    """Take one download out of its client, from the queue or from the history. download_id:
+    the id `send` returned. delete_files: also delete what it downloaded. Returns nothing. A
+    download the client no longer knows is no error: it is gone, which is what was asked."""
+    kind = client["type"]
+    if kind == "prowlarr":
+        raise ServiceError("A download that went through Prowlarr can only be removed in the download client itself")
+    if not download_id:
+        raise ServiceError(f"{client['name']} gave no id for this download, so it cannot be removed from here")
+    if kind in torrent.TYPES:
+        await torrent.remove(session, client, download_id, delete_files)
+        return
+    download_id = str(download_id)
+    # The queue first and then the history: a download only moves from the first to the second,
+    # so it cannot slip between the two calls. Where it is not, the client says so without error.
+    if kind == "nzbget":
+        if not re.fullmatch(r"[0-9]{1,9}", download_id):
+            raise ServiceError("NZBGet: this is not the id of a download")
+        # The Final commands delete for good. Without them GroupDelete moves the download to
+        # the history, and HistoryDelete then takes it out of sight there.
+        commands = ("GroupFinalDelete", "HistoryFinalDelete") if delete_files else ("GroupDelete", "HistoryDelete")
+        for command in commands:
+            # (command, offset, text, ids): the form of before NZBGet 18, where the offset was
+            # still needed. Later versions do not use it, but take it.
+            await clients.nzbget(session, client, "editqueue", [command, 0, "", [int(download_id)]])
+    elif kind == "sabnzbd":
+        # Only one job: "all" or a list with commas in its place would delete more.
+        if not re.fullmatch(r"SABnzbd_nzo_\w+", download_id):
+            raise ServiceError("SABnzbd: this is not the id of a download")
+        for mode in ("queue", "history"):
+            await clients.sabnzbd(session, client, {"mode": mode, "name": "delete", "value": download_id,
+                                                    "del_files": "1" if delete_files else "0"}, strict=False)
+    else:
+        raise ServiceError(f"Unknown download client: {kind}")

@@ -118,6 +118,15 @@ def _own_hash(kind, content):
     return found
 
 
+def _known_hash(download_id):
+    """The info hash a torrent is known by, checked before it is used in a removal: "all" or
+    nothing in its place would mean every torrent to qBittorrent."""
+    found = str(download_id or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", found):
+        raise ServiceError("this is not the id of a torrent")
+    return found
+
+
 # ---------------------------------------------------------------- qBittorrent
 
 
@@ -222,6 +231,12 @@ async def _qbittorrent_states(session, client, only=None):
     return found
 
 
+async def _qbittorrent_remove(session, client, download_id, delete_files):
+    # qBittorrent answers 200 in every case, also for a hash it does not have.
+    await _qbittorrent(session, client, "torrents/delete", fields={
+        "hashes": _known_hash(download_id), "deleteFiles": "true" if delete_files else "false"})
+
+
 # ---------------------------------------------------------------- Transmission
 
 
@@ -317,6 +332,13 @@ async def _transmission_states(session, client):
     return found
 
 
+async def _transmission_remove(session, client, download_id, delete_files):
+    # A torrent is addressed by its hash, as in torrent-set. One that Transmission does not
+    # have is skipped without an error.
+    await _transmission(session, client, "torrent-remove", {
+        "ids": [_known_hash(download_id)], "delete-local-data": bool(delete_files)})
+
+
 # ---------------------------------------------------------------- uTorrent
 
 
@@ -409,12 +431,25 @@ async def _utorrent_states(session, client):
     return found
 
 
+async def _utorrent_remove(session, client, download_id, delete_files):
+    found = _known_hash(download_id)
+    # removedata takes the downloaded files along, remove leaves them. uTorrent writes hashes
+    # in capitals.
+    answer = await _utorrent(session, client, [("action", "removedata" if delete_files else "remove"),
+                                               ("hash", found.upper())])
+    # What uTorrent answers for a hash it does not have is not documented. So an error only
+    # counts when the torrent is still there.
+    if answer.get("error") and found in await _utorrent_states(session, client):
+        raise ServiceError(f"uTorrent: {str(answer['error'])[:200]}")
+
+
 # ---------------------------------------------------------------- the three as one
 
 
 _STATUS = {"qbittorrent": _qbittorrent_status, "transmission": _transmission_status, "utorrent": _utorrent_status}
 _ADD = {"qbittorrent": _qbittorrent_add, "transmission": _transmission_add, "utorrent": _utorrent_add}
 _STATES = {"qbittorrent": _qbittorrent_states, "transmission": _transmission_states, "utorrent": _utorrent_states}
+_REMOVE = {"qbittorrent": _qbittorrent_remove, "transmission": _transmission_remove, "utorrent": _utorrent_remove}
 
 
 async def _call(client, functions, *arguments):
@@ -452,3 +487,10 @@ async def states(session, client):
     every torrent the client has. done: the download itself is complete, whether it seeds or
     was stopped after. failed: an error that does not pass by itself."""
     return await _call(client, _STATES, session, client)
+
+
+async def remove(session, client, download_id, delete_files):
+    """Take one torrent out of the client. download_id: the info hash `add` returned.
+    delete_files: also delete what it downloaded. A torrent the client no longer has is no
+    error: it is gone, which is what was asked."""
+    await _call(client, _REMOVE, session, client, download_id, delete_files)

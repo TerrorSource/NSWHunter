@@ -1,5 +1,5 @@
 """Stand-ins for switch-library-manager-web, Prowlarr, a Newznab and a Torznab indexer, NZBGet,
-Telegram and a Discord webhook, in one small web app.
+SABnzbd, Telegram and a Discord webhook, in one small web app.
 
 Used by the tests, and runnable by itself to try the panel without the real services:
     python tests/fakes.py            (listens on port 9000)
@@ -138,6 +138,10 @@ def make_fakes():
     app["covers"] = []  # pictures of games that were asked for
     app["fetched"] = []  # download links of the direct indexers that were followed
     app["indexer_ids"] = []
+    app["sab"] = {}  # SABnzbd: id -> "queue", or a history status like "Completed"
+    # Every removal a download client was asked for, also of what it does not have:
+    # ("nzbget", the command, id) and ("sabnzbd", "queue" or "history", id, with the files or not).
+    app["removed"] = []
 
     async def export(request):
         if request.headers.get("Authorization") != "Bearer slm_test":
@@ -235,10 +239,55 @@ def make_fakes():
                 {"NZBID": int(i), "Status": "DOWNLOADING", "FileSizeMB": app["progress"].get(i, (0, 0))[0],
                  "RemainingSizeMB": app["progress"].get(i, (0, 0))[1]}
                 for i, s in app["downloads"].items() if s == "queue"]})
+        if body["method"] == "editqueue":
+            # (command, text, ids), or with an offset after the command as before NZBGet 18.
+            command, ids = body["params"][0], body["params"][-1]
+            if command not in ("GroupDelete", "GroupFinalDelete", "HistoryDelete", "HistoryFinalDelete"):
+                return web.json_response({"error": {"name": "JSONRPCError", "code": 3, "message": "Invalid action"}})
+            done = False
+            for found in map(str, ids):
+                app["removed"].append(("nzbget", command, found))
+                where = app["downloads"].get(found)
+                if command.startswith("Group") and where == "queue":
+                    done = True
+                    if command == "GroupDelete":
+                        app["downloads"][found] = "DELETED/MANUAL"  # it moves to the history
+                    else:
+                        del app["downloads"][found]
+                elif command.startswith("History") and where not in (None, "queue"):
+                    done = True
+                    del app["downloads"][found]
+            return web.json_response({"result": done})  # false: none of the ids was there
         name, content, category = body["params"][:3]
         app["sent"].append((name, category, base64.b64decode(content)))
         app["downloads"][str(len(app["sent"]))] = "queue"
         return web.json_response({"result": len(app["sent"])})
+
+    async def sabnzbd(request):
+        """As the API of SABnzbd, as far as following and removing a download go."""
+        form = await request.post()
+        if form.get("apikey") != "sab_test":
+            return web.json_response({"status": False, "error": "API Key Incorrect"}, status=403)
+        mode, jobs = form.get("mode"), app["sab"]
+        if mode in ("queue", "history") and form.get("name") == "delete":
+            files, removed = form.get("del_files") == "1", []
+            for found in form.get("value", "").split(","):
+                app["removed"].append(("sabnzbd", mode, found, files))
+                if found in jobs and (jobs[found] == "queue") == (mode == "queue"):
+                    del jobs[found]
+                    removed.append(found)
+            # The queue tells what it removed, and says false if that is nothing. The history
+            # says true whatever it found.
+            if mode == "queue":
+                return web.json_response({"status": bool(removed), "nzo_ids": removed})
+            return web.json_response({"status": True})
+        if mode == "queue":
+            return web.json_response({"queue": {"slots": [
+                {"nzo_id": i, "status": "Downloading", "percentage": "0"} for i, s in jobs.items() if s == "queue"]}})
+        if mode == "history":
+            return web.json_response({"history": {"slots": [
+                {"nzo_id": i, "status": s} for i, s in jobs.items() if s != "queue"]}})
+        return web.json_response({"status": False, "error": "not implemented"})
 
     async def rescan(request):
         app["rescans"].append(1)
@@ -340,6 +389,7 @@ def make_fakes():
         web.post("/api/v1/search", keyed(grab)),
         web.get("/1/download", download),
         web.post("/jsonrpc", nzbget),
+        web.post("/api", sabnzbd),
         web.post("/sync", rescan),
         web.post("/bot{token}/sendMessage", telegram),
         web.post("/bot{token}/getUpdates", telegram_updates),

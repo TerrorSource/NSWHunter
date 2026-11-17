@@ -27,6 +27,7 @@ TORRENT_HASH = hashlib.sha1(bencode(INFO)).hexdigest()
 EVERY = pytest.mark.parametrize("kind", torrent.TYPES)
 # Every client twice: as an older version and as the newest, where the API differs.
 BOTH = pytest.mark.parametrize("modern", [False, True], ids=["old", "new"])
+FILES = pytest.mark.parametrize("files", [True, False], ids=["with files", "without files"])
 
 
 def run(test, modern=False):
@@ -337,6 +338,108 @@ def test_utorrent_states():
         assert (await native(session, fakes, client, {1: 130, 4: 1000, 18: 0}))["state"] == "downloading"
         # Complete in per mille by rounding, but with bytes to go: not done yet.
         assert (await native(session, fakes, client, {1: 201, 4: 1000, 18: 4096}))["state"] == "downloading"
+    run(test)
+
+
+# ---------------------------------------------------------------- removing
+
+
+@EVERY
+@BOTH
+@FILES
+def test_remove_takes_that_one_torrent_out(kind, modern, files):
+    # What each client is asked, in the words of its version.
+    asked = {"qbittorrent": "torrents/delete", "transmission": "torrent_remove" if modern else "torrent-remove",
+             "utorrent": "removedata" if files else "remove"}
+
+    async def test(session, fakes, clients):
+        client = clients[kind]
+        await torrent.add(session, client, "magnet", MAGNET)
+        await torrent.add(session, client, "file", TORRENT)
+        assert await torrent.remove(session, client, HASH, files) is None
+        assert fakes["calls"][-1] == (kind, asked[kind])
+        assert fakes["removed"] == [(kind, HASH, files)]
+        assert set(fakes["torrents"][kind]) == {TORRENT_HASH}
+        assert set(await torrent.states(session, client)) == {TORRENT_HASH}
+    run(test, modern)
+
+
+@EVERY
+@BOTH
+@FILES
+def test_remove_what_the_client_no_longer_has_is_no_error(kind, modern, files):
+    async def test(session, fakes, clients):
+        client = clients[kind]
+        await torrent.add(session, client, "file", TORRENT)
+        # Never added, and then one that was removed before.
+        await torrent.remove(session, client, HASH, files)
+        assert set(fakes["torrents"][kind]) == {TORRENT_HASH}
+        await torrent.remove(session, client, TORRENT_HASH, files)
+        await torrent.remove(session, client, TORRENT_HASH, files)
+        assert fakes["removed"] == [(kind, HASH, files), (kind, TORRENT_HASH, files), (kind, TORRENT_HASH, files)]
+        assert fakes["torrents"][kind] == {}
+    run(test, modern)
+
+
+@EVERY
+def test_remove_knows_a_hash_in_capitals(kind):
+    async def test(session, fakes, clients):
+        await torrent.add(session, clients[kind], "magnet", MAGNET)
+        await torrent.remove(session, clients[kind], HASH.upper(), True)
+        assert fakes["removed"] == [(kind, HASH, True)] and fakes["torrents"][kind] == {}
+    run(test)
+
+
+@EVERY
+def test_remove_refuses_what_is_no_hash(kind):
+    async def test(session, fakes, clients):
+        client = clients[kind]
+        await torrent.add(session, client, "magnet", MAGNET)
+        await torrent.add(session, client, "file", TORRENT)
+        # "all" means every torrent to qBittorrent, and so does a list to all three.
+        for wrong in ("all", "", None, HASH[:39], HASH + "0", f"{HASH}|{TORRENT_HASH}", "recently-active"):
+            assert await refused(torrent.remove(session, client, wrong, True)) == (
+                f"{LABELS[kind]}: this is not the id of a torrent"), wrong
+        assert fakes["removed"] == [] and set(fakes["torrents"][kind]) == {HASH, TORRENT_HASH}
+    run(test)
+
+
+@EVERY
+@BOTH
+def test_remove_logs_in_again_when_the_session_ran_out(kind, modern):
+    async def test(session, fakes, clients):
+        await torrent.add(session, clients[kind], "magnet", MAGNET)
+        fakes["expire"]()
+        await torrent.remove(session, clients[kind], HASH, False)
+        assert fakes["torrents"][kind] == {} and fakes["logins"][kind] == 2
+    run(test, modern)
+
+
+@EVERY
+def test_remove_that_fails_is_an_error(kind):
+    async def test(session, fakes, clients):
+        await torrent.add(session, clients[kind], "magnet", MAGNET)
+        wrong = {**clients[kind], "password": "not-the-password"}
+        assert await refused(torrent.remove(session, wrong, HASH, True)) == f"{LABELS[kind]}: wrong username or password"
+        gone = {**clients[kind], "url": "http://127.0.0.1:1"}
+        message = await refused(torrent.remove(session, gone, HASH, True))
+        assert message.startswith(f"{LABELS[kind]}: ") and PASSWORD not in message
+        empty = {**clients[kind], "url": ""}
+        assert await refused(torrent.remove(session, empty, HASH, True)) == f"{LABELS[kind]}: fill in the address"
+        assert fakes["removed"] == [] and set(fakes["torrents"][kind]) == {HASH}
+    run(test)
+
+
+def test_utorrent_that_keeps_the_torrent_is_an_error():
+    async def test(session, fakes, clients):
+        client = clients["utorrent"]
+        await torrent.add(session, client, "magnet", MAGNET)
+        fakes["mood"]["stuck"] = True
+        # An error about a torrent that is still there. About one that is gone it is none.
+        assert await refused(torrent.remove(session, client, HASH, True)) == (
+            "uTorrent: Can't remove torrent: access denied")
+        await torrent.remove(session, client, TORRENT_HASH, True)
+        assert set(fakes["torrents"]["utorrent"]) == {HASH}
     run(test)
 
 

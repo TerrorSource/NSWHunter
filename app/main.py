@@ -340,7 +340,8 @@ async def do_grab_best(hunter, body):
 
 
 async def do_search(hunter, body):
-    return {"found": await hunter.search_now(str(body["key"]))}
+    query = " ".join(str(body.get("query") or "").split())[:100]  # words of the user's own, if any
+    return {"found": await hunter.search_now(str(body["key"]), query or None)}
 
 
 async def do_ignore(hunter, body):
@@ -361,9 +362,8 @@ async def do_restore(hunter, body):
 
 
 async def do_unsend(hunter, body):
-    """Forget that a release was sent, so the item can be judged again."""
-    hunter.state["items"][str(body["key"])]["grab"] = None
-    hunter.save()
+    """Take a release out of the queue; if asked also out of the download client, and onto the blocklist."""
+    await hunter.unsend(str(body["key"]), remove=bool(body.get("remove")), block=bool(body.get("block")))
 
 
 async def do_dismiss(hunter, body):

@@ -682,13 +682,15 @@ class Hunter:
             elif not self.state["services"].get(name, {}).get("ok"):
                 self.provider("INDEXERS", indexer, True, "answers")
 
-    async def search_game(self, game_id):
+    async def search_game(self, game_id, words=None):
+        """Search the indexers for one game: by its name, or with words of the user's own (for
+        releases that are not named after the game). Returns how many new candidates."""
         game = self.games.get(game_id)
         if game is None:
             return 0
         update_id = game_id[:13] + "800"
-        queries = [matcher.search_term(game.name) or update_id]
-        if config.SEARCH_BY_TITLE_ID and update_id not in queries:
+        queries = [words] if words else [matcher.search_term(game.name) or update_id]
+        if not words and config.SEARCH_BY_TITLE_ID and update_id not in queries:
             queries.append(update_id)
         releases = []
         for query in queries:
@@ -699,6 +701,8 @@ class Hunter:
             releases += found
         found = self.process(releases, [game_id])
         logs.debug(f"Searched {queries}: {len(releases)} releases, {found} new candidate(s) for {game.name or game_id}")
+        if words:
+            return found  # the turn of this game in the searches by name stays what it was
         self.state["searched"][game_id] = int(time.time())
         for item in self.items_of(game_id):
             item["last_search"] = int(time.time())
@@ -942,6 +946,25 @@ class Hunter:
                 raise clients.ServiceError(f"{sent} sent, then: {e}") from e
             sent += 1
         return sent
+
+    async def unsend(self, key, remove=False, block=False):
+        """Take a release out of the queue: forget that it was sent, so its item awaits a choice
+        again. `remove`: also take the download, with its files, out of the download client.
+        `block`: also reject the release, so it is not offered or sent again."""
+        item = self.state["items"][key]
+        grab = item.get("grab")
+        if not grab:
+            return
+        if remove:
+            client = next((c for c in config.providers("DOWNLOAD_CLIENTS") if c["id"] == grab.get("client")), None)
+            if client is None:
+                raise clients.ServiceError("The download client this was sent to is no longer in the settings")
+            await downloads.remove(self.session, client, grab.get("client_id"))
+        item["grab"] = None
+        self.event(f"Removed from the queue{' and from ' + grab.get('client_name', 'the download client') if remove else ''}: {grab['title']}")
+        if block and grab.get("guid"):
+            self.reject(key, grab["guid"])
+        self.save()
 
     # ------------------------------------------------------------ rejecting and restoring
 
@@ -1191,12 +1214,12 @@ class Hunter:
                 self.status.update(running=False, phase=None, last_run=int(time.time()))
                 self.save()
 
-    async def search_now(self, key):
+    async def search_now(self, key, query=None):
         """The "Search now" button. Does not wait for a running round: a round can take a while."""
         item = self.state["items"].get(key)
         if item is None:
             raise clients.ServiceError("Unknown game")
-        found = await self.search_game(item["game_id"])
+        found = await self.search_game(item["game_id"], query)
         self.save()
         return found
 

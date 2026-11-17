@@ -2,6 +2,21 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.5.0] - 2026-11-17
+
+### Added
+
+- **A page per game.** The name of a game, on Games, Wanted, in the Queue and in the History, opens its page: its picture, what you have and what is the latest, what it misses with the best release and the status of each, and the history of that game. The toolbar has Search Game, Interactive Search and Ignore. The Back button of the browser now goes back a page everywhere.
+- **Posters on Games.** The **View** menu switches between the table and a wall of pictures; the bar under a picture says whether the game misses something.
+- **Options** in the toolbar: which columns the table of the games shows, and how many rows a page of the Queue, the History, the Blocklist and the Events has (20, 50, 100 or 200).
+- **Removing from the queue asks what to do**, as Sonarr and Radarr do: also take the download and its files out of the download client (NZBGet, SABnzbd, qBittorrent, Transmission, uTorrent), and add the release to the blocklist. What went through the download client of Prowlarr can only be removed there.
+- **A search term of your own** in Interactive Search, for releases that are not named after the game. Such a search leaves the turn of the game in the searches by name alone.
+- **Unsaved Changes.** Leaving a settings page with changes that were not saved asks first.
+
+### Changed
+
+- **The panel is drawn again only when something changed**, and once a minute for texts like "5 min ago". Before it was drawn again every eight seconds, which took the focus of the keyboard out of a table and made tooltips flicker.
+
 ## [3.4.0] - 2026-11-17
 
 ### Added
