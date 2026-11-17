@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.6.1] - 2026-11-17
+
+### Fixed
+
+- **Logging in over HTTPS no longer locks the same browser out of HTTP.** A browser does not let a plain cookie take the place of a secure one with the same name, so after a login over HTTPS a login over HTTP did not stick. A login over HTTPS now has a cookie of its own. Logins made before this version stay valid.
+- The message for a host name the panel does not answer to pointed at a page that no longer exists; it now says Settings > General > Host Names.
+
+### Changed
+
+- The README points to the new wiki, and `.env.example` has the variables for HTTPS and the backup password.
+
 ## [3.6.0] - 2026-11-17
 
 ### Added

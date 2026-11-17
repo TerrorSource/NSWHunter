@@ -327,6 +327,30 @@ def test_https_is_only_switched_on_with_a_certificate_that_works():
     api(test)
 
 
+def test_a_login_over_https_has_a_cookie_of_its_own():
+    """A browser does not let a plain cookie take the place of a secure one with the same name:
+    with one name, logging in over HTTPS would lock the same browser out of HTTP."""
+    async def test(client):
+        r = await client.post("/api/login", json=LOGIN)
+        assert auth.SECURE_COOKIE not in r.cookies and not r.cookies[auth.COOKIE]["secure"]
+        proxy = {"X-Forwarded-Proto": "https"}  # as a reverse proxy with HTTPS says it
+        r = await client.post("/api/login", json=LOGIN, headers=proxy)
+        cookie = r.cookies[auth.SECURE_COOKIE]
+        assert auth.COOKIE not in r.cookies and auth.SECURE_COOKIE.startswith("__Host-")
+        assert cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Strict" and cookie["path"] == "/"
+        client.session.cookie_jar.clear()
+        sent = {"Cookie": f"{auth.SECURE_COOKIE}={cookie.value}"}
+        assert (await client.get("/api/state", headers={**proxy, **sent})).status == 200
+        listed = (await (await client.get("/api/sessions", headers={**proxy, **sent})).json())["sessions"]
+        assert [s["current"] for s in listed].count(True) == 1
+        # Over HTTP that cookie counts for nothing: a browser would not even send it there.
+        assert (await client.get("/api/state", headers=sent)).status == 401
+        r = await client.post("/api/logout", json={}, headers={**proxy, **sent})
+        assert not auth.valid(cookie.value) and r.cookies[auth.SECURE_COOKIE]["secure"] and r.cookies[auth.SECURE_COOKIE].value == ""
+        assert (await client.get("/api/state", headers={**proxy, **sent})).status == 401
+    api(test, login=False)
+
+
 def test_the_https_side_starts_moves_and_stops_with_the_settings():
     async def test():
         config.PANEL_USER, config.PANEL_PASSWORD, config.INITIAL_PASSWORD = "hunter", config.hash_password("correct horse"), None

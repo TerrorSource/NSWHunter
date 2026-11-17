@@ -10,6 +10,8 @@ Searches your indexers for the Switch updates and DLC that your library misses a
 
 Once the update is in your library, the item disappears by itself.
 
+The [wiki](../../wiki) has the rest: a step-by-step start, a tour of the panel with screenshots, every guide, and help when something does not work.
+
 ## Installing
 
 Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` folders by folders on your server, and set `TZ` and the `user:` line to yours. The panel is on port 3033.

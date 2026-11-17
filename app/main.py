@@ -87,8 +87,22 @@ def refuse(status, text, **more):
     return web.json_response({"ok": False, "error": text, **more}, status=status)
 
 
+def over_https(request):
+    """Did this request come in over HTTPS: on the HTTPS port, or through a reverse proxy that says so?"""
+    return request.secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+
+def token_of(request):
+    """The token of the login of this browser, or None. Over HTTP only the plain cookie counts."""
+    for name in (auth.SECURE_COOKIE, auth.COOKIE) if over_https(request) else (auth.COOKIE,):
+        token = request.cookies.get(name)
+        if auth.valid(token):
+            return token
+    return None
+
+
 def logged_in(request):
-    return bool(config.PANEL_PASSWORD) and auth.valid(request.cookies.get(auth.COOKIE))
+    return bool(config.PANEL_PASSWORD) and token_of(request) is not None
 
 
 @web.middleware
@@ -107,7 +121,7 @@ async def guarded(request, handler):
         return web.Response(status=403, text=(
             f"NSWHunter does not answer to the name '{name}'.\n\n"
             "Open the panel by its IP address, or add this name to the host names of the panel: "
-            "on the Configuration tab under Panel, or with the environment variable PANEL_HOSTS.\n"))
+            "under Settings > General > Host Names, or with the environment variable PANEL_HOSTS.\n"))
     # A page of another site cannot make the browser change something here.
     origin = request.headers.get("Origin")
     if request.method != "GET" and origin and urlsplit(origin).netloc.lower() != request.host.lower():
@@ -123,9 +137,9 @@ async def guarded(request, handler):
 
 def session_cookie(request, response):
     """Log this browser in: a cookie that scripts cannot read and other sites cannot send."""
-    secure = request.secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+    secure = over_https(request)
     token = auth.start(request.remote or "", request.headers.get("User-Agent", ""))
-    response.set_cookie(auth.COOKIE, token, max_age=auth.LIFETIME, httponly=True,
+    response.set_cookie(auth.SECURE_COOKIE if secure else auth.COOKIE, token, max_age=auth.LIFETIME, httponly=True,
                         samesite="Strict", secure=secure, path="/")
     return response
 
@@ -198,7 +212,7 @@ async def api_login(request):
 
 
 async def api_sessions(request):
-    return web.json_response({"ok": True, "sessions": auth.listing(request.cookies.get(auth.COOKIE))})
+    return web.json_response({"ok": True, "sessions": auth.listing(token_of(request))})
 
 
 async def api_sessions_end(request):
@@ -206,14 +220,14 @@ async def api_sessions_end(request):
     try:
         body = await request.json()
         if body.get("others"):
-            ended = auth.end_others(request.cookies.get(auth.COOKIE))
+            ended = auth.end_others(token_of(request))
         else:
             ended = int(auth.end_id(str(body["id"])))
     except (KeyError, ValueError, TypeError, AttributeError):
         return refuse(400, "Invalid request")
     if ended:
         request.app["hunter"].event(f"Logged out {ended} other session(s)" if body.get("others") else "Logged out a session")
-    return web.json_response({"ok": True, "ended": ended, "sessions": auth.listing(request.cookies.get(auth.COOKIE))})
+    return web.json_response({"ok": True, "ended": ended, "sessions": auth.listing(token_of(request))})
 
 
 async def api_totp(request):
@@ -286,9 +300,13 @@ async def secure(hunter):
 
 
 async def api_logout(request):
-    auth.end(request.cookies.get(auth.COOKIE))
     response = web.json_response({"ok": True})
+    auth.end(request.cookies.get(auth.COOKIE))
     response.del_cookie(auth.COOKIE, path="/")
+    if over_https(request):
+        # The secure cookie can only be taken away the way it was given: over HTTPS, and as secure.
+        auth.end(request.cookies.get(auth.SECURE_COOKIE))
+        response.del_cookie(auth.SECURE_COOKIE, path="/", secure=True, httponly=True, samesite="Strict")
     return response
 
 

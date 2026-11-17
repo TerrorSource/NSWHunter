@@ -11,6 +11,11 @@ import time
 import config
 
 COOKIE = "nswhunter_session"
+# The login made over HTTPS has a cookie of its own, which a browser never sends over HTTP. A
+# browser does not let a plain cookie take the place of a secure one with the same name, so
+# with one name a login over HTTPS would lock the same browser out of HTTP. The prefix makes
+# the browser hold it to this host and to HTTPS.
+SECURE_COOKIE = "__Host-nswhunter_session"
 LIFETIME = 30 * 86400  # a login lasts this long
 FREE_TRIES = 5  # wrong logins from one address before it has to wait
 MAX_WAIT = 900
