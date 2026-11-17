@@ -329,7 +329,7 @@ class Hunter:
 
     async def cover(self, game_id):
         """(content type, bytes) of the small picture of a game, or None if there is none. A
-        picture is fetched once and then kept in /data/covers."""
+        picture is fetched once and then kept in the folder covers of the config folder."""
         address = self.state.get("covers", {}).get(game_id)
         if not COVER_ID.fullmatch(game_id) or not address:
             return None

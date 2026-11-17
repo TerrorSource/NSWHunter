@@ -58,7 +58,11 @@ def decrypt(data, password):
 
 
 def folder():
-    """Where the backups are kept. A relative folder is under the data folder."""
+    """Where the backups are kept. A relative folder is under the config folder. "/backup" is
+    the volume of that name if the container has one; without it the backups go in "backups" in
+    the config folder, where they stay when the container is made anew."""
+    if config.BACKUP_FOLDER.rstrip("/") == "/backup" and not os.path.ismount("/backup"):
+        return os.path.join(config.DATA_DIR, "backups")
     return os.path.join(config.DATA_DIR, config.BACKUP_FOLDER)  # an absolute folder stays as it is
 
 

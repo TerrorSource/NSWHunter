@@ -317,6 +317,7 @@ async def api_state(request):
     view["now"] = int(time.time())
     view["started"] = STARTED
     view["user"] = config.PANEL_USER
+    view["data_dir"] = config.DATA_DIR
     view["ui"] = {"theme": config.UI_THEME, "date": config.UI_DATE_FORMAT, "time": config.UI_TIME_FORMAT,
                   "relative": config.UI_RELATIVE_DATES}
     return web.json_response(view)
@@ -820,7 +821,7 @@ if __name__ == "__main__":
     made_up = config.first_login()
     if config.WAS_RESET:
         auth.end_all()  # whoever was logged in with the old password is logged out
-        log("The password was reset because the file reset-password was in the data folder. Two-step login is off.")
+        log("The password was reset because the file reset-password was in the config folder. Two-step login is off.")
     if made_up:
         # Shown at every start until the user has chosen a password of their own. Only here,
         # in the output of the container: not in the log files and not in the panel.

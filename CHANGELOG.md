@@ -2,6 +2,15 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.11.0] - 2026-11-17
+
+### Changed
+
+- **The settings are in `/config`, as with Sonarr and Radarr, so `/data` is free for the folder of your media.** `docker-compose.yml` mounts one folder, at `/config`. With your media at `/data`, as your other containers have it, the paths of your download client and your library are the same here and nothing has to be translated.
+- **An existing installation keeps working.** If the settings are found in `/data`, they are used from there, and the log says how to move: mount the same folder at `/config` instead of `/data`. Nothing has to be copied.
+- **Backups are kept in the folder `backups` of the config folder**, unless `/backup` is a volume of the container: then they go there, as before. The image no longer makes volumes of its own that are gone with the container.
+- **The start of the container never touches `/data` when that is your media**: it only changes the owner of the config folder and of NSWHunter's own files in it. If nothing is mounted at `/config`, the container says so and stops, instead of writing somewhere else.
+
 ## [3.10.3] - 2026-11-17
 
 ### Fixed

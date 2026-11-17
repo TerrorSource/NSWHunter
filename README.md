@@ -14,12 +14,14 @@ The [wiki](../../wiki) has the rest: a step-by-step start, a tour of the panel w
 
 ## Installing
 
-Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` folders by folders on your server, and set `TZ` and the `user:` line to yours. The panel is on port 3033.
+Use [docker-compose.yml](docker-compose.yml): replace the `/path/to/...` folder by a folder on your server, and set `TZ` and the `user:` line to yours. The panel is on port 3033.
 
-- `/data` holds the settings and the state, `/backup` the backups of both. Both folders have to belong to the user of the `user:` line: `chown -R 1000:1000 <folder>`.
-- The container runs read-only, never as root and without privileges; it only writes to those two folders.
+- `/config` holds the settings, the state and the backups of both, as with Sonarr and Radarr. The folder has to belong to the user of the `user:` line: `chown -R 1000:1000 <folder>`.
+- `/data` is left free for the folder of your media.
+- The container runs read-only, never as root and without privileges; it only writes to the folders you give it.
+- An installation of before version 3.11 has its settings in `/data`. That keeps working; to move, mount the same folder at `/config` instead.
 - HTTPS is optional (Settings > General): publish its port as well, like `3443:3443`.
-- Importing is optional (Settings > Media Management): to have finished downloads put in the folder of their game, add the download folder and your library as volumes too, under the same paths your download client and Switch-library-manager-web use for them.
+- Importing is optional (Settings > Media Management): to have finished downloads put in the folder of their game, add the folder with your downloads and your library as a volume too, under the same path your download client uses for it (like `/data`).
 - If the image is private, the server needs a login for `ghcr.io` to pull it: your GitHub username and a token with the `read:packages` scope.
 
 ## The first login
@@ -35,7 +37,7 @@ At the first start NSWHunter makes the user `admin` with a password it makes up,
 
 With that password the panel lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until then the lines are in the log at every start; after that they are gone and the made-up password no longer works.
 
-Forgot your password, or lost the phone of your two-step login (optional, Settings > General)? Put an empty file named `reset-password` in the data folder and restart the container: a new password is made up and written to the log, and two-step login is off. Your username and all other settings stay.
+Forgot your password, or lost the phone of your two-step login (optional, Settings > General)? Put an empty file named `reset-password` in the config folder and restart the container: a new password is made up and written to the log, and two-step login is off. Your username and all other settings stay.
 
 ## Setting up
 
@@ -102,4 +104,4 @@ Start with off and watch for a few days whether the scores match how updates are
 
 ## Backups
 
-A backup is a zip of the settings (with their keys and passwords) and the state; with a **Backup Password** on the General page it is encrypted, and only NSWHunter can put it back, with that password. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
+A backup is a zip of the settings (with their keys and passwords) and the state; with a **Backup Password** on the General page it is encrypted, and only NSWHunter can put it back, with that password. NSWHunter makes one every 7 days, in the folder `backups` of the config folder (or in `/backup`, if you make that a volume), and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.

@@ -17,5 +17,4 @@ services:
     ports:
       - 3033:3033
     volumes:
-      - /path/to/nswhunter/data:/data
-      - /path/to/nswhunter/backup:/backup
+      - /path/to/nswhunter/config:/config

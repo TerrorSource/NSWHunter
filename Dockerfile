@@ -7,7 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DATA_DIR=/data \
     HOME=/tmp \
     PORT=3033 \
     TZ=Etc/UTC \
@@ -25,17 +24,20 @@ RUN pip install -r /app/requirements.txt
 COPY app/ /app/
 COPY CHANGELOG.md /app/CHANGELOG.md
 # Always readable for the app user, also when a file had stricter rights on the build machine.
-RUN chmod -R a+rX /app && mkdir -p /data /backup
+# /config and /backup belong to the default user: an empty named volume takes the owner of the
+# folder it is mounted on, and would else be root's.
+RUN chmod -R a+rX /app && mkdir -p /config /data /backup && chown 1000:1000 /config /backup
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 WORKDIR /app
 
-# /backup is a volume of its own, so the backups do not sit next to what they are a backup of.
-VOLUME /data /backup
+# /config holds the settings and the state, as with Sonarr and Radarr; /data is left for your
+# media. No VOLUME lines: a volume nobody named would be gone with the container, and the
+# entrypoint tells by what is mounted where the settings are.
 EXPOSE 3033
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s \
   CMD python3 -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '3033'), timeout=5)" || exit 1
 
-# With 'user:' the container never is root. Without it the entrypoint starts as root, gives /data
-# to PUID:PGID and then runs NSWHunter as that user.
+# With 'user:' the container never is root. Without it the entrypoint starts as root, gives the
+# config folder to PUID:PGID and then runs NSWHunter as that user.
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "-u", "/app/main.py"]

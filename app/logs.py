@@ -1,4 +1,4 @@
-"""The log of NSWHunter: to the output of the container and to a file per day in /data/logs,
+"""The log of NSWHunter: to the output of the container and to a file per day in the folder logs of the config folder,
 named nswhunter_2026-03-25.txt.
 
 Three levels, chosen in the settings: info says what happens; debug also every search and

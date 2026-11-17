@@ -1384,7 +1384,7 @@ function renderStatus() {
       ["Automatic Download", state.settings.auto ? "from score " + state.settings.auto : "off: everything awaits your choice"],
       ["Library", plural(state.library.games, "game") + ", " + plural(state.library.updates, "update") + " missing"
         + (state.settings.dlc ? ", " + state.library.dlc + " DLC missing" : "")],
-      ["Data Folder", "/data"],
+      ["Config Folder", state.data_dir],
       ["User", state.user]]));
 }
 // How long something has been going on: "3d 4h 12m".
@@ -1612,9 +1612,9 @@ const FORMS = {
       {name: "SSL_ENABLED", label: "Enable HTTPS", checkbox: true, help: "Also serve the panel over HTTPS, on a port of its own. HTTP keeps working."},
       {name: "SSL_PORT", label: "HTTPS Port", number: true,
        help: "The container has to publish this port: add it under ports in your compose file, like 3443:3443."},
-      {name: "SSL_CERT_PATH", label: "Certificate Path", placeholder: "/data/certs/panel.pem", browse: "file",
+      {name: "SSL_CERT_PATH", label: "Certificate Path", placeholder: "/config/certs/panel.pem", browse: "file",
        help: "A PEM file with your certificate, in a volume of the container. Leave it empty to let NSWHunter make a certificate itself: the connection is encrypted, but your browser warns once, because nobody vouches for that certificate."},
-      {name: "SSL_KEY_PATH", label: "Certificate Key Path", placeholder: "/data/certs/panel.key", browse: "file",
+      {name: "SSL_KEY_PATH", label: "Certificate Key Path", placeholder: "/config/certs/panel.key", browse: "file",
        help: "The PEM file with the key of the certificate. Leave it empty if the key is in the same file."},
       {name: "PANEL_HOSTS", label: "Host Names", placeholder: "nswhunter.example.com",
        help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
@@ -1625,7 +1625,7 @@ const FORMS = {
        help: "There is one log file per day, named nswhunter_2026-03-25.txt. Files older than this are removed."}]},
     {title: "Backups", fields: [
       {name: "BACKUP_FOLDER", label: "Folder", placeholder: "/backup", browse: "folder",
-       help: "Make it a volume of the container, or the backups are gone with the container. A relative path is under /data. The backups themselves are under System > Backup."},
+       help: "/backup is the volume of that name; if the container has none, the backups are kept in the folder backups of the config folder. A relative path is under the config folder. The backups themselves are under System > Backup."},
       {name: "BACKUP_PASSWORD", label: "Backup Password", secret: true,
        help: "With a password the backups are encrypted: a backup holds every key and password of the settings. Keep the password somewhere else too, because without it an encrypted backup cannot be put back. Backups made before stay as they are."},
       {name: "BACKUP_INTERVAL_DAYS", label: "Interval", number: true, unit: "days", help: "Interval between automatic backups"},
@@ -1670,7 +1670,7 @@ function control(f, values, secrets, where) {
                             ...(f.name === "PANEL_USER" ? {autocomplete: "username"} : NO_LOGIN)});
   if (!f.browse) return input;
   // A folder or a file of the container: the File Browser can fill it in.
-  const from = () => (input.value.startsWith("/") ? input.value : input.value ? "/data/" + input.value : "/");
+  const from = () => (input.value.startsWith("/") ? input.value : input.value ? state.data_dir + "/" + input.value : "/");
   if (where !== "e") {
     return h("div", {class: "row"}, input, browseButton(f.label, from, chosen => {
       if (chosen === null) return;
@@ -1953,7 +1953,7 @@ async function totpDialog(action) {
         h("div", {class: "sub"}, "Type: time based · 6 digits · 30 seconds"))),
     h("p", {}, "2. Fill in the six digits the app shows now."),
     h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says)),
-    h("p", {class: "sub"}, "Lost your phone later? Put an empty file named reset-password in the data folder and restart the container: you get a new password in its log, and two-step login is off.")]
+    h("p", {class: "sub"}, "Lost your phone later? Put an empty file named reset-password in the config folder and restart the container: you get a new password in its log, and two-step login is off.")]
     : [h("p", {}, "Fill in a code of your authenticator app to switch two-step login off."),
        h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says))];
   put($("modal"), dialog(begun ? "Set Up Two-Step Login" : "Switch Off Two-Step Login", body,

@@ -2,7 +2,7 @@
 
 There are single settings (EDITABLE) and three lists of providers (PROVIDERS): the indexers,
 the download clients and the connections. Both are changed in the panel and kept in
-/data/settings.json. For a single setting an environment variable of the same name gives the
+settings.json in the config folder. For a single setting an environment variable of the same name gives the
 first value; a saved value wins. Everything else comes from environment variables only (see
 .env.example)."""
 import hashlib
@@ -43,7 +43,9 @@ def choice(name, allowed, default):
 
 
 TZ = env("TZ", "Etc/UTC")
-DATA_DIR = env("DATA_DIR", "/data")
+# Where the settings and the state are kept. The entrypoint of the image sets it: /config, or
+# /data for an installation of before version 3.11 that still has them there.
+DATA_DIR = env("DATA_DIR", "/config")
 PORT = int(number("PORT", 3033))
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
@@ -52,7 +54,7 @@ VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
 # The password the first start made up, kept until the user has chosen one of their own.
 INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial-password")
 INITIAL_PASSWORD = None  # that password, while it is the one that works (set by first_login)
-# An empty file with this name in the data folder asks for a new made-up password at the next start.
+# An empty file with this name in the config folder asks for a new made-up password at the next start.
 RESET_FILE = os.path.join(DATA_DIR, "reset-password")
 WAS_RESET = False  # whether this start did that
 LOG_DIR = os.path.join(DATA_DIR, "logs")
@@ -300,7 +302,7 @@ def normalize(name, value):
             raise ValueError(f"{name}: the name of one folder, without a slash")
     elif kind == "file":
         if value and (not value.startswith("/") or ".." in value.split("/") or "\\" in value):
-            raise ValueError(f"{name}: fill in the whole path of a file in the container, like /data/certs/panel.pem")
+            raise ValueError(f"{name}: fill in the whole path of a file in the container, like /config/certs/panel.pem")
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
@@ -601,7 +603,7 @@ def first_login():
     it still has to be changed, else None. Called once at start."""
     global PANEL_PASSWORD, INITIAL_PASSWORD, WAS_RESET
     if os.path.exists(RESET_FILE):
-        # Asked for by someone who can write in the data folder: a new made-up password, and no
+        # Asked for by someone who can write in the config folder: a new made-up password, and no
         # second step. Safer than editing the settings file by hand, where a slip loses it all.
         try:
             os.remove(RESET_FILE)
@@ -677,7 +679,7 @@ def add_root_folder(path, library_path=""):
     path = clean_folder("Path", path)
     library_path = clean_folder("Path in Switch-library-manager-web", library_path or path)
     # Not the folders NSWHunter keeps its own files in. A library that is a volume somewhere under
-    # the data folder is fine: many setups have everything under /data.
+    # the config folder is fine too.
     own = [DATA_DIR.rstrip("/") + "/" + name for name in ("logs", "covers", "certs", "backups")] + [os.path.join(DATA_DIR, BACKUP_FOLDER)]
     if path in ("/", DATA_DIR.rstrip("/")) or any(path == folder or path.startswith(folder.rstrip("/") + "/") for folder in own):
         raise ValueError(f"{path} cannot be a root folder: NSWHunter keeps its own files there. Choose the folder of your library.")
