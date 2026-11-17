@@ -4,22 +4,16 @@ services:
     image: ghcr.io/terrorsource/nswhunter:latest
     restart: always
     network_mode: bridge
+    user: "1000:1000"
     read_only: true
     cap_drop:
       - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETGID
-      - SETUID
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp
     environment:
       - TZ=Etc/UTC
-      - PUID=1000
-      - PGID=1000
     ports:
       - 3033:3033
     volumes:

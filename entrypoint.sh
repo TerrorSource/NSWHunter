@@ -1,10 +1,13 @@
 #!/bin/sh
-# NSWHunter - start the app as PUID:PGID (default 1000:1000).
+# NSWHunter - start the app without root privileges.
 #
-# The container starts as root (the default). This script:
-#   1. makes PUID:PGID the owner of /data and /backup;
+# Started as a user of your own (compose 'user:', as docker-compose.yml does): NSWHunter starts
+# right away, and never was root. The folders of /data and /backup have to belong to that user.
+#
+# Started as root (no 'user:'): this script
+#   1. makes PUID:PGID (default 1000:1000) the owner of /data and /backup;
 #   2. drops all root privileges and starts NSWHunter as that user.
-# If you start the container as a user yourself (compose 'user:'), NSWHunter starts right away.
+# That needs the capabilities CHOWN, DAC_OVERRIDE, SETGID and SETUID.
 set -eu
 
 PUID="${PUID:-1000}"
@@ -24,6 +27,16 @@ if [ "$(id -u)" = "0" ]; then
     fi
   done
   exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups --inh-caps=-all -- "$@"
+fi
+
+# Not root: nothing can be put right from here, so say what is wrong instead of failing later.
+me="$(id -u):$(id -g)"
+if ! [ -w /data ]; then
+  echo "[nswhunter] /data cannot be written by user $me. Make that user the owner of its folder on the server (chown -R $me <folder>), or change the 'user:' line of the container." >&2
+  exit 1
+fi
+if [ -d /backup ] && ! [ -w /backup ]; then
+  echo "[nswhunter] Warning: /backup cannot be written by user $me, so no backups can be made. Make that user the owner of its folder on the server (chown -R $me <folder>)." >&2
 fi
 
 exec "$@"

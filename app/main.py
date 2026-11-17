@@ -4,6 +4,7 @@ import base64
 import hashlib
 import os
 import re
+import signal
 import time
 import warnings
 from urllib.parse import urlsplit
@@ -16,6 +17,8 @@ import backup
 import clients
 import config
 import logs
+import tls
+import totp
 from hunter import Hunter, log
 from version import __version__
 
@@ -25,6 +28,9 @@ warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)
 HERE = os.path.dirname(os.path.abspath(__file__))
 STARTED = int(time.time())  # for the uptime on the Status page
 background = set()
+# What the panel listens with: the runner of the web app, and the HTTPS side if it is on.
+listening = {"runner": None, "tls": None}
+pending_totp = {}  # the secret of a second step that is being set up, until its first code proves it
 
 with open(os.path.join(HERE, "panel.html"), encoding="utf-8") as f:
     PANEL = f.read()
@@ -118,7 +124,8 @@ async def guarded(request, handler):
 def session_cookie(request, response):
     """Log this browser in: a cookie that scripts cannot read and other sites cannot send."""
     secure = request.secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
-    response.set_cookie(auth.COOKIE, auth.start(), max_age=auth.LIFETIME, httponly=True,
+    token = auth.start(request.remote or "", request.headers.get("User-Agent", ""))
+    response.set_cookie(auth.COOKIE, token, max_age=auth.LIFETIME, httponly=True,
                         samesite="Strict", secure=secure, path="/")
     return response
 
@@ -168,14 +175,114 @@ async def api_login(request):
         user, password = str(body["user"]), str(body["password"])
     except (KeyError, ValueError, TypeError, AttributeError):
         return refuse(400, "Invalid request")
-    if not config.PANEL_PASSWORD or not auth.check_login(user, password):
+    def wrong(text, **more):
         auth.failed(address)
         wait = auth.wait_for(address)
         if wait:
             request.app["hunter"].event(f"{auth.FREE_TRIES} wrong logins from {address}: it has to wait", "warn")
-        return refuse(401, "Wrong username or password", wait=wait)
+        return refuse(401, text, wait=wait, **more)
+
+    if not config.PANEL_PASSWORD or not auth.check_login(user, password):
+        return wrong("Wrong username or password")
+    if config.TOTP_SECRET:
+        # The second step: the code of the authenticator app. Asked only after the right password.
+        given = str(body.get("code") or "").strip()
+        if not given:
+            return refuse(401, "Fill in the code of your authenticator app", totp=True)
+        step = totp.verify(config.TOTP_SECRET, given, after=auth.used_step)
+        if step is None:
+            return wrong("That code is not right. Codes change every 30 seconds.", totp=True)
+        auth.used_step = step
     auth.succeeded(address)
     return session_cookie(request, web.json_response({"ok": True}))
+
+
+async def api_sessions(request):
+    return web.json_response({"ok": True, "sessions": auth.listing(request.cookies.get(auth.COOKIE))})
+
+
+async def api_sessions_end(request):
+    """Log one browser out, or every browser but this one."""
+    try:
+        body = await request.json()
+        if body.get("others"):
+            ended = auth.end_others(request.cookies.get(auth.COOKIE))
+        else:
+            ended = int(auth.end_id(str(body["id"])))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return refuse(400, "Invalid request")
+    if ended:
+        request.app["hunter"].event(f"Logged out {ended} other session(s)" if body.get("others") else "Logged out a session")
+    return web.json_response({"ok": True, "ended": ended, "sessions": auth.listing(request.cookies.get(auth.COOKIE))})
+
+
+async def api_totp(request):
+    """The second step of the login: begin setting it up, switch it on with a first code, or
+    switch it off with a code."""
+    hunter = request.app["hunter"]
+    try:
+        body = await request.json()
+        what, given = str(body["action"]), str(body.get("code") or "")
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return refuse(400, "Invalid request")
+    if what == "begin":
+        if config.TOTP_SECRET:
+            return refuse(400, "Two-step login is already on")
+        secret = pending_totp["secret"] = totp.new_secret()
+        address = totp.uri(secret, config.PANEL_USER)
+        return web.json_response({"ok": True, "secret": secret, "uri": address, "qr": totp.qr(address)})
+    if what == "enable":
+        secret = pending_totp.get("secret")
+        if config.TOTP_SECRET or not secret:
+            return refuse(400, "Begin setting up two-step login first")
+        step = totp.verify(secret, given)
+        if step is None:
+            return refuse(400, "That code is not right. Check the time of your phone and try the next code.")
+        config.set_totp(secret)
+        pending_totp.clear()
+        auth.used_step = step
+        hunter.event("Two-step login switched on", "warn")
+        return web.json_response({"ok": True, "totp": True})
+    if what == "disable":
+        if not config.TOTP_SECRET:
+            return web.json_response({"ok": True, "totp": False})
+        address = request.remote or "?"
+        if auth.wait_for(address):
+            return refuse(429, f"Too many wrong codes. Try again in {auth.wait_for(address)} seconds.")
+        step = totp.verify(config.TOTP_SECRET, given, after=auth.used_step)
+        if step is None:
+            auth.failed(address)
+            return refuse(400, "That code is not right. Codes change every 30 seconds.")
+        config.set_totp("")
+        hunter.event("Two-step login switched off", "warn")
+        return web.json_response({"ok": True, "totp": False})
+    return refuse(400, "Invalid request")
+
+
+async def secure(hunter):
+    """Start, move or stop the HTTPS side of the panel as the settings say. A certificate that
+    cannot be used leaves the panel on HTTP alone, and is said on the Status page."""
+    if listening["tls"] is not None:
+        await listening["tls"].stop()
+        listening["tls"] = None
+    hunter.state["services"].pop("ssl", None)
+    if not config.SSL_ENABLED or listening["runner"] is None:
+        return
+    try:
+        site = web.TCPSite(listening["runner"], port=config.SSL_PORT, ssl_context=tls.context())
+        await site.start()
+    except tls.TlsError as e:
+        hunter.service("ssl", False, f"HTTPS is not on: {e}")
+        hunter.event(f"HTTPS is not on: {e}", "error")
+        return
+    except OSError as e:
+        hunter.service("ssl", False, f"HTTPS is not on: port {config.SSL_PORT} cannot be used ({e.strerror or e})")
+        hunter.event(f"HTTPS is not on: port {config.SSL_PORT} cannot be used ({e.strerror or e})", "error")
+        return
+    listening["tls"] = site
+    own = "" if config.SSL_CERT_PATH else ", with a certificate NSWHunter made itself"
+    hunter.service("ssl", True, f"on port {config.SSL_PORT}{own}")
+    hunter.event(f"HTTPS is on, on port {config.SSL_PORT}{own}")
 
 
 async def api_logout(request):
@@ -381,12 +488,22 @@ async def api_settings_save(request):
     login = (config.PANEL_USER, config.PANEL_PASSWORD)
     try:
         body = await request.json()
-        changed = config.update(dict(body.get("values") or {}), list(body.get("clear") or []))
+        values, clear = dict(body.get("values") or {}), list(body.get("clear") or [])
+        after = config.overlay(values, clear)
+        if after.SSL_ENABLED and any(name.startswith("SSL_") for name in values):
+            if after.SSL_PORT == config.PORT:
+                raise ValueError(f"SSL_PORT: port {config.PORT} is the one of HTTP; choose another")
+            tls.context(after)  # with a certificate that cannot be used HTTPS is not switched on
+        changed = config.update(values, clear)
+    except tls.TlsError as e:
+        return web.json_response({"ok": False, "error": f"HTTPS: {e}"}, status=400)
     except ValueError as e:
         return web.json_response({"ok": False, "error": str(e)}, status=400)
     except (AttributeError, TypeError):
         return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
     hunter.event("Settings saved: " + (", ".join(changed) or "nothing changed"))
+    if any(name.startswith("SSL_") for name in changed):
+        await secure(hunter)
     logs.setup()
     request.app["wake"].set()
     response = web.json_response({"ok": True, **config.editable()})
@@ -463,7 +580,8 @@ async def api_provider_delete(request):
 
 
 async def api_backups(request):
-    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing()})
+    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing(),
+                              "encrypting": bool(config.BACKUP_PASSWORD)})
 
 
 async def api_backup(request):
@@ -478,7 +596,7 @@ async def api_backup(request):
         elif what == "delete":
             backup.delete(name)
         elif what == "restore":
-            backup.restore(name)
+            backup.restore(name, str(body.get("password") or "") or None)
             # Use what was put back at once: the settings, the log files, the state.
             config.load_saved()
             config.first_login()
@@ -488,11 +606,17 @@ async def api_backup(request):
             request.app["wake"].set()
         else:
             raise ValueError
+    except backup.WrongPassword as e:
+        # The panel asks for the password the backup was made with, and tries again.
+        return web.json_response({"ok": False, "error": str(e), "password": True}, status=400)
     except backup.BackupError as e:
         return web.json_response({"ok": False, "error": str(e)}, status=400)
     except (ValueError, AttributeError, TypeError, KeyError):
         return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
-    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing()})
+    if what == "restore":
+        await secure(hunter)
+    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing(),
+                              "encrypting": bool(config.BACKUP_PASSWORD)})
 
 
 async def api_backup_download(request):
@@ -500,7 +624,8 @@ async def api_backup_download(request):
     try:
         name = request.query.get("name", "")
         return web.FileResponse(backup.path(name), headers={
-            "Content-Disposition": f'attachment; filename="{name}"', "Content-Type": "application/zip"})
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Content-Type": "application/octet-stream" if name.endswith(backup.ENCRYPTED) else "application/zip"})
     except backup.BackupError as e:
         return refuse(404, str(e))
 
@@ -558,6 +683,9 @@ def make_app():
         web.post("/api/password", api_password),
         web.post("/api/login", api_login),
         web.post("/api/logout", api_logout),
+        web.get("/api/sessions", api_sessions),
+        web.post("/api/sessions", api_sessions_end),
+        web.post("/api/totp", api_totp),
         web.get("/api/state", api_state),
         web.get("/api/log", api_log),
         web.get("/api/games", api_games),
@@ -592,6 +720,22 @@ def make_app():
     return app
 
 
+async def serve():
+    """Listen on the HTTP port, and on the HTTPS port if the settings ask for it, until the
+    container is stopped."""
+    app = make_app()
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    listening["runner"] = runner
+    await web.TCPSite(runner, port=config.PORT).start()
+    await secure(app["hunter"])
+    stopped = asyncio.Event()
+    for name in (signal.SIGINT, signal.SIGTERM):
+        asyncio.get_running_loop().add_signal_handler(name, stopped.set)
+    await stopped.wait()
+    await runner.cleanup()
+
+
 if __name__ == "__main__":
     config.load_saved()
     logs.setup()
@@ -608,4 +752,4 @@ if __name__ == "__main__":
         logs.console("=" * 62)
     elif config.problems():
         log(f"Not set up yet. Open the panel on port {config.PORT} and fill in the settings.")
-    web.run_app(make_app(), port=config.PORT, print=None, access_log=None)
+    asyncio.run(serve())

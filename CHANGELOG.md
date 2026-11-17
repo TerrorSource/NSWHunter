@@ -2,6 +2,21 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.6.0] - 2026-11-17
+
+### Added
+
+- **Two-step login, optional** (Settings > General). Set it up by scanning a QR code with an authenticator app; from then on logging in takes your password and the six-digit code of the app. A code works once, wrong codes have to wait like wrong passwords, and switching it off takes a code too. Lost your phone: remove `TOTP_SECRET` from `/data/settings.json` and restart.
+- **HTTPS, optional** (Settings > General), on a port of its own next to HTTP, as in Sonarr and Radarr. With a certificate of your own (a PEM file and its key), or without one: then NSWHunter makes a certificate itself, which encrypts the connection but makes the browser warn once. It is switched on, moved and switched off without a restart; a certificate that cannot be used is refused when you save, and said on the Status page if it breaks later. The container has to publish the port.
+- **Encrypted backups.** With a **Backup Password** (Settings > General) every new backup is encrypted, because a backup holds all keys and passwords of the settings. An encrypted backup is put back with that password; if the password of the settings is another one by then, the panel asks for the one the backup was made with. Without the password such a backup cannot be opened.
+- **Sessions** (Settings > General): the browsers that are logged in, with their address and when they were last used, a button to log one out, and one to log out all others.
+- **A browser test of the panel** runs with every build: it logs in for the first time, sets the panel up, opens every page, sends and removes a download, and checks a phone-sized screen. No image is built if it fails.
+
+### Changed
+
+- **The container never is root any more.** `docker-compose.yml` starts it as a user (`user: "1000:1000"`) and without any capability; the folders of `/data` and `/backup` have to belong to that user, and the container says so if they do not. A stack with `PUID` and `PGID` and the four `cap_add` lines keeps working as before.
+- A bulk action on Wanted says why it did fewer than were ticked: which had no release to send, and what a download client or indexer answered.
+
 ## [3.5.0] - 2026-11-17
 
 ### Added

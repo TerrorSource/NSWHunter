@@ -258,7 +258,7 @@ class Hunter:
     def forget_services(self):
         """Drop what was said by entries that are gone or switched off."""
         live = {f"{kind}:{e['id']}" for kind in config.KINDS for e in config.providers(kind, enabled=True)}
-        for name in [n for n in self.state["services"] if n not in live and n not in ("slm", "titledb", "config", "backup")]:
+        for name in [n for n in self.state["services"] if n not in live and n not in ("slm", "titledb", "config", "backup", "ssl")]:
             del self.state["services"][name]
 
     def legacy_source(self):

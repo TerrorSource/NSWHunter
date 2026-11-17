@@ -41,8 +41,16 @@ jobs:
           pip install pip-audit
           pip-audit -r requirements.txt --strict
 
+  # The panel in a real browser: logging in, setting up and clicking through every page.
+  panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Browser test of the panel
+        run: tests/panel/run.sh
+
   build:
-    needs: test
+    needs: [test, panel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

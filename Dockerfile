@@ -35,6 +35,7 @@ EXPOSE 3033
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s \
   CMD python3 -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '3033'), timeout=5)" || exit 1
 
-# The entrypoint starts as root, gives /data to PUID:PGID and then runs NSWHunter as that user.
+# With 'user:' the container never is root. Without it the entrypoint starts as root, gives /data
+# to PUID:PGID and then runs NSWHunter as that user.
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "-u", "/app/main.py"]

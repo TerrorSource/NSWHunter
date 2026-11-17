@@ -211,6 +211,11 @@
   .choice input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: #5d9cec; flex: none; }
   .choice span.sub { display: block; }
   .mfoot .words { font: inherit; flex: 0 1 300px; min-width: 120px; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--edge); background: var(--input); color: var(--text); }
+  /* Setting up the second step of the login: the QR code with the key next to it. */
+  .qrbox { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; margin: 6px 0 14px; }
+  .qr { border-radius: 4px; flex: none; }
+  .key { font-size: 15px; letter-spacing: .04em; margin: 4px 0 8px; overflow-wrap: anywhere; color: var(--head); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; align-items: center; }
   /* Updates: a version, and under it what changed. */
   .update { margin-bottom: 26px; }
   .uhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
@@ -352,6 +357,10 @@
     <input id="auth-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
     <label for="auth-password" id="auth-password-label">Password</label>
     <input id="auth-password" type="password" autocomplete="current-password" required>
+    <div id="auth-code-row" hidden>
+      <label for="auth-code">Code of your authenticator app</label>
+      <input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" spellcheck="false">
+    </div>
     <div id="auth-repeat-row" hidden>
       <label for="auth-repeat">New password again</label>
       <input id="auth-repeat" type="password" autocomplete="new-password">
@@ -496,6 +505,7 @@ function needLogin(mode) {
     : "";
   $("auth-password-label").textContent = change ? "New password" : "Password";
   $("auth-repeat-row").hidden = !change;
+  $("auth-code-row").hidden = true; $("auth-code").value = "";
   $("auth-password").setAttribute("autocomplete", change ? "new-password" : "current-password");
   $("authgo").textContent = change ? "Save and go on" : "Log in";
   $("autherror").textContent = "";
@@ -511,9 +521,17 @@ $("authform").addEventListener("submit", async e => {
   $("authgo").disabled = true; say("");
   try {
     const r = await fetch(change ? "/api/password" : "/api/login", {
-      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({user, password})});
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify($("auth-code-row").hidden ? {user, password} : {user, password, code: $("auth-code").value})});
     const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
     if (r.status === 401 && data.login) { auth = null; needLogin("login"); return; }
+    if (data.totp) {
+      // The password was right; the second step asks for the code of the authenticator app.
+      const first = $("auth-code-row").hidden;
+      $("auth-code-row").hidden = false;
+      say(first ? "" : data.error || "That code is not right."); $("auth-code").value = ""; $("auth-code").focus();
+      return;
+    }
     if (!data.ok) { say(data.error || "Failed"); $("auth-password").select(); return; }
     auth = null; opened = false;
     $("auth").hidden = true;
@@ -816,21 +834,24 @@ function renderWanted() {
 async function eachSelected(done, work) {
   const chosen = games().filter(g => selected.has(g.id));
   busy.add("bulk"); render();
-  let count = 0;
+  let count = 0, nothing = 0, wrong = "";
   for (const game of chosen) {
-    try { if (await work(game)) count++; } catch (e) { if (e === LOGIN) break; }
+    try {
+      const answer = await work(game);  // no answer: there was nothing to do for this game
+      if (!answer) nothing++; else if (answer.data.ok) count++; else wrong = wrong || answer.data.error || "Failed";
+    } catch (e) { if (e === LOGIN) break; wrong = wrong || "No connection to NSWHunter"; }
   }
   busy.delete("bulk"); selected.clear();
   await load();
-  toast(plural(count, "game") + " " + done);
+  // Why it was fewer than were ticked is said too: "0 games sent" alone would leave you guessing.
+  toast(plural(count, "game") + " " + done + (nothing ? "; " + nothing + " had no release to send" : "") + (wrong ? ". " + wrong : ""));
 }
-const sent = r => r.data.ok === true;
-const searchSelected = () => eachSelected("searched", g => request("/api/search", {key: g.items[0].key}).then(sent));
+const searchSelected = () => eachSelected("searched", g => request("/api/search", {key: g.items[0].key}));
 const downloadSelected = () => eachSelected("sent to the download client", g => {
   const top = topOf(g);
-  return top ? request("/api/grab", {key: top.item.key, guid: top.release.guid}).then(sent) : false;
+  return top ? request("/api/grab", {key: top.item.key, guid: top.release.guid}) : null;
 });
-const ignoreSelected = () => eachSelected("ignored", g => request("/api/ignore", {keys: g.items.map(i => i.key), ignored: true}).then(sent));
+const ignoreSelected = () => eachSelected("ignored", g => request("/api/ignore", {keys: g.items.map(i => i.key), ignored: true}));
 // The window of one game, as the Interactive Search of Sonarr and Radarr: everything that was
 // found for it, per missing thing, to choose from.
 let viewing = null, ownWords = "";
@@ -1240,7 +1261,8 @@ function renderStatus() {
       h("tbody", {},
         row("Library (Switch-library-manager-web)", s.slm), row("Version list", s.titledb),
         listed("INDEXERS"), listed("DOWNLOAD_CLIENTS"), listed("CONNECTIONS"),
-        s.backup ? row("Backups", s.backup) : null))),
+        s.backup ? row("Backups", s.backup) : null,
+        s.ssl ? row("HTTPS", s.ssl) : null))),
     h("h2", {}, "About"),
     facts([
       ["Version", state.version],
@@ -1366,11 +1388,13 @@ async function loadBackups() {
     if (page === "backup") renderBackups();
   } catch (e) { /* the list stays as it was */ }
 }
-async function backupDo(action, name) {
+// `password`: for an encrypted backup that the backup password of the settings does not open.
+async function backupDo(action, name, password) {
   busy.add("b" + (name || "")); render();
   try {
-    const {data} = await request("/api/backup", {action, name});
-    if (!data.ok) toast(data.error || "Failed");
+    const {data} = await request("/api/backup", {action, name, password});
+    if (!data.ok && data.password) backupPassword(name, password ? data.error : "");
+    else if (!data.ok) toast(data.error || "Failed");
     else {
       backups = data;
       toast(action === "create" ? "Backup made" : action === "delete" ? "Backup removed" : "Backup restored");
@@ -1382,13 +1406,27 @@ async function backupDo(action, name) {
   busy.delete("b" + (name || ""));
   if (!auth) render();
 }
+function backupPassword(name, wrong) {
+  editing = null; viewing = null;
+  const field = h("input", {type: "password", id: "backup-pass", autocomplete: "off", onkeydown: e => { if (e.key === "Enter") go(); }});
+  const go = () => { const value = field.value; if (!value) return; closeModal(); backupDo("restore", name, value); };
+  put($("modal"), dialog("Encrypted Backup", [
+    h("p", {}, "This backup is encrypted, and the backup password of the settings does not open it. Fill in the password it was made with."),
+    h("div", {class: "field"}, h("label", {for: "backup-pass"}, "Backup Password"), h("div", {}, field, h("div", {class: "testresult bad", role: "alert"}, wrong || "")))],
+    [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Cancel"), h("button", {type: "button", class: "primary", onclick: go}, "Restore")]));
+  $("modal").hidden = false;
+  field.focus();
+}
 function renderBackups() {
   if (!backups) return;
   put($("backups"),
-    h("div", {class: "alert"}, "Backups are located in: " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state. Interval and retention are under Settings > General."),
+    h("div", {class: "alert"}, "Backups are located in: " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state. "
+      + (backups.encrypting ? "New backups are encrypted with your backup password. " : "New backups are not encrypted: set a backup password under Settings > General to change that. ")
+      + "Interval and retention are under Settings > General."),
     table(["", "Name", "Size#", "Time#", ""], backups.backups.map(b => h("tr", {},
       h("td", {class: "tight"}, b.kind === "manual" ? mark("person", "Manual: made with Backup Now", "") : mark("clock", "Scheduled", "")),
-      h("td", {class: "mono"}, h("a", {href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name, title: "Download this backup"}, b.name)),
+      h("td", {class: "mono"}, h("a", {href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name, title: "Download this backup"}, b.name),
+        b.encrypted ? h("span", {class: "label sent", title: "Encrypted with the backup password it was made with"}, "encrypted") : null),
       h("td", {class: "num"}, kb(b.size)), h("td", {class: "num"}, ago(b.at)),
       h("td", {}, h("div", {class: "acts"},
         ibtn("restore", "Restore: replace the settings and the state by this backup",
@@ -1439,6 +1477,13 @@ const FORMS = {
       {name: "PANEL_PASSWORD", label: "Password", secret: true, required: true,
        help: "At least 8 characters; only a hash of it is kept. After a change every other browser has to log in again."},
       {name: "PASSWORD_AGAIN", label: "Password Confirmation", secret: true, required: true, local: true},
+      {name: "SSL_ENABLED", label: "Enable HTTPS", checkbox: true, help: "Also serve the panel over HTTPS, on a port of its own. HTTP keeps working."},
+      {name: "SSL_PORT", label: "HTTPS Port", number: true,
+       help: "The container has to publish this port: add it under ports in your compose file, like 3443:3443."},
+      {name: "SSL_CERT_PATH", label: "Certificate Path", placeholder: "/data/certs/panel.pem",
+       help: "A PEM file with your certificate, in a volume of the container. Leave it empty to let NSWHunter make a certificate itself: the connection is encrypted, but your browser warns once, because nobody vouches for that certificate."},
+      {name: "SSL_KEY_PATH", label: "Certificate Key Path", placeholder: "/data/certs/panel.key",
+       help: "The PEM file with the key of the certificate. Leave it empty if the key is in the same file."},
       {name: "PANEL_HOSTS", label: "Host Names", placeholder: "nswhunter.example.com",
        help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
     {title: "Logging", fields: [
@@ -1449,6 +1494,8 @@ const FORMS = {
     {title: "Backups", fields: [
       {name: "BACKUP_FOLDER", label: "Folder", placeholder: "/backup",
        help: "Make it a volume of the container, or the backups are gone with the container. A relative path is under /data. The backups themselves are under System > Backup."},
+      {name: "BACKUP_PASSWORD", label: "Backup Password", secret: true,
+       help: "With a password the backups are encrypted: a backup holds every key and password of the settings. Keep the password somewhere else too, because without it an encrypted backup cannot be put back. Backups made before stay as they are."},
       {name: "BACKUP_INTERVAL_DAYS", label: "Interval", number: true, unit: "days", help: "Interval between automatic backups"},
       {name: "BACKUP_RETENTION_DAYS", label: "Retention", number: true, unit: "days",
        help: "Automatic backups older than the retention period are cleaned up automatically. A backup you make yourself stays until you delete it."}]}],
@@ -1514,6 +1561,111 @@ function renderForm() {
   rerender = () => keepTyped(() => $("config"), build);
   build();
   put($("extra"));
+  if (page === "general") { renderSecurity(); loadSessions(); }
+}
+// Under the form of General: the second step of the login and the browsers that are logged in.
+// Both work at once, without Save Changes.
+let logins = null;
+async function loadSessions() {
+  try {
+    logins = (await request("/api/sessions")).data.sessions || [];
+    if (page === "general") renderSecurity();
+  } catch (e) { /* the list stays as it was */ }
+}
+// "Chrome on macOS", from what a browser says about itself.
+function browserOf(agent) {
+  const browser = /Edg\//.test(agent) ? "Edge" : /Firefox\//.test(agent) ? "Firefox" : /Chrome\//.test(agent) ? "Chrome"
+    : /Safari\//.test(agent) ? "Safari" : /curl|python|aiohttp/i.test(agent) ? "A script" : "";
+  const system = /iPhone|iPad/.test(agent) ? "iOS" : /Android/.test(agent) ? "Android" : /Windows/.test(agent) ? "Windows"
+    : /Mac OS X|Macintosh/.test(agent) ? "macOS" : /Linux/.test(agent) ? "Linux" : "";
+  return [browser, system].filter(Boolean).join(" on ") || "Unknown browser";
+}
+async function endSessions(body) {
+  try {
+    const {data} = await request("/api/sessions", body);
+    if (!data.ok) return toast(data.error || "Failed");
+    logins = data.sessions;
+    toast(data.ended ? plural(data.ended, "session") + " logged out" : "Nothing to log out");
+    renderSecurity();
+  } catch (e) {
+    if (e !== LOGIN) toast("No connection to NSWHunter");
+  }
+}
+function renderSecurity() {
+  if (page !== "general" || !settings) return;
+  const on = settings.totp, others = (logins || []).filter(l => !l.current).length;
+  put($("extra"),
+    h("h2", {}, "Two-Step Login"),
+    h("div", {class: "field"}, h("div", {class: "name"}, "Authenticator App"),
+      h("div", {class: "row"}, h("span", {class: "label wide " + (on ? "ok" : "mute")}, on ? "On" : "Off"),
+        on ? h("button", {type: "button", onclick: () => totpDialog("disable")}, "Switch Off")
+          : h("button", {type: "button", onclick: () => totpDialog("begin")}, "Set Up")),
+      h("div", {class: "help"}, on ? "Logging in takes your password and a code of your authenticator app."
+        : "Optional. With it, logging in takes your password and a six-digit code of an authenticator app on your phone (Google Authenticator, Aegis, 1Password and the like).")),
+    h("h2", {}, "Sessions"),
+    logins ? table(["Browser", "Address", "Logged In", "Last Used", ""], logins.map(l => h("tr", {},
+        h("td", {title: l.agent || null}, browserOf(l.agent), l.current ? [" ", h("span", {class: "label ok"}, "this browser")] : null),
+        h("td", {class: "mono tight"}, l.address || "–"),
+        h("td", {class: "tight"}, l.made ? ago(l.made) : "–"),
+        h("td", {class: "tight"}, l.seen ? ago(l.seen) : "–"),
+        h("td", {}, h("div", {class: "acts"}, l.current ? null : ibtn("remove", "Log this browser out", () => endSessions({id: l.id})))))),
+      "Nobody is logged in.") : h("div", {class: "line"}, "Loading…"),
+    h("div", {class: "tabs"}, h("button", {type: "button", disabled: !others, onclick: () => endSessions({others: true})}, "Log Out All Other Sessions"),
+      h("span", {class: "line"}, "A login lasts 30 days. A new password logs every other browser out too.")));
+}
+// The QR code of the second step, drawn here from the rows the server made: the secret is never
+// in the address of a picture.
+function qrCode(rows) {
+  const NS = "http://www.w3.org/2000/svg", edge = 4, side = rows.length + 2 * edge;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + side + " " + side); svg.setAttribute("width", "210"); svg.setAttribute("height", "210");
+  svg.setAttribute("class", "qr"); svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "QR code for your authenticator app");
+  const paper = document.createElementNS(NS, "rect");
+  paper.setAttribute("width", side); paper.setAttribute("height", side); paper.setAttribute("fill", "#fff");
+  const ink = document.createElementNS(NS, "path");
+  ink.setAttribute("fill", "#000");
+  ink.setAttribute("d", rows.map((row, y) => [...row].map((dark, x) => dark === "1" ? "M" + (x + edge) + " " + (y + edge) + "h1v1h-1z" : "").join("")).join(""));
+  svg.append(paper, ink);
+  return svg;
+}
+async function totpDialog(action) {
+  editing = null; viewing = null;
+  let begun = null;
+  if (action === "begin") {
+    try {
+      const {data} = await request("/api/totp", {action: "begin"});
+      if (!data.ok) return toast(data.error || "Failed");
+      begun = data;
+    } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); return; }
+  }
+  const says = h("div", {class: "testresult bad", role: "alert"});
+  const code = h("input", {type: "text", id: "totp-code", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "7", spellcheck: "false",
+                           placeholder: "123456", onkeydown: e => { if (e.key === "Enter") go(); }});
+  async function go() {
+    says.textContent = "";
+    try {
+      const {data} = await request("/api/totp", {action: begun ? "enable" : "disable", code: code.value});
+      if (!data.ok) { says.textContent = data.error || "Failed"; code.select(); return; }
+      settings.totp = data.totp;
+      closeModal(); renderSecurity();
+      toast(data.totp ? "Two-step login is on" : "Two-step login is off");
+    } catch (e) { if (e !== LOGIN) says.textContent = "No connection to NSWHunter"; }
+  }
+  const body = begun ? [
+    h("p", {}, "1. Scan this code with the authenticator app on your phone, or type the key into it."),
+    h("div", {class: "qrbox"}, begun.qr && begun.qr.length ? qrCode(begun.qr) : null,
+      h("div", {}, h("div", {class: "sub"}, "Key"), h("div", {class: "mono key"}, begun.secret.replace(/(.{4})/g, "$1 ").trim()),
+        h("div", {class: "sub"}, "Type: time based · 6 digits · 30 seconds"))),
+    h("p", {}, "2. Fill in the six digits the app shows now."),
+    h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says)),
+    h("p", {class: "sub"}, "Lost your phone later? Stop the container, remove the line TOTP_SECRET from /data/settings.json and start it again.")]
+    : [h("p", {}, "Fill in a code of your authenticator app to switch two-step login off."),
+       h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says))];
+  put($("modal"), dialog(begun ? "Set Up Two-Step Login" : "Switch Off Two-Step Login", body,
+    [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Cancel"),
+     h("button", {type: "button", class: begun ? "primary" : "danger", onclick: go}, begun ? "Switch On" : "Switch Off")]));
+  $("modal").hidden = false;
+  code.focus();
 }
 // A change in a form of the settings lights up Save Changes in the toolbar.
 for (const kind of ["input", "change"]) $("config").addEventListener(kind, () => { if (!dirty) { dirty = true; renderToolbar(); } });

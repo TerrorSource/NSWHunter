@@ -135,8 +135,21 @@ LOG_LEVEL = choice("LOG_LEVEL", LOG_LEVELS, "info")
 LOG_KEEPS = (7, 14, 30, 90)  # there is a log file per day; this many days of them are kept
 LOG_KEEP_DAYS = choice("LOG_KEEP_DAYS", LOG_KEEPS, 14)
 
+# The second step of the login: the secret an authenticator app shares with the panel. Empty:
+# the login is the password alone. Set and removed in the panel only (see set_totp).
+TOTP_SECRET = ""
+
+# The panel over HTTPS as well, on a port of its own; HTTP stays as it is. Without a certificate
+# of your own NSWHunter makes one itself (see tls.py).
+SSL_ENABLED = flag("SSL_ENABLED")
+SSL_PORT = int(min(65535, max(1, number("SSL_PORT", 3443))))
+SSL_CERT_PATH = env("SSL_CERT_PATH")
+SSL_KEY_PATH = env("SSL_KEY_PATH")
+
 # Backups of the settings and the state. A relative folder is under DATA_DIR.
 BACKUP_FOLDER = env("BACKUP_FOLDER", "/backup")
+# With a password the backups are encrypted: a backup holds every key and password of the settings.
+BACKUP_PASSWORD = env("BACKUP_PASSWORD")
 BACKUP_INTERVAL_DAYS = int(min(90, max(1, number("BACKUP_INTERVAL_DAYS", 7))))
 BACKUP_RETENTION_DAYS = int(min(365, max(1, number("BACKUP_RETENTION_DAYS", 28))))
 
@@ -152,19 +165,23 @@ UI_RELATIVE_DATES = flag("UI_RELATIVE_DATES", True)
 
 # ---------------------------------------------------------------- single settings
 
-# name -> kind: "url", "text", "secret", "bool", "path", a range of whole numbers, or the tuple
-# of allowed values.
+# name -> kind: "url", "text", "secret", "bool", "path", "file" (a file in the container, or
+# empty), a range of whole numbers, or the tuple of allowed values.
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS,
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
+    "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
     "BACKUP_FOLDER": "path", "BACKUP_INTERVAL_DAYS": range(1, 91), "BACKUP_RETENTION_DAYS": range(1, 366),
+    "BACKUP_PASSWORD": "secret",
     "UI_THEME": THEMES, "UI_DATE_FORMAT": DATE_FORMATS, "UI_TIME_FORMAT": TIME_FORMATS,
     "UI_RELATIVE_DATES": "bool",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
+# Kept in the settings file too, but no setting of a form: set by steps of their own in the panel.
+PRIVATE = ("TOTP_SECRET",)
 # A key or password belongs to the address it was saved for: it is never sent to another one.
 BOUND = {"SLM_URL": "SLM_API_KEY"}
 
@@ -254,6 +271,9 @@ def normalize(name, value):
     elif kind == "path":
         if not value or ".." in value.split("/") or "\\" in value:
             raise ValueError(f"{name}: fill in a folder, like /backup")
+    elif kind == "file":
+        if value and (not value.startswith("/") or ".." in value.split("/") or "\\" in value):
+            raise ValueError(f"{name}: fill in the whole path of a file in the container, like /data/certs/panel.pem")
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
@@ -443,7 +463,7 @@ def saved():
             data = json.load(f)
     except (FileNotFoundError, ValueError):
         return {}
-    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS} if isinstance(data, dict) else {}
+    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS or k in PRIVATE} if isinstance(data, dict) else {}
 
 
 def write(data):
@@ -496,8 +516,10 @@ def load_saved():
     """Put the saved settings on top of the environment. Called once at start."""
     data = saved()
     kept = dict(data)
+    # Not a setting of a form: only its own steps in the panel set or remove it.
+    globals()["TOTP_SECRET"] = data["TOTP_SECRET"] if isinstance(data.get("TOTP_SECRET"), str) else ""
     for name, value in data.items():
-        if name in KINDS:
+        if name in KINDS or name in PRIVATE:
             continue
         try:
             globals()[name] = kept[name] = normalize(name, value)
@@ -579,6 +601,17 @@ def update(values, clear=()):
     return changed
 
 
+def set_totp(secret):
+    """Switch the second step of the login on (with the secret of the authenticator app) or off ("")."""
+    data = saved()
+    if secret:
+        data["TOTP_SECRET"] = secret
+    else:
+        data.pop("TOTP_SECRET", None)
+    write(data)
+    globals()["TOTP_SECRET"] = secret
+
+
 def overlay(values, clear=()):
     """The single settings as they would be after saving this form, without saving or using
     them: for the Test buttons. Same rules as update(): an empty secret keeps the saved one."""
@@ -605,6 +638,7 @@ def editable():
     return {
         "values": {n: globals()[n] for n in EDITABLE if n not in SECRETS},
         "secrets": {n: bool(globals()[n]) for n in SECRETS},
+        "totp": bool(TOTP_SECRET),
         "providers": shown_providers(),
         "schema": {kind: {t: {"label": spec["label"], "fields": spec["fields"], "protocol": spec.get("protocol", "")}
                           for t, spec in types.items()} for kind, types in PROVIDERS.items()},

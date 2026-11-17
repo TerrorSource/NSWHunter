@@ -16,8 +16,12 @@ FREE_TRIES = 5  # wrong logins from one address before it has to wait
 MAX_WAIT = 900
 FORGET = 3600  # wrong logins are forgotten this long after the last one
 
-sessions = {}  # sha256 of a session token -> the time it ends
+# sha256 of a session token -> {"ends", "made", "seen", "address", "agent"}: when the login ends
+# and was made, when it was last used, and from where and with what browser.
+sessions = {}
 failures = {}  # address -> (number of wrong logins in a row, time of the last one)
+used_step = 0  # the step of time of the last code of the second step that was used
+SEEN_EVERY = 300  # "last seen" is written to the file at most this often
 
 # Names that only exist inside a home network: no public DNS can make them point somewhere.
 LOCAL_SUFFIXES = (".local", ".lan", ".home", ".home.arpa", ".internal", ".intranet", ".localhost", ".localdomain")
@@ -39,8 +43,12 @@ def load():
     except (FileNotFoundError, ValueError):
         return
     now = time.time()
-    if isinstance(saved, dict):
-        sessions.update({k: v for k, v in saved.items() if isinstance(v, (int, float)) and v > now})
+    for key, value in (saved.items() if isinstance(saved, dict) else ()):
+        if isinstance(value, (int, float)):  # as an older version kept it: only when it ends
+            value = {"ends": value, "made": value - LIFETIME, "seen": 0, "address": "", "agent": ""}
+        if isinstance(value, dict) and isinstance(value.get("ends"), (int, float)) and value["ends"] > now:
+            sessions[key] = {"ends": int(value["ends"]), "made": int(value.get("made") or 0), "seen": int(value.get("seen") or 0),
+                             "address": str(value.get("address") or "")[:64], "agent": str(value.get("agent") or "")[:300]}
 
 
 def save():
@@ -52,19 +60,28 @@ def save():
     os.replace(tmp, config.SESSIONS_FILE)
 
 
-def start():
+def start(address="", agent=""):
     """A new session. Returns the token for the cookie."""
     now = time.time()
-    for key in [k for k, ends in sessions.items() if ends <= now]:
+    for key in [k for k, session in sessions.items() if session["ends"] <= now]:
         del sessions[key]
     token = secrets.token_urlsafe(32)
-    sessions[_key(token)] = int(now + LIFETIME)
+    sessions[_key(token)] = {"ends": int(now + LIFETIME), "made": int(now), "seen": int(now),
+                             "address": str(address)[:64], "agent": str(agent)[:300]}
     save()
     return token
 
 
 def valid(token):
-    return bool(token) and sessions.get(_key(token), 0) > time.time()
+    """Is this the token of a login that still lasts? Using it is remembered as "last seen"."""
+    session = sessions.get(_key(token)) if token else None
+    now = time.time()
+    if session is None or session["ends"] <= now:
+        return False
+    if now - session["seen"] > SEEN_EVERY:
+        session["seen"] = int(now)
+        save()
+    return True
 
 
 def end(token):
@@ -76,6 +93,36 @@ def end_all():
     """After a new password: every browser has to log in again."""
     sessions.clear()
     save()
+
+
+def listing(token):
+    """The logins that still last, newest first, for the panel. The id is a piece of the hash
+    of the token: enough to point at one, useless to log in with."""
+    own, now = _key(token) if token else "", time.time()
+    return sorted(({"id": key[:16], "made": s["made"], "seen": s["seen"], "ends": s["ends"], "address": s["address"],
+                    "agent": s["agent"], "current": key == own}
+                   for key, s in sessions.items() if s["ends"] > now), key=lambda s: s["made"], reverse=True)
+
+
+def end_id(public_id):
+    """End the login with this id. True if there was one."""
+    found = [key for key in sessions if key[:16] == public_id and len(str(public_id)) == 16]
+    for key in found:
+        del sessions[key]
+    if found:
+        save()
+    return bool(found)
+
+
+def end_others(token):
+    """End every login but the one of this token. Returns how many."""
+    own = _key(token) if token else ""
+    others = [key for key in sessions if key != own]
+    for key in others:
+        del sessions[key]
+    if others:
+        save()
+    return len(others)
 
 
 # ---------------------------------------------------------------- logging in

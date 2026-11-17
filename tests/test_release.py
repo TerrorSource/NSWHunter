@@ -23,3 +23,5 @@ def test_compose_file_holds_no_filled_in_secrets():
     assert "3033:3033" in text and re.search(r"image: ghcr\.io/[a-z0-9-]+/nswhunter:latest", text)
     # And nothing of one particular server: the folders are placeholders.
     assert "/path/to/nswhunter/data:/data" in text and "/mnt/" not in text
+    # The container never is root: it starts as a user, and needs no capability at all.
+    assert re.search(r'^    user: "\d+:\d+"$', text, re.M) and "cap_add" not in text and "- ALL" in text

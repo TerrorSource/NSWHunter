@@ -12,10 +12,11 @@ Once the update is in your library, the item disappears by itself.
 
 ## Installing
 
-Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` folders by folders on your server and set `TZ`, `PUID` and `PGID` to yours. The panel is on port 3033.
+Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` folders by folders on your server, and set `TZ` and the `user:` line to yours. The panel is on port 3033.
 
-- `/data` holds the settings and the state, `/backup` the backups of both.
-- The container runs read-only and without privileges; it only writes to those two folders.
+- `/data` holds the settings and the state, `/backup` the backups of both. Both folders have to belong to the user of the `user:` line: `chown -R 1000:1000 <folder>`.
+- The container runs read-only, never as root and without privileges; it only writes to those two folders.
+- HTTPS is optional (Settings > General): publish its port as well, like `3443:3443`.
 - If the image is private, the server needs a login for `ghcr.io` to pull it: your GitHub username and a token with the `read:packages` scope.
 
 ## The first login
@@ -31,7 +32,7 @@ At the first start NSWHunter makes the user `admin` with a password it makes up,
 
 With that password the panel lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until then the lines are in the log at every start; after that they are gone and the made-up password no longer works.
 
-Forgot your password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: a new password is made up and written to the log.
+Forgot your password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: a new password is made up and written to the log. Lost the phone of your two-step login (optional, Settings > General)? Remove `TOTP_SECRET` the same way.
 
 ## Setting up
 
@@ -98,4 +99,4 @@ Start with off and watch for a few days whether the scores match how updates are
 
 ## Backups
 
-A backup is a zip of the settings (with their keys and passwords) and the state. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
+A backup is a zip of the settings (with their keys and passwords) and the state; with a **Backup Password** on the General page it is encrypted, and only NSWHunter can put it back, with that password. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
