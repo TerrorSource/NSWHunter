@@ -1624,8 +1624,8 @@ const FORMS = {
       {name: "LOG_KEEP_DAYS", label: "Log Retention", options: [["7", "7 days"], ["14", "14 days"], ["30", "30 days"], ["90", "90 days"]],
        help: "There is one log file per day, named nswhunter_2026-03-25.txt. Files older than this are removed."}]},
     {title: "Backups", fields: [
-      {name: "BACKUP_FOLDER", label: "Folder", placeholder: "/backup", browse: "folder",
-       help: "/backup is the volume of that name; if the container has none, the backups are kept in the folder backups of the config folder. A relative path is under the config folder. The backups themselves are under System > Backup."},
+      {name: "BACKUP_FOLDER", label: "Folder", placeholder: "/config/backups", browse: "folder",
+       help: "Where the backups are kept. The default is the folder backups of the config folder; any other folder has to be a volume of the container. A relative path is under the config folder. The backups themselves are under System > Backup."},
       {name: "BACKUP_PASSWORD", label: "Backup Password", secret: true,
        help: "With a password the backups are encrypted: a backup holds every key and password of the settings. Keep the password somewhere else too, because without it an encrypted backup cannot be put back. Backups made before stay as they are."},
       {name: "BACKUP_INTERVAL_DAYS", label: "Interval", number: true, unit: "days", help: "Interval between automatic backups"},

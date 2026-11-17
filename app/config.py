@@ -167,7 +167,17 @@ SSL_CERT_PATH = env("SSL_CERT_PATH")
 SSL_KEY_PATH = env("SSL_KEY_PATH")
 
 # Backups of the settings and the state. A relative folder is under DATA_DIR.
-BACKUP_FOLDER = env("BACKUP_FOLDER", "/backup")
+def backup_folder(asked):
+    """The folder of the backups: "backups" in the config folder (/config/backups), unless
+    another one is asked for. Before version 3.11 it was the volume /backup; that only still
+    counts where the container has that volume, else its backups would be gone with it."""
+    asked = (asked or "").strip()
+    if not asked or (asked.rstrip("/") == "/backup" and not os.path.ismount("/backup")):
+        return os.path.join(DATA_DIR, "backups")
+    return asked
+
+
+BACKUP_FOLDER = backup_folder(env("BACKUP_FOLDER"))
 # With a password the backups are encrypted: a backup holds every key and password of the settings.
 BACKUP_PASSWORD = env("BACKUP_PASSWORD")
 BACKUP_INTERVAL_DAYS = int(min(90, max(1, number("BACKUP_INTERVAL_DAYS", 7))))
@@ -578,6 +588,7 @@ def load_saved():
             globals()[name] = kept[name] = normalize(name, value)
         except ValueError:
             continue
+    globals()["BACKUP_FOLDER"] = backup_folder(BACKUP_FOLDER)  # a saved "/backup" without that volume
     old = legacy() if any(kind not in data for kind in KINDS) else {}
     for kind in KINDS:
         entries = []

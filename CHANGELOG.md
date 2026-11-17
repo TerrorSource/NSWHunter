@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.11.1] - 2026-11-17
+
+### Changed
+
+- **The default backup folder is `/config/backups`**, and the General page shows it as such. An installation that has a volume at `/backup` keeps using that one.
+
 ## [3.11.0] - 2026-11-17
 
 ### Changed
