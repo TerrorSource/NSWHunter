@@ -1583,6 +1583,8 @@ const FORMS = {
     {title: "Importing", fields: [
       {name: "IMPORT_COMPLETED", label: "Import Completed Downloads", checkbox: true,
        help: "Put a finished download in the folder of its game in your library, as Completed Download Handling does in Sonarr and Radarr. It needs a root folder (below), and the download folder as a volume of the container."},
+      {name: "FOLDER_TEMPLATE", label: "Folder Name Template", placeholder: "{TITLE_NAME} [{TITLE_ID}]",
+       help: "The folder of a game in the root folder, as Organize of Switch-library-manager-web names it: {TITLE_NAME} is the name of the game and {TITLE_ID} its title ID, so the default gives a folder like \"Some Game [0100ABCD0000A000]\". A folder that already has the title ID in its name is used as it is. Empty: a download goes next to the files its game already has."},
       {name: "REMOVE_COMPLETED", label: "Remove Completed", checkbox: true,
        help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."}]},
     {title: "Searching", fields: [
@@ -1713,7 +1715,7 @@ function renderRoots() {
           async () => { const wrong = await changeRoots({action: "remove", path: r.path}); if (wrong) toast(wrong); }))))),
       "No root folder yet. Add the folder of your library to have finished downloads put in it.") : h("div", {class: "line"}, "Loading…"),
     h("div", {class: "tabs"}, h("button", {type: "button", class: "primary", onclick: rootDialog}, "Add Root Folder"),
-      h("span", {class: "line"}, "The folder of your library, as a volume of this container. A download is put next to the updates or DLC its game already has, or else next to the game.")));
+      h("span", {class: "line"}, "The folder of your library, as a volume of this container. A download is put in the folder of its game in it, named by the Folder Name Template.")));
 }
 function rootDialog() {
   editing = null; viewing = null;
@@ -1731,7 +1733,7 @@ function rootDialog() {
     h("div", {class: "field"}, h("label", {for: "root-path"}, "Path"), h("div", {}, path, says),
       h("div", {class: "help"}, "The folder of your library in this container. It has to be a volume of the container that NSWHunter may write in.")),
     h("div", {class: "field"}, h("label", {for: "root-theirs"}, "Path in Switch-library-manager-web"), theirs,
-      h("div", {class: "help"}, "Only if that container has the same folder under another path, like /mnt/roms: NSWHunter reads from the library where the files of a game are, and has to know which folder of its own that is. Leave it empty if both containers use the same path."))],
+      h("div", {class: "help"}, "Only without a Folder Name Template, and only if that container has the same folder under another path, like /mnt/roms: NSWHunter then reads from the library where the files of a game are, and has to know which folder of its own that is."))],
     [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Cancel"), h("button", {type: "button", class: "primary", onclick: go}, "Add")]));
   $("modal").hidden = false;
   path.focus();

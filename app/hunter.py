@@ -878,7 +878,7 @@ class Hunter:
                 raise importer.ImportProblem("it went through the download client of Prowlarr, which does not say where its downloads are")
             # Moving a file to another disk takes a while: not in the way of everything else.
             done, left = await asyncio.to_thread(importer.bring, client, grab.get("path"), self.files.get(item["game_id"]) or [],
-                                                 wanted, grab.get("protocol") or "usenet")
+                                                 wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]))
         except importer.ImportProblem as e:
             text = str(e)
             if grab.get("import_error") != text:

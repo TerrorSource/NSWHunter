@@ -91,6 +91,10 @@ GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 60)
 # Importing: put a finished download in the library, as Sonarr and Radarr do. Off until it is
 # switched on; it needs a root folder, and the download folder as a volume of the container.
 IMPORT_COMPLETED = flag("IMPORT_COMPLETED")
+# The folder of a game in a root folder, written as Organize of Switch-library-manager-web
+# writes it: {TITLE_NAME} and {TITLE_ID}. Empty: a download goes next to the files its game
+# already has, as the library names them.
+FOLDER_TEMPLATE = env("FOLDER_TEMPLATE", "{TITLE_NAME} [{TITLE_ID}]")
 # After a usenet download was put in the library: take it out of the download client too.
 REMOVE_COMPLETED = flag("REMOVE_COMPLETED")
 # Where the library is: [{"path": the folder in this container, "library_path": the same folder
@@ -182,7 +186,7 @@ EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
-    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool",
+    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
@@ -283,6 +287,14 @@ def normalize(name, value):
     elif kind == "path":
         if not value or ".." in value.split("/") or "\\" in value:
             raise ValueError(f"{name}: fill in a folder, like /backup")
+    elif kind == "template":
+        if value and "{TITLE_NAME}" not in value and "{TITLE_ID}" not in value:
+            raise ValueError(f"{name}: the template needs {{TITLE_NAME}} or {{TITLE_ID}}")
+        rest = value.replace("{TITLE_NAME}", "").replace("{TITLE_ID}", "")
+        if "{" in rest or "}" in rest:
+            raise ValueError(f"{name}: only {{TITLE_NAME}} and {{TITLE_ID}} can be used")
+        if "/" in value or "\\" in value or len(value) > 120:
+            raise ValueError(f"{name}: the name of one folder, without a slash")
     elif kind == "file":
         if value and (not value.startswith("/") or ".." in value.split("/") or "\\" in value):
             raise ValueError(f"{name}: fill in the whole path of a file in the container, like /data/certs/panel.pem")

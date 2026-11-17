@@ -2,8 +2,11 @@
 and Radarr.
 
 The download client says where a finished download is. The Switch files in it are moved to the
-folder of their game in the library: next to the updates (or DLC) the game already has, or else
-next to the game itself. A torrent is linked or copied instead, so it can go on seeding.
+folder of their game in a root folder. That folder is named by the folder name template, as
+Organize of Switch-library-manager-web names it; a folder that already has the title ID of the
+game in its name is used as it is. Without a template a file goes next to the updates (or DLC)
+the game already has, or else next to the game itself. A torrent is linked or copied instead of
+moved, so it can go on seeding.
 
 Both folders have to be volumes of this container. The library is named by its root folders
 (Settings > Media Management); nothing is ever written outside one, and nothing is overwritten."""
@@ -16,6 +19,8 @@ import config
 EXTENSIONS = (".nsp", ".nsz", ".xci", ".xcz")
 TITLE_ID = re.compile(r"(?<![0-9A-Fa-f])(0[0-9A-Fa-f]{15})(?![0-9A-Fa-f])")
 PART = ".nswhunter-part"  # a file that is still being copied; the library does not read this
+# What Switch-library-manager-web leaves out of a name: what a disk refuses or a path splits on.
+ILLEGAL = re.compile(r'[/\\?%*:;=|"<>]')
 
 
 class ImportProblem(Exception):
@@ -68,6 +73,39 @@ def folder_for(files, kind):
     raise ImportProblem("the library does not say where the files of this game are")
 
 
+def piece(name):
+    """A name as a part of the name of a folder, as Switch-library-manager-web writes it:
+    without the characters a disk refuses, its spaces one by one, nothing loose at its ends."""
+    return " ".join(ILLEGAL.sub("", name).split()).strip(" -_.")
+
+
+def folder_name(game_id, name):
+    """The name of the folder of a game by the folder name template."""
+    result = config.FOLDER_TEMPLATE.replace("{TITLE_NAME}", piece(name)).replace("{TITLE_ID}", game_id.upper())
+    for empty in ("[]", "()", "<>"):
+        result = result.replace(empty, "")
+    result = ILLEGAL.sub("", " ".join(result.split())).strip(". ")
+    return result or "_"
+
+
+def game_folder(game_id, name):
+    """(the folder of a game, its root folder) by the folder name template. A folder in a root
+    folder that already has the title ID in its name is the folder of the game, whatever name
+    is around it: the library may write the name a little differently. Else it is a new folder
+    in the first root folder."""
+    wanted, by_id = folder_name(game_id, name), "{TITLE_ID}" in config.FOLDER_TEMPLATE
+    for root in config.ROOT_FOLDERS:
+        try:
+            folders = sorted(entry.name for entry in os.scandir(root["path"]) if entry.is_dir())
+        except OSError:
+            continue
+        found = [f for f in folders if f == wanted] or [f for f in folders if by_id and game_id.upper() in f.upper()]
+        if found:
+            return os.path.join(root["path"], found[0]), root["path"]
+    root = config.ROOT_FOLDERS[0]["path"]
+    return os.path.join(root, wanted), root
+
+
 def switch_files(path):
     """The Switch files of a download: the file itself, or everything in its folder."""
     if os.path.isfile(path):
@@ -105,18 +143,21 @@ def put(source, folder, keep):
     return target, "moved"
 
 
-def bring(client, reported, game_files, wanted, protocol):
+def bring(client, reported, game_files, wanted, protocol, game=None):
     """Put the Switch files of one finished download in the library.
 
     client: the download client entry. reported: where the client says the download is.
     game_files: [{"type", "path", "version"}] of the game as the library has it. wanted: "UPD"
-    or "DLC", what the download was sent for. Returns ([{"file", "folder", "how"}] of what
-    was brought in, [files that were left where they are]). ImportProblem says why not."""
+    or "DLC", what the download was sent for. game: (title ID, name) of the game; with it and
+    a folder name template, the folder comes from the template and not from the files the game
+    has. Returns ([{"file", "folder", "how"}] of what was brought in, [files that were left
+    where they are]). ImportProblem says why not."""
+    templated = bool(game and config.FOLDER_TEMPLATE)
     if not config.ROOT_FOLDERS:
         raise ImportProblem("there is no root folder yet (Settings > Media Management > Root Folders)")
     if not reported:
         raise ImportProblem(f"{client['name']} does not say where the download is")
-    if not game_files:
+    if not templated and not game_files:
         raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
     source = local_download(client, str(reported))
     try:
@@ -133,7 +174,7 @@ def bring(client, reported, game_files, wanted, protocol):
             if kind == "BASE":
                 left.append(file)  # the game itself, from a bundle: the library has it already
                 continue
-            folder, root = local_library(folder_for(game_files, kind))
+            folder, root = game_folder(*game) if templated else local_library(folder_for(game_files, kind))
             # Whatever the library says: nothing is written outside a root folder.
             if not under(os.path.realpath(folder), os.path.realpath(root)):
                 raise ImportProblem(f"{folder} is not inside the root folder {root}")

@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.9.0] - 2026-11-17
+
+### Added
+
+- **Folder Name Template** (Settings > Media Management > Importing), default `{TITLE_NAME} [{TITLE_ID}]`: the folder of a game in the root folder, written as Organize of Switch-library-manager-web writes it. A finished download goes in that folder, for example `Some Game [0100ABCD0000A000]`. The name is cleaned the way Switch-library-manager-web cleans it.
+
+### Changed
+
+- **Importing puts everything of a game in its folder by the template**, instead of next to the files the game already has. A folder in the root folder that already has the title ID of the game in its name is used as it is, whatever name is around it; a new folder is only made when there is none. With the template emptied the old way is back: next to the updates or DLC the game has, as the library names its folders.
+- With a template the "Path in Switch-library-manager-web" of a root folder is not needed: where the library says its files are is not used.
+
 ## [3.8.1] - 2026-11-17
 
 ### Changed
