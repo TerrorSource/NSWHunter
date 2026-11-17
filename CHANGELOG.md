@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.10.0] - 2026-11-17
+
+### Added
+
+- **File Browser**, as in Sonarr and Radarr: a window that lists the folders of the container, to click through instead of typing a path. A click on a folder opens it, ".." goes to the folder above, and typing in the box narrows the list to what starts like it. **Add Root Folder** opens it, and Ok adds the folder. The Local Path of a download client, the backup folder and the two certificate paths have a button for it next to their field.
+
 ## [3.9.0] - 2026-11-17
 
 ### Added

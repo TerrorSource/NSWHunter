@@ -497,6 +497,15 @@ async def do_import(hunter, body):
     await hunter.import_now(str(body["key"]))
 
 
+async def api_browse(request):
+    """The File Browser of the panel: the folders of a path in this container."""
+    try:
+        body = await request.json()
+        return web.json_response({"ok": True, **importer.browse(str(body.get("path") or "/"), bool(body.get("files")))})
+    except (ValueError, TypeError, AttributeError):
+        return refuse(400, "Invalid request")
+
+
 async def api_root_folders(request):
     return web.json_response({"ok": True, "folders": importer.root_folders()})
 
@@ -765,6 +774,7 @@ def make_app():
         web.post("/api/unsend", action(do_unsend)),
         web.post("/api/dismiss", action(do_dismiss)),
         web.post("/api/import", action(do_import)),
+        web.post("/api/browse", api_browse),
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),
     ])

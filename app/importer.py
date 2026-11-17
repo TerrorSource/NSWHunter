@@ -202,3 +202,39 @@ def root_folders():
             pass
         listed.append(entry)
     return listed
+
+
+MAX_LISTED = 1000
+
+
+def browse(path, files=False):
+    """What the File Browser of the panel shows for a path in this container: the folders in
+    it (and the files, if asked), and the folder above it. A path that is not a folder is a
+    name being typed: its folder is listed, with the names that start like it.
+
+    Returns {"folder", "parent", "entries": [{"name", "path", "folder"}], "error"}. Only names:
+    nothing of what is inside a file."""
+    # A whole path, without "..". One slash in front: two would be a path of its own kind.
+    path = os.path.normpath("/" + str(path or "").strip().lstrip("/"))
+    start = ""
+    folder = path
+    if not os.path.isdir(folder):
+        start, folder = os.path.basename(folder).lower(), os.path.dirname(folder)
+        while not os.path.isdir(folder):
+            start, folder = "", os.path.dirname(folder)  # typed further than what is there
+    entries, error = [], ""
+    try:
+        with os.scandir(folder) as found:
+            for entry in found:
+                try:
+                    is_folder = entry.is_dir()
+                    wanted = is_folder or (files and entry.is_file())
+                except OSError:
+                    continue
+                if wanted and not entry.name.startswith(".") and entry.name.lower().startswith(start):
+                    entries.append({"name": entry.name, "path": os.path.join(folder, entry.name), "folder": is_folder})
+    except OSError as e:
+        error = f"{folder} cannot be read: {e.strerror or e}"
+    entries.sort(key=lambda e: (not e["folder"], e["name"].casefold()))
+    return {"folder": folder, "parent": None if folder == "/" else os.path.dirname(folder),
+            "entries": entries[:MAX_LISTED], "error": error}
