@@ -116,6 +116,28 @@ def switch_files(path):
     return found
 
 
+PACKED = (".rar", ".zip", ".7z", ".001", ".par2")
+
+
+def holds(path):
+    """What is in a folder without Switch files, in words: so it need not be looked up on the
+    server. Counted by the ending of the names."""
+    if os.path.isfile(path):
+        return f"it is one file, {os.path.basename(path)}", os.path.splitext(path)[1].lower() in PACKED
+    count, endings = 0, {}
+    for _, _, names in os.walk(path):
+        for name in names:
+            ending = os.path.splitext(name)[1].lower() or "(no ending)"
+            ending = ".r00-.r99" if re.fullmatch(r"\.[r-z]\d\d", ending) else ending
+            endings[ending] = endings.get(ending, 0) + 1
+            count += 1
+    if not count:
+        return "the folder is empty", False
+    most = sorted(endings.items(), key=lambda e: (-e[1], e[0]))
+    listed = ", ".join(f"{n} {ending}" for ending, n in most[:6]) + (" and more" if len(most) > 6 else "")
+    return f"it holds {count} file(s): {listed}", any(e in PACKED or e == ".r00-.r99" for e in endings)
+
+
 def put(source, folder, keep):
     """Bring one file into a folder; `keep` leaves the original where it is (a torrent that goes
     on seeding). Returns (the new file, how it got there). Nothing is overwritten."""
@@ -156,7 +178,8 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
     if not config.ROOT_FOLDERS:
         raise ImportProblem("there is no root folder yet (Settings > Media Management > Root Folders)")
     if not reported:
-        raise ImportProblem(f"{client['name']} does not say where the download is")
+        raise ImportProblem(f"{client['name']} no longer has this download in its list, so it does not say where the files are, "
+                            "and no folder named after the release was found where its other downloads are")
     if not templated and not game_files:
         raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
     source = local_download(client, str(reported))
@@ -167,7 +190,11 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
                 f"the same path as in {client['name']}; or give the download client a Remote Path and a Local Path.")
         files = switch_files(source)
         if not files:
-            raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}. Is the download still packed?")
+            what, packed = holds(source)
+            advice = ("The download is still packed: let your download client unpack, or unpack it by hand and try again."
+                      if packed else "Were its files moved by hand?" if what == "the folder is empty"
+                      else "Nothing in it is a file for the Switch.")
+            raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
         done, left = [], []
         for file in files:
             kind = kind_of(os.path.basename(file), wanted)

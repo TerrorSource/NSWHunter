@@ -2,6 +2,13 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.11.2] - 2026-11-17
+
+### Changed
+
+- **An import that finds no Switch files says what the folder holds**: "it holds 14 file(s): 12 .r00-.r99, 1 .nfo, 1 .rar. The download is still packed", or that the folder is empty. Before it only asked whether the download was still packed.
+- **A finished download that its client no longer lists is still found**, if it was taken out of the history of the download client: NSWHunter looks for a folder named after the release where the other finished downloads of that client are. If there is none, the message says that the client no longer has the download in its list.
+
 ## [3.11.1] - 2026-11-17
 
 ### Changed

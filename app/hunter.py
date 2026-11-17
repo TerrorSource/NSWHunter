@@ -839,6 +839,9 @@ class Hunter:
         grab["percent"] = (known or {}).get("percent")
         if (known or {}).get("path"):
             grab["path"] = known["path"]  # where the download client says the download is
+            # And where this client keeps its finished downloads: for one it no longer lists.
+            if grab.get("client"):
+                self.state.setdefault("download_folders", {})[grab["client"]] = os.path.dirname(str(known["path"]).rstrip("/"))
         if state == "failed":
             self.tell_later.append(self.drop(
                 item, f"Download failed: {grab['title']}. The next release gets its turn.",
@@ -877,7 +880,8 @@ class Hunter:
             if client["type"] == "prowlarr":
                 raise importer.ImportProblem("it went through the download client of Prowlarr, which does not say where its downloads are")
             # Moving a file to another disk takes a while: not in the way of everything else.
-            done, left = await asyncio.to_thread(importer.bring, client, grab.get("path"), self.files.get(item["game_id"]) or [],
+            done, left = await asyncio.to_thread(importer.bring, client, grab.get("path") or self.guessed_path(client, grab),
+                                                 self.files.get(item["game_id"]) or [],
                                                  wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]))
         except importer.ImportProblem as e:
             text = str(e)
@@ -902,6 +906,19 @@ class Hunter:
             except clients.ServiceError as e:
                 self.event(f"Imported, but not removed from {client['name']}: {e}", "warn")
         return True
+
+    def guessed_path(self, client, grab):
+        """Where a finished download probably is when its client no longer lists it (taken out
+        of its history, by the client itself or by hand): a folder named after the release,
+        next to the other finished downloads of that client. None if there is no such folder."""
+        folder = self.state.get("download_folders", {}).get(client["id"])
+        if not folder:
+            return None
+        for name in dict.fromkeys((clients.nzb_filename(grab["title"])[:-4], grab["title"])):
+            guess = os.path.join(folder, name)
+            if os.path.isdir(importer.local_download(client, guess)):
+                return guess
+        return None
 
     async def import_now(self, key):
         """The button "Try the import again" of the Queue."""
