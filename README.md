@@ -35,7 +35,7 @@ At the first start NSWHunter makes the user `admin` with a password it makes up,
 
 With that password the panel lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until then the lines are in the log at every start; after that they are gone and the made-up password no longer works.
 
-Forgot your password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: a new password is made up and written to the log. Lost the phone of your two-step login (optional, Settings > General)? Remove `TOTP_SECRET` the same way.
+Forgot your password, or lost the phone of your two-step login (optional, Settings > General)? Put an empty file named `reset-password` in the data folder and restart the container: a new password is made up and written to the log, and two-step login is off. Your username and all other settings stay.
 
 ## Setting up
 

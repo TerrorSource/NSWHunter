@@ -52,6 +52,9 @@ VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
 # The password the first start made up, kept until the user has chosen one of their own.
 INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial-password")
 INITIAL_PASSWORD = None  # that password, while it is the one that works (set by first_login)
+# An empty file with this name in the data folder asks for a new made-up password at the next start.
+RESET_FILE = os.path.join(DATA_DIR, "reset-password")
+WAS_RESET = False  # whether this start did that
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 COVER_DIR = os.path.join(DATA_DIR, "covers")  # the small pictures of the games, fetched once
 
@@ -488,13 +491,23 @@ def shown_providers():
 # ---------------------------------------------------------------- the settings file
 
 
+class SettingsBroken(Exception):
+    """The settings file is there and cannot be read: nothing may be written over it."""
+
+
 def saved():
+    """What the settings file holds. No file: nothing yet. A file that is damaged is no reason to
+    start anew: writing over it would lose every key and password in it."""
     try:
         with open(SETTINGS_FILE) as f:
             data = json.load(f)
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError:
         return {}
-    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS or k in PRIVATE} if isinstance(data, dict) else {}
+    except ValueError as e:
+        raise SettingsBroken(f"{SETTINGS_FILE} is damaged and cannot be read ({e})") from e
+    if not isinstance(data, dict):
+        raise SettingsBroken(f"{SETTINGS_FILE} is damaged: it does not hold settings")
+    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS or k in PRIVATE}
 
 
 def write(data):
@@ -586,7 +599,18 @@ def first_login():
     """Without a password the panel would be open: make one up for the user "admin" and keep
     it readable until the user has chosen one of their own. Returns the made-up password while
     it still has to be changed, else None. Called once at start."""
-    global PANEL_PASSWORD, INITIAL_PASSWORD
+    global PANEL_PASSWORD, INITIAL_PASSWORD, WAS_RESET
+    if os.path.exists(RESET_FILE):
+        # Asked for by someone who can write in the data folder: a new made-up password, and no
+        # second step. Safer than editing the settings file by hand, where a slip loses it all.
+        try:
+            os.remove(RESET_FILE)
+        except OSError:
+            pass  # it cannot be taken away, so it would ask again at every start: not done
+        else:
+            PANEL_PASSWORD, WAS_RESET = "", True
+            if TOTP_SECRET:
+                set_totp("")
     if not PANEL_PASSWORD:
         password = secrets.token_urlsafe(12)
         os.makedirs(DATA_DIR, exist_ok=True)

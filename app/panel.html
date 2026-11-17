@@ -1607,6 +1607,8 @@ const FORMS = {
       {name: "PANEL_PASSWORD", label: "Password", secret: true, required: true,
        help: "At least 8 characters; only a hash of it is kept. After a change every other browser has to log in again."},
       {name: "PASSWORD_AGAIN", label: "Password Confirmation", secret: true, required: true, local: true},
+      {name: "CURRENT_PASSWORD", label: "Current Password", secret: true, required: true, local: true, current: true,
+       help: "Only needed to change the username or the password. Without it they stay as they are, whatever is in the fields above."},
       {name: "SSL_ENABLED", label: "Enable HTTPS", checkbox: true, help: "Also serve the panel over HTTPS, on a port of its own. HTTP keeps working."},
       {name: "SSL_PORT", label: "HTTPS Port", number: true,
        help: "The container has to publish this port: add it under ports in your compose file, like 3443:3443."},
@@ -1652,7 +1654,9 @@ function control(f, values, secrets, where) {
   if (f.secret) {
     const set = secrets[f.name], wipe = clearing.has(where + f.name);
     return h("div", {class: "row"},
-      h("input", {id, name: f.name, type: "password", autocomplete: "new-password", disabled: wipe,
+      h("input", {id, name: f.name, type: "password", autocomplete: f.current ? "current-password" : "new-password", disabled: wipe,
+                  // A key of a service is no login: a password manager should not fill it in or offer to save it.
+                  ...(f.name.startsWith("PANEL_") || f.local ? {} : {"data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "true", "data-form-type": "other"}),
                   placeholder: wipe ? "will be cleared on save" : f.local ? "" : set ? "set; leave empty to keep it" : "not set"}),
       // A key can be emptied; the password of the panel can only be replaced.
       set && !f.required ? h("button", {type: "button", class: "small", onclick: () => { wipe ? clearing.delete(where + f.name) : clearing.add(where + f.name); rerender(); }},
@@ -1946,7 +1950,7 @@ async function totpDialog(action) {
         h("div", {class: "sub"}, "Type: time based · 6 digits · 30 seconds"))),
     h("p", {}, "2. Fill in the six digits the app shows now."),
     h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says)),
-    h("p", {class: "sub"}, "Lost your phone later? Stop the container, remove the line TOTP_SECRET from /data/settings.json and start it again.")]
+    h("p", {class: "sub"}, "Lost your phone later? Put an empty file named reset-password in the data folder and restart the container: you get a new password in its log, and two-step login is off.")]
     : [h("p", {}, "Fill in a code of your authenticator app to switch two-step login off."),
        h("div", {class: "field"}, h("label", {for: "totp-code"}, "Code"), h("div", {}, code, says))];
   put($("modal"), dialog(begun ? "Set Up Two-Step Login" : "Switch Off Two-Step Login", body,
@@ -1963,12 +1967,14 @@ async function saveForm() {
     if ((values.PANEL_PASSWORD || values.PASSWORD_AGAIN) && values.PANEL_PASSWORD !== values.PASSWORD_AGAIN) return toast("The password and its confirmation are not the same.");
     delete values.PASSWORD_AGAIN;
   }
+  const current = values.CURRENT_PASSWORD;
+  delete values.CURRENT_PASSWORD;
   busy.add("save"); renderToolbar();
   try {
-    const {data} = await request("/api/settings", {values, clear: [...clearing].filter(n => n.startsWith("f")).map(n => n.slice(1))});
+    const {data} = await request("/api/settings", {values, current_password: current, clear: [...clearing].filter(n => n.startsWith("f")).map(n => n.slice(1))});
     if (!data.ok) { toast(data.error || "Saving failed"); return; }
     settings = data; clearing.clear(); dirty = false;
-    toast("Settings saved");
+    toast(data.login_changed ? "Settings saved. Your login was changed: every other browser has to log in again." : "Settings saved");
     await load();
     renderForm();
   } catch (err) {

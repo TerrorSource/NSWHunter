@@ -2,6 +2,21 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.10.2] - 2026-11-17
+
+### Security
+
+- **The login only changes with the current password.** Settings > General has a field **Current Password**; without it the username and the password stay as they are, whatever is in their fields. Before, saving that page for something else (the backup folder, say) also saved the username and password fields as they stood, so a password manager that had filled them in changed the login without a word. When the login does change, the panel says so and the Events page records it.
+- The fields for API keys and the backup password ask password managers to leave them alone.
+
+### Added
+
+- **Resetting a lost password without editing a file by hand.** Put an empty file named `reset-password` in the data folder and restart the container: NSWHunter makes up a new password, writes it to the log of the container, switches two-step login off and logs everyone out. The username and every other setting stay.
+
+### Fixed
+
+- **A damaged settings file is never written over.** If `settings.json` cannot be read, NSWHunter no longer starts with empty settings and saves those over it, which lost every key and password. It stops, says why in the log, and leaves the file as it is.
+
 ## [3.10.1] - 2026-11-17
 
 ### Changed

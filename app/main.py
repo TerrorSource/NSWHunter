@@ -546,6 +546,13 @@ async def api_settings_save(request):
     try:
         body = await request.json()
         values, clear = dict(body.get("values") or {}), list(body.get("clear") or [])
+        # A form that is saved for something else must not change the login on the way, as a
+        # password manager that fills in its fields would: that takes the current password.
+        new_user = str(values.get("PANEL_USER", config.PANEL_USER)).strip()
+        if (new_user != config.PANEL_USER or str(values.get("PANEL_PASSWORD") or "").strip()) \
+                and not config.check_password(str(body.get("current_password") or "")):
+            return web.json_response({"ok": False, "error": "Fill in your current password to change the username or the password. "
+                                      "If you did not mean to change them: empty the password fields and put the username back."}, status=400)
         after = config.overlay(values, clear)
         if after.SSL_ENABLED and any(name.startswith("SSL_") for name in values):
             if after.SSL_PORT == config.PORT:
@@ -563,9 +570,11 @@ async def api_settings_save(request):
         await secure(hunter)
     logs.setup()
     request.app["wake"].set()
-    response = web.json_response({"ok": True, **config.editable()})
-    if login != (config.PANEL_USER, config.PANEL_PASSWORD):
+    changed_login = login != (config.PANEL_USER, config.PANEL_PASSWORD)
+    response = web.json_response({"ok": True, "login_changed": changed_login, **config.editable()})
+    if changed_login:
         # A new login: every other browser has to log in again, this one stays.
+        hunter.event(f"The login was changed in the settings: the username is {config.PANEL_USER}", "warn")
         auth.end_all()
         session_cookie(request, response)
     return response
@@ -798,10 +807,20 @@ async def serve():
 
 
 if __name__ == "__main__":
-    config.load_saved()
+    try:
+        config.load_saved()
+    except config.SettingsBroken as e:
+        # Going on would write new settings over the file, and lose what is in it.
+        logs.console(f"NSWHunter {__version__} does not start: {e}.")
+        logs.console("The file is left as it is. Repair it, or put settings.json from a backup in its place "
+                     "(a backup is a zip with that file in it). To start with empty settings, rename the file.")
+        raise SystemExit(1) from None
     logs.setup()
     log(f"NSWHunter {__version__} starting on port {config.PORT}")
     made_up = config.first_login()
+    if config.WAS_RESET:
+        auth.end_all()  # whoever was logged in with the old password is logged out
+        log("The password was reset because the file reset-password was in the data folder. Two-step login is off.")
     if made_up:
         # Shown at every start until the user has chosen a password of their own. Only here,
         # in the output of the container: not in the log files and not in the panel.
