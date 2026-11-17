@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.10.1] - 2026-11-17
+
+### Changed
+
+- The File Browser has a narrow Type column, and the table of root folders leaves out the path the library has for a folder while a Folder Name Template is set, where it plays no part.
+
 ## [3.10.0] - 2026-11-17
 
 ### Added

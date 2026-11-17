@@ -260,6 +260,7 @@
   #browse-path:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
   .browse { max-height: 50vh; overflow-y: auto; margin-top: 16px; }
   .browse tr.pick { cursor: pointer; }
+  .browse th:first-child, .browse td:first-child { width: 70px; }
   .browsebtn { display: inline-flex; padding: 6px 9px; flex: none; }
   .sub.bad { color: var(--bad); overflow-wrap: anywhere; }
   .abouttop { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
@@ -1740,11 +1741,13 @@ async function changeRoots(body) {
 }
 function renderRoots() {
   if (page !== "media" || !settings) return;
+  const templated = settings.values.FOLDER_TEMPLATE !== "";
   put($("extra"),
     h("h2", {}, "Root Folders"),
-    roots ? table(["Path", "Path in Switch-library-manager-web", "Free Space#", ""], roots.map(r => h("tr", {},
+    // With a Folder Name Template the path the library has for the folder plays no part, and is left out.
+    roots ? table(["Path", templated ? null : "Path in Switch-library-manager-web", "Free Space#", ""].filter(c => c !== null), roots.map(r => h("tr", {},
         h("td", {class: "mono"}, r.path, r.ok ? null : [" ", h("span", {class: "label error", title: "The folder is not there in this container, or NSWHunter may not write in it"}, "cannot be written")]),
-        h("td", {class: "mono"}, r.library_path === r.path ? "the same" : r.library_path),
+        templated ? null : h("td", {class: "mono"}, r.library_path === r.path ? "the same" : r.library_path),
         h("td", {class: "num"}, r.free === null ? "–" : size(r.free) || "0 MB"),
         h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove this root folder. The folder and what is in it stay.",
           async () => { const wrong = await changeRoots({action: "remove", path: r.path}); if (wrong) toast(wrong); }))))),
