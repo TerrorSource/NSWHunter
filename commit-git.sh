@@ -100,16 +100,16 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker build -q -t "${LOCAL_TAG}:prepush" . > "$TEST_LOG" 2>&1 \
     || { tail -20 "$TEST_LOG"; echo "🛑 Building the image failed — nothing committed."; exit 1; }
   docker run --rm --entrypoint sh -v "$(pwd)":/src:ro -w /src "${LOCAL_TAG}:prepush" -c \
-    "pip install -q --root-user-action=ignore -r requirements-dev.txt >/dev/null 2>&1 && python3 -m pytest" > "$TEST_LOG" 2>&1 \
+    "pip install -q --root-user-action=ignore -r tests/requirements.txt >/dev/null 2>&1 && python3 -m pytest tests" > "$TEST_LOG" 2>&1 \
     || { tail -25 "$TEST_LOG"; echo "🛑 Tests failed — nothing committed."; exit 1; }
   tail -1 "$TEST_LOG"
 elif "$PY_BIN" -c "import pytest, aiohttp" 2>/dev/null; then
   echo "🧪 Tests…"
-  "$PY_BIN" -m pytest > "$TEST_LOG" 2>&1 || { tail -25 "$TEST_LOG"; echo "🛑 Tests failed — nothing committed."; exit 1; }
+  "$PY_BIN" -m pytest tests > "$TEST_LOG" 2>&1 || { tail -25 "$TEST_LOG"; echo "🛑 Tests failed — nothing committed."; exit 1; }
   tail -1 "$TEST_LOG"
 else
   echo "⚠️  No Docker and no pytest/aiohttp for $PY_BIN — tests skipped."
-  echo "   Once: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt"
+  echo "   Once: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r tests/requirements.txt"
 fi
 rm -f "$TEST_LOG"
 

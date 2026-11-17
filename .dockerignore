@@ -6,8 +6,6 @@ data/
 tests/
 commit-git.sh
 docker-compose*.yml
-requirements-dev.txt
-pytest.ini
 *.md
 !README.md
 !CHANGELOG.md

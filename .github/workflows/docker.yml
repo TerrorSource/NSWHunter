@@ -32,9 +32,9 @@ jobs:
           cache: pip
           cache-dependency-path: |
             requirements.txt
-            requirements-dev.txt
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m pytest -W ignore::DeprecationWarning
+            tests/requirements.txt
+      - run: pip install -r requirements.txt -r tests/requirements.txt
+      - run: python -m pytest tests -W ignore::DeprecationWarning
       # Known vulnerabilities in the Python packages? Then the build stops.
       - name: pip-audit
         run: |
