@@ -2,6 +2,18 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.2.0] - 2026-11-17
+
+### Added
+
+- **Pictures on the Games page.** Every row starts with the small picture of the game, as Switch-library-manager-web has it. NSWHunter fetches a picture once, keeps it in `/data/covers` and hands it to the panel itself, so your browser loads nothing from elsewhere. A game the library has no picture of gets a grey square.
+- **System > Tasks**, as in Sonarr and Radarr: what runs by itself (Check Health, Library Sync, Rss Sync, Search Missing, Refresh Monitored Downloads, Refresh Version List, Backup), how often, when it last ran, how long that took and when it runs next. Every task has a button to run it now.
+
+### Changed
+
+- **A log file per day**, named `nswhunter_2026-03-25.txt`. The setting for the size of a log file made way for **Log Retention**: how many days of log files are kept (7, 14, 30 or 90; default 14). Log files of the old kind are removed once they are older than that.
+- The README is shorter again.
+
 ## [3.1.1] - 2026-11-17
 
 ### Changed

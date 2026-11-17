@@ -5,6 +5,8 @@ Used by the tests, and runnable by itself to try the panel without the real serv
     python tests/fakes.py            (listens on port 9000)
 """
 import base64
+import struct
+import zlib
 
 from aiohttp import web
 
@@ -89,6 +91,18 @@ RSS = ('<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" '
        'xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel><title>Fake</title>{}</channel></rss>')
 
 
+def png(red, green, blue, side=40):
+    """A small square picture in one colour: a real PNG, so a browser shows it."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    row = b"\x00" + bytes((red, green, blue)) * side
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * side)) + chunk(b"IEND", b""))
+
+
+PNG = png(200, 40, 60)
+
+
 def bencode(value):
     """Enough of bencode to make a small torrent file."""
     if isinstance(value, int):
@@ -121,6 +135,7 @@ def make_fakes():
     app["edits"] = []  # messages that were rewritten after a press
     app["progress"] = {}  # NZBGet: id -> (MB in total, MB left) of what is in the queue
     app["discord"] = []  # what was posted to the Discord webhook
+    app["covers"] = []  # pictures of games that were asked for
     app["fetched"] = []  # download links of the direct indexers that were followed
     app["indexer_ids"] = []
 
@@ -128,6 +143,27 @@ def make_fakes():
         if request.headers.get("Authorization") != "Bearer slm_test":
             return web.Response(status=401)
         return web.json_response(app["library"])
+
+    async def titles(request):
+        """As the API of switch-library-manager-web: every game with where its pictures are. One
+        picture is its own, one is on another server, one game has none."""
+        if request.headers.get("Authorization") != "Bearer slm_test":
+            return web.Response(status=401)
+        # The same stand-in under another name: to NSWHunter that is another server.
+        elsewhere = f"{request.scheme}://localhost:{request.url.port}/elsewhere/hades.png"
+        return web.json_response({
+            "0100623017A58000": {"iconUrl": "/covers/big.jpg", "thumbnailUrl": "/covers/0100623017A58000.jpg"},
+            "0100aaaa0000a000": {"iconUrl": elsewhere},
+            "0100BBBB0000B000": {"iconUrl": ""},
+            "0100DDDD0000D000": {"thumbnailUrl": "/covers/not-a-picture"}})
+
+    async def cover(request):
+        app["covers"].append((request.path, request.headers.get("Authorization")))
+        if request.path.startswith("/covers/") and request.headers.get("Authorization") != "Bearer slm_test":
+            return web.Response(status=401)
+        if request.path.endswith("not-a-picture"):
+            return web.Response(text="<html>login</html>", content_type="text/html")
+        return web.Response(body=PNG, content_type="image/png")
 
     def keyed(handler):
         """Like Prowlarr: nothing without the API key."""
@@ -294,6 +330,9 @@ def make_fakes():
         web.get("/tor/get/{how}", tor_get),
         web.post("/discord/{token}", discord),
         web.get("/export/library.json", export),
+        web.get("/api/titles", titles),
+        web.get("/covers/{name}", cover),
+        web.get("/elsewhere/{name}", cover),
         web.get("/api/v1/system/status", keyed(status)),
         web.get("/api/v1/search", search),
         web.get("/api/v1/indexer", keyed(indexers)),

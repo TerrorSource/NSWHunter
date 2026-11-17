@@ -1,5 +1,7 @@
 """Direct indexers next to Prowlarr, several connections, the games list, backups and the log."""
+import datetime
 import os
+import shutil
 import time
 
 import pytest
@@ -9,6 +11,7 @@ import config
 import hunter as hunter_module
 import indexers
 import logs
+from fakes import PNG
 from test_hunter import ALAN, HADES, HOLLOW, providers, run, titles
 
 NAB = {"id": "nb", "type": "newznab", "name": "FakeNab", "enabled": True, "url": "BASE/nab", "api_key": "nab_test",
@@ -187,11 +190,21 @@ def test_only_names_of_backups_reach_a_file():
         config.BACKUP_FOLDER = saved
 
 
-def test_log_levels(capsys):
-    saved = config.LOG_LEVEL, config.LOG_DIR, config.LOG_SIZE_MB
+def test_log_levels_and_a_file_per_day(capsys):
+    saved = config.LOG_LEVEL, config.LOG_DIR, config.LOG_KEEP_DAYS
     config.LOG_DIR = os.path.join(config.DATA_DIR, "logs-test")
+    shutil.rmtree(config.LOG_DIR, ignore_errors=True)
+    os.makedirs(config.LOG_DIR)
+    today = datetime.date.today()
     try:
-        config.LOG_LEVEL = "info"
+        # Files of other days: two inside what is kept, one too old, one of an older version, one of someone else.
+        old = os.path.join(config.LOG_DIR, "nswhunter.txt.1")
+        for name in (f"nswhunter_{today - datetime.timedelta(days=13)}.txt", f"nswhunter_{today - datetime.timedelta(days=15)}.txt",
+                     "nswhunter.txt.1", "notes.txt"):
+            open(os.path.join(config.LOG_DIR, name), "w").close()
+        long_ago = time.time() - 20 * 86400
+        os.utime(old, (long_ago, long_ago))
+        config.LOG_LEVEL, config.LOG_KEEP_DAYS = "info", 14
         logs.setup()
         logs.info("said at info")
         logs.debug("a search")
@@ -205,12 +218,14 @@ def test_log_levels(capsys):
         out = capsys.readouterr().out
         assert "said at info" in out and "a search" not in out and "a verdict" not in out
         assert "[debug] another search" in out and "another verdict" not in out and "[trace] a third verdict" in out
-        # The files hold the same lines, but never what is for the output of the container only.
-        text = open(os.path.join(config.LOG_DIR, "nswhunter.txt")).read()
+        # The file of today holds the same lines, but never what is for the output of the container only.
+        text = open(os.path.join(config.LOG_DIR, f"nswhunter_{today}.txt")).read()
         assert "said at info" in text and "[trace] a third verdict" in text and "made-up password" not in text
         assert "the made-up password" in out
+        assert sorted(os.listdir(config.LOG_DIR)) == sorted([
+            f"nswhunter_{today}.txt", f"nswhunter_{today - datetime.timedelta(days=13)}.txt", "notes.txt"])
     finally:
-        config.LOG_LEVEL, config.LOG_DIR, config.LOG_SIZE_MB = saved
+        config.LOG_LEVEL, config.LOG_DIR, config.LOG_KEEP_DAYS = saved
         logs.setup()
 
 
@@ -280,4 +295,81 @@ def test_search_all_searches_every_game_in_the_next_round():
         assert hunter.search_all() == 5
         await hunter.round()
         assert len(fakes["queries"]) == searched + 1 + 1 + 5
+    run(test)
+
+
+def test_games_get_their_picture_from_the_library():
+    async def test(hunter, fakes):
+        await hunter.round()
+        games = {g["name"]: g for g in hunter.library()}
+        assert games["Alan Wake Remastered"]["cover"] and games["Hades"]["cover"] and not games["Stardew Valley"]["cover"]
+        assert not games["Pokémon™ Scarlet"]["cover"]  # the library has no picture of it
+        # The small picture is preferred; it is fetched once, with the key, and then kept.
+        assert await hunter.cover(ALAN) == ("image/png", PNG)
+        assert await hunter.cover(ALAN) == ("image/png", PNG)
+        assert fakes["covers"] == [("/covers/0100623017A58000.jpg", "Bearer slm_test")]
+        assert [n.split("_")[0] for n in os.listdir(config.COVER_DIR)] == [ALAN]
+        # A picture on another server is fetched without the key of the library.
+        assert await hunter.cover(HADES) == ("image/png", PNG)
+        assert fakes["covers"][-1] == ("/elsewhere/hades.png", None)
+        # What is not a picture is not passed on, and not asked for again at once.
+        assert await hunter.cover(HOLLOW) is None and await hunter.cover(HOLLOW) is None
+        assert len(fakes["covers"]) == 3
+        for nothing in ("0100CCCC0000C000", "../settings.json", "0100623017A58000/../x", ""):
+            assert await hunter.cover(nothing) is None
+    shutil.rmtree(config.COVER_DIR, ignore_errors=True)
+    run(test)
+    shutil.rmtree(config.COVER_DIR, ignore_errors=True)
+
+
+def test_without_pictures_everything_else_works():
+    async def test(hunter, fakes):
+        await hunter.round()
+        assert hunter.status["error"] is None and all(s["ok"] for s in hunter.state["services"].values())
+        assert not any(g["cover"] for g in hunter.library()) and len(titles(hunter, ALAN)) == 4
+    # The library does not know the address of the pictures: an older version of it, say.
+    saved = hunter_module.clients.cover_addresses
+
+    async def unknown(session):
+        raise hunter_module.clients.ServiceError("Library: HTTP 404")
+    hunter_module.clients.cover_addresses = unknown
+    try:
+        run(test)
+    finally:
+        hunter_module.clients.cover_addresses = saved
+
+
+def test_tasks_say_when_they_ran_and_can_be_run_by_hand():
+    async def test(hunter, fakes):
+        await hunter.round()
+        hunter.status["next_run"] = int(time.time()) + 3600
+        tasks = {t["name"]: t for t in hunter.tasks()}
+        assert list(tasks) == ["health", "library", "rss", "search", "downloads", "versions", "backup"]
+        assert all(t["last"] and t["duration"] is not None for n, t in tasks.items() if n != "downloads")
+        assert (tasks["health"]["interval"], tasks["search"]["interval"], tasks["backup"]["interval"]) == (3600, 86400, 7 * 86400)
+        # Nothing in the queue: the downloads are not asked about, and are not planned.
+        assert tasks["downloads"]["last"] is None and tasks["downloads"]["next"] is None
+        assert tasks["rss"]["next"] == hunter.status["next_run"]
+        # Searched a moment ago: the next search is a day away, the next backup a week.
+        assert 86000 < tasks["search"]["next"] - time.time() < 86500
+        assert 6.9 * 86400 < tasks["backup"]["next"] - time.time() < 7.1 * 86400
+        queries = len(fakes["queries"])
+        assert await hunter.run_task("rss") is False and len(fakes["queries"]) == queries + 1
+        # Search Missing is done by a round that starts now.
+        assert await hunter.run_task("search") is True and hunter.state["searched"] == {}
+        await hunter.grab(ALAN, hunter.state["items"][ALAN]["candidates"][0]["guid"])
+        fakes["progress"]["1"] = (400, 100)
+        assert await hunter.run_task("downloads") is False
+        assert hunter.state["items"][ALAN]["grab"]["percent"] == 75 and hunter.tasks()[4]["last"]
+        hunter.state["tasks"].pop("backup")
+        await hunter.run_task("backup")
+        assert hunter.state["tasks"]["backup"]["last"] and hunter_module.backup.listing()
+        hunter.versions = {}
+        await hunter.run_task("versions")
+        assert len(hunter.versions) == 4
+        with pytest.raises(hunter_module.clients.ServiceError, match="Unknown task"):
+            await hunter.run_task("format-disk")
+        async with hunter.lock:
+            with pytest.raises(hunter_module.clients.ServiceError, match="A round is running"):
+                await hunter.run_task("library")
     run(test)

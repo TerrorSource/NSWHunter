@@ -100,6 +100,51 @@ async def titledb_versions(session):
 # ---------------------------------------------------------------- download clients
 
 
+IMAGES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
+MAX_COVER = 3 * 2**20
+
+
+async def cover_addresses(session):
+    """{title ID: address of its small picture} of every game switch-library-manager-web knows
+    one of. The address is as that app gives it: its own path, or one on another server."""
+    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY else {}
+    try:
+        async with session.get(f"{config.SLM_URL}/api/titles", headers=headers, timeout=LONG) as r:
+            await _check(r, "Library")
+            titles = await _json(r, LARGE)
+    except Exception as e:
+        raise _wrap("Library", e) from e
+    found = {}
+    for title_id, title in titles.items() if isinstance(titles, dict) else []:
+        if isinstance(title, dict):
+            address = title.get("thumbnailUrl") or title.get("iconUrl") or ""
+            if isinstance(address, str) and address:
+                found[str(title_id).upper()] = address
+    return found
+
+
+async def cover(session, address):
+    """Fetch one picture. Returns (content type, bytes). The key of the library only goes
+    along to the library itself, never to another server its address may point at."""
+    own = address.startswith("/")
+    if own:
+        address = config.SLM_URL + address
+    if not address.startswith(("http://", "https://")):
+        raise ServiceError("Cover: not an address")
+    same = urlsplit(address).netloc == urlsplit(config.SLM_URL).netloc
+    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY and (own or same) else {}
+    try:
+        async with session.get(address, headers=headers, timeout=SHORT) as r:
+            await _check(r, "Cover")
+            kind = r.content_type
+            data = await _read(r, MAX_COVER)
+    except Exception as e:
+        raise _wrap("Cover", e) from e
+    if kind not in IMAGES or not data:
+        raise ServiceError("Cover: the answer is not a picture")
+    return kind, data
+
+
 def basic(username, password):
     """The header of a login by name and password."""
     return {"Authorization": "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()}

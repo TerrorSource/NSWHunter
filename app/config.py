@@ -53,6 +53,7 @@ VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
 INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial-password")
 INITIAL_PASSWORD = None  # that password, while it is the one that works (set by first_login)
 LOG_DIR = os.path.join(DATA_DIR, "logs")
+COVER_DIR = os.path.join(DATA_DIR, "covers")  # the small pictures of the games, fetched once
 
 # Switch-library-manager-web: the library and what is missing.
 SLM_URL = url("SLM_URL")
@@ -131,8 +132,8 @@ PANEL_HOSTS = env("PANEL_HOSTS").lower().replace(" ", "")
 # release that was judged, with the verdict.
 LOG_LEVELS = ("info", "debug", "trace")
 LOG_LEVEL = choice("LOG_LEVEL", LOG_LEVELS, "info")
-LOG_SIZES = (1, 2, 5, 10, 25)  # MB per log file; five older files are kept
-LOG_SIZE_MB = choice("LOG_SIZE_MB", LOG_SIZES, 1)
+LOG_KEEPS = (7, 14, 30, 90)  # there is a log file per day; this many days of them are kept
+LOG_KEEP_DAYS = choice("LOG_KEEP_DAYS", LOG_KEEPS, 14)
 
 # Backups of the settings and the state. A relative folder is under DATA_DIR.
 BACKUP_FOLDER = env("BACKUP_FOLDER", "/backup")
@@ -158,7 +159,7 @@ EDITABLE = {
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS,
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
-    "LOG_LEVEL": LOG_LEVELS, "LOG_SIZE_MB": LOG_SIZES,
+    "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
     "BACKUP_FOLDER": "path", "BACKUP_INTERVAL_DAYS": range(1, 91), "BACKUP_RETENTION_DAYS": range(1, 366),
     "UI_THEME": THEMES, "UI_DATE_FORMAT": DATE_FORMATS, "UI_TIME_FORMAT": TIME_FORMATS,
     "UI_RELATIVE_DATES": "bool",

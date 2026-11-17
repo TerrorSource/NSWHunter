@@ -82,7 +82,7 @@ def test_empty_secret_keeps_the_old_one_and_clear_removes_it():
     {"PANEL_PASSWORD": "short"},             # at least 8 characters
     {"PANEL_HOSTS": "http://nas.example"},   # names only
     {"LOG_LEVEL": "loud"},
-    {"LOG_SIZE_MB": "3"},
+    {"LOG_KEEP_DAYS": "3"},
     {"BACKUP_INTERVAL_DAYS": "0"},
     {"BACKUP_RETENTION_DAYS": "400"},
     {"BACKUP_FOLDER": "../elsewhere"},
@@ -98,11 +98,11 @@ def test_wrong_values_change_nothing(values):
 
 
 def test_numbers_and_choices_of_the_new_pages():
-    config.update({"SEARCH_INTERVAL_HOURS": "48", "LOG_LEVEL": "Trace", "LOG_SIZE_MB": "5", "BACKUP_FOLDER": "/backup",
+    config.update({"SEARCH_INTERVAL_HOURS": "48", "LOG_LEVEL": "Trace", "LOG_KEEP_DAYS": "30", "BACKUP_FOLDER": "/backup",
                    "BACKUP_INTERVAL_DAYS": "3", "BACKUP_RETENTION_DAYS": 60, "UI_THEME": "dark",
                    "UI_DATE_FORMAT": "iso", "UI_TIME_FORMAT": "24", "UI_RELATIVE_DATES": False})
     shown = config.editable()["values"]
-    assert (shown["SEARCH_INTERVAL_HOURS"], shown["LOG_LEVEL"], shown["LOG_SIZE_MB"]) == (48, "trace", 5)
+    assert (shown["SEARCH_INTERVAL_HOURS"], shown["LOG_LEVEL"], shown["LOG_KEEP_DAYS"]) == (48, "trace", 30)
     assert (shown["BACKUP_INTERVAL_DAYS"], shown["BACKUP_RETENTION_DAYS"], shown["UI_RELATIVE_DATES"]) == (3, 60, False)
 
 
@@ -418,16 +418,39 @@ def test_api_history_search_all_test_all_and_log_files():
         config.LOG_DIR = os.path.join(config.DATA_DIR, "logs-api")
         os.makedirs(config.LOG_DIR, exist_ok=True)
         try:
-            for name, text in (("nswhunter.txt", "newest"), ("nswhunter.txt.1", "older"), ("notes.txt", "not a log")):
+            for name, text in (("nswhunter_2026-03-25.txt", "newest"), ("nswhunter_2026-03-24.txt", "older"), ("notes.txt", "not a log")):
                 with open(os.path.join(config.LOG_DIR, name), "w") as f:
                     f.write(text)
             data = await (await client.get("/api/logfiles")).json()
-            assert [f["name"] for f in data["files"]] == ["nswhunter.txt", "nswhunter.txt.1"] and data["files"][0]["size"] == 6
-            r = await client.get("/api/logfile", params={"name": "nswhunter.txt.1"})
+            assert [f["name"] for f in data["files"]] == ["nswhunter_2026-03-25.txt", "nswhunter_2026-03-24.txt"] and data["files"][0]["size"] == 6
+            r = await client.get("/api/logfile", params={"name": "nswhunter_2026-03-24.txt"})
             assert r.status == 200 and await r.text() == "older" and "attachment" in r.headers["Content-Disposition"]
-            for wrong in ("notes.txt", "../settings.json", "nswhunter.txt.22", ""):
+            for wrong in ("notes.txt", "../settings.json", "nswhunter_2026-03-25.txt/../../settings.json", "nswhunter_today.txt", ""):
                 assert (await client.get("/api/logfile", params={"name": wrong})).status == 404
         finally:
             shutil.rmtree(config.LOG_DIR, ignore_errors=True)
             config.LOG_DIR = saved
     api(test)
+
+
+def test_api_covers_and_tasks():
+    async def test(client):
+        hunter = client.server.app["hunter"]
+
+        async def picture(game_id):
+            return ("image/png", b"png bytes") if game_id == "0100AAAA0000A000" else None
+        hunter.cover = picture
+        r = await client.get("/api/cover/0100aaaa0000a000")
+        assert r.status == 200 and r.headers["Content-Type"] == "image/png" and await r.read() == b"png bytes"
+        # A picture may be kept by the browser, and is still not to be read as anything else.
+        assert "max-age" in r.headers["Cache-Control"] and r.headers["X-Content-Type-Options"] == "nosniff"
+        assert (await client.get("/api/cover/0100CCCC0000C000")).status == 404
+        data = await (await client.get("/api/tasks")).json()
+        assert [t["text"] for t in data["tasks"]][:3] == ["Check Health", "Library Sync", "Rss Sync"]
+        # Not set up: a task cannot be run, and says so instead of failing.
+        r = await client.post("/api/task", json={"name": "rss"})
+        assert r.status == 502 and "not set up" in (await r.json())["error"]
+        assert (await client.post("/api/task", json={})).status == 400
+    api(test)
+    # Pictures are the only thing the page may load, and only from the panel itself.
+    assert "img-src 'self' data:" in main.HEADERS["Content-Security-Policy"]

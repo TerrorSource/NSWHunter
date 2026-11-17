@@ -1,8 +1,10 @@
 """What NSWHunter does each round: read the library, look for releases, judge them, send them."""
 import asyncio
 import datetime
+import hashlib
 import json
 import os
+import re
 import secrets
 import time
 
@@ -25,6 +27,10 @@ RELEASE_FIELDS = ("guid", "title", "size", "indexer", "indexerId", "published", 
 ELSEWHERE = ("is another DLC", "names no DLC", "names one DLC", "has the title ID of one DLC",
              "not DLC", "DLC only", "title ID of another part")
 MAX_EVENTS = 1000
+COVER_ID = re.compile(r"[0-9A-F]{16}")
+# What a round is made of, as the Tasks page lists it: name -> how it is called there.
+TASKS = {"health": "Check Health", "library": "Library Sync", "rss": "Rss Sync", "search": "Search Missing",
+         "downloads": "Refresh Monitored Downloads", "versions": "Refresh Version List", "backup": "Backup"}
 MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
@@ -75,6 +81,8 @@ class Hunter:
                        "error": None,  # {"text", "at"} of the last round, if it broke
                        "skipped": 0}  # games and releases the last round had to leave out
         self.troubles = set()  # what was already written to the log about those
+        self.cover_gate = asyncio.Semaphore(4)  # pictures fetched at the same time
+        self.no_cover = {}  # picture -> when fetching it last failed
         self.state = {
             "items": {},  # key -> one missing update or DLC, with its candidates
             "searched": {},  # game id -> time of the last search by name
@@ -88,6 +96,9 @@ class Hunter:
             "arrived": [],  # what was sent and is now in the library, newest first
             "games": [],  # every game of the library, for the Games page
             "history": [],  # what was sent, arrived and failed, newest first
+            "covers": {},  # title ID -> where the small picture of the game is
+            "covers_fetched": 0,
+            "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
         }
         self.load()
@@ -133,6 +144,77 @@ class Hunter:
         """What was sent, arrived and failed, for the History page."""
         return self.state.get("history", [])
 
+    def tasks(self):
+        """What runs by itself, for the Tasks page: how often, when last, how long, when next."""
+        done, next_round = self.state.get("tasks", {}), self.status.get("next_run")
+        every_round = config.SYNC_INTERVAL_MINUTES * 60
+        hours, days = config.SEARCH_INTERVAL_HOURS * 3600, config.BACKUP_INTERVAL_DAYS * 86400
+        searched = self.state["searched"]
+        open_games = [g for g in self.games if any(not i["ignored"] and not i["grab"] for i in self.items_of(g))]
+        oldest = min((searched.get(g, 0) for g in open_games), default=None)
+        queued = any(i.get("grab") for i in self.state["items"].values())
+        scheduled = [b["at"] for b in backup.listing() if b["kind"] == "scheduled"]
+        fetched = self.state.get("versions_fetched") or 0
+
+        def after(moment):
+            """The first round at or after a moment: these tasks run as part of a round."""
+            return max(moment, next_round or 0) or None
+
+        rows = {
+            "health": (every_round, next_round, "The library, every indexer and every download client"),
+            "library": (every_round, next_round, "What your library has and misses"),
+            "rss": (every_round, next_round, "The newest posts of your indexers, held against what is missing"),
+            "search": (hours, None if oldest is None else after(oldest + hours),
+                       "Every game that misses something, by name; a game is searched when its turn comes"),
+            "downloads": (config.WATCH_SECONDS, (done.get("downloads", {}).get("last", 0) + config.WATCH_SECONDS) if queued else None,
+                          "Only while something is in the queue"),
+            "versions": (86400, after(fetched + 86400), "Every update of every game with its date"),
+            "backup": (days, after(max(scheduled) + days) if scheduled else next_round, "The settings and the state"),
+        }
+        result = []
+        for name, (interval, upcoming, about) in rows.items():
+            last = done.get(name, {})
+            result.append({"name": name, "text": TASKS[name], "about": about, "interval": int(interval),
+                           # Not run since this version started counting: what is known another way.
+                           "last": last.get("last") or (max(scheduled) if name == "backup" and scheduled else None)
+                           or (fetched if name == "versions" and fetched else None)
+                           or (max(searched.values()) if name == "search" and searched else None),
+                           "duration": last.get("duration"), "next": int(upcoming) if upcoming else None})
+        return result
+
+    async def run_task(self, name):
+        """The button of a task: run it now. Returns True if a round has to start for it."""
+        if name not in TASKS:
+            raise clients.ServiceError("Unknown task")
+        if config.problems():
+            raise clients.ServiceError("NSWHunter is not set up yet")
+        if name == "search":
+            self.search_all()
+            return True  # the round that starts now searches every game
+        if self.lock.locked():
+            raise clients.ServiceError("A round is running. Try again when it is done.")
+        async with self.lock:
+            if name == "health":
+                await self.task("health", self.check_services())
+            elif name == "library":
+                await self.task("library", self.sync_library())
+            elif name == "rss":
+                if not self.games:
+                    await self.sync_library()
+                await self.task("rss", self.feed())
+            elif name == "downloads":
+                await self.task("downloads", self.follow_grabs())
+            elif name == "versions":
+                self.state["versions_fetched"] = 0
+                await self.task("versions", self.refresh_versions())
+                await self.sync_library()  # the dates of the updates are used when the library is read
+            elif name == "backup":
+                self.backups(now=True)
+                if "backup" in self.state["services"]:
+                    raise clients.ServiceError(self.state["services"]["backup"]["text"])
+            self.save()
+        return False
+
     def search_all(self):
         """The button "Search All": every game is searched by name in the next round, not only
         the ones whose turn it is. Returns how many games that are."""
@@ -146,6 +228,17 @@ class Hunter:
 
     def service(self, name, ok, text):
         self.state["services"][name] = {"ok": ok, "text": text, "at": int(time.time())}
+
+    def did(self, name, start):
+        """Remember when a task ran and how long it took, for the Tasks page."""
+        self.state.setdefault("tasks", {})[name] = {"last": int(start), "duration": round(time.time() - start, 2)}
+
+    async def task(self, name, work):
+        start = time.time()
+        try:
+            return await work
+        finally:
+            self.did(name, start)
 
     def provider(self, kind, entry, ok, text):
         """What an indexer, download client or connection last said."""
@@ -210,6 +303,59 @@ class Hunter:
         self.state["versions_source"] = source
         self.service("titledb", True, f"{len(self.versions)} games")
 
+    def versions_due(self):
+        source = config.TITLEDB_VERSIONS_URL
+        fresh = time.time() - self.state["versions_fetched"] < 86400
+        return bool(source) and not (fresh and self.state.get("versions_source") == source)
+
+    async def refresh_covers(self):
+        """Where the small pictures of the games are, as switch-library-manager-web says. Asked
+        once a day. Without them the games are listed without a picture: nothing else needs them."""
+        if time.time() - self.state.get("covers_fetched", 0) < 86400:
+            return
+        try:
+            self.state["covers"] = await clients.cover_addresses(self.session)
+            self.state["covers_fetched"] = int(time.time())
+            logs.debug(f"Covers: {len(self.state['covers'])} games have a picture")
+        except clients.ServiceError as e:
+            logs.debug("No covers:", e)
+            self.state["covers_fetched"] = int(time.time()) - 86400 + 3600  # again in an hour
+
+    async def cover(self, game_id):
+        """(content type, bytes) of the small picture of a game, or None if there is none. A
+        picture is fetched once and then kept in /data/covers."""
+        address = self.state.get("covers", {}).get(game_id)
+        if not COVER_ID.fullmatch(game_id) or not address:
+            return None
+        # The address is part of the name: a new picture in the library is fetched anew.
+        stem = f"{game_id}_{hashlib.sha256(address.encode()).hexdigest()[:8]}"
+        for kind, extension in clients.IMAGES.items():
+            path = os.path.join(config.COVER_DIR, f"{stem}.{extension}")
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    return kind, f.read()
+        if self.no_cover.get(stem, 0) > time.time() - 3600:
+            return None
+        async with self.cover_gate:
+            try:
+                kind, data = await clients.cover(self.session, address)
+            except clients.ServiceError as e:
+                self.no_cover[stem] = time.time()
+                logs.debug(f"No picture of {game_id}:", e)
+                return None
+        try:
+            os.makedirs(config.COVER_DIR, exist_ok=True)
+            for old in os.listdir(config.COVER_DIR):
+                if old.startswith(game_id + "_"):
+                    os.remove(os.path.join(config.COVER_DIR, old))
+            path = os.path.join(config.COVER_DIR, f"{stem}.{clients.IMAGES[kind]}")
+            with open(path + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(path + ".tmp", path)
+        except OSError:
+            pass  # not kept: it is fetched again the next time
+        return kind, data
+
     async def sync_library(self):
         """Read the export and keep one item per missing update (and per missing DLC)."""
         try:
@@ -217,6 +363,7 @@ class Hunter:
         except clients.ServiceError as e:
             self.service("slm", False, str(e))
             return False
+        await self.refresh_covers()
         games, wanted, broken, listed = {}, {}, set(), []
         for title in titles:
             try:
@@ -278,6 +425,7 @@ class Hunter:
         missing_dlc = [d for d in all_dlc if d["status"] == "missing"] if config.INCLUDE_DLC else []
         listed.append({
             "id": game_id, "name": name or game_id, "version": title.get("version") or "",
+            "cover": game_id in self.state.get("covers", {}),
             "local": int(title.get("localUpdate") or 0), "latest": int(title.get("latestUpdate") or 0),
             "update_missing": update, "updates_ignored": bool(title.get("updatesIgnored")),
             "dlc_missing": sum(1 for d in all_dlc if d["status"] == "missing"),
@@ -573,13 +721,14 @@ class Hunter:
             try:
                 await self.search_game(game_id)
             except clients.ServiceError:
-                return  # no indexer answers; heard() has said which
+                return n  # no indexer answers; heard() has said which
             except Exception as e:  # noqa: BLE001
                 self.skip(self.games[game_id].name or game_id, e)
                 self.state["searched"][game_id] = int(time.time())  # again after the interval, not every round
             self.save()  # a long first round: keep what was found so far
         if queue:
             self.event(f"Searched {len(queue)} game(s) by name")
+        return len(queue)
 
     # ------------------------------------------------------------ sending
 
@@ -683,8 +832,13 @@ class Hunter:
         if not any(i.get("grab") for i in self.state["items"].values()):
             return
         async with self.lock:
-            await self.follow_grabs()
+            await self.followed()
             self.save()
+
+    async def followed(self):
+        """follow_grabs, as a task when there is something to follow."""
+        if any(i.get("grab") for i in self.state["items"].values()):
+            await self.task("downloads", self.follow_grabs())
 
     async def tell(self, text, about):
         """A notification through every connection that is switched on and wants to hear of
@@ -966,11 +1120,13 @@ class Hunter:
         self.save()
         return self.state["services"]
 
-    def backups(self):
-        """The scheduled backup, when it is time, and the end of the old ones."""
+    def backups(self, now=False):
+        """The scheduled backup, when it is time (or `now`), and the end of the old ones."""
         try:
-            if backup.due():
+            if now or backup.due():
+                start = time.time()
                 self.event(f"Backup made: {backup.create('scheduled')}")
+                self.did("backup", start)
             backup.prune()
             self.state["services"].pop("backup", None)
         except (backup.BackupError, OSError) as e:
@@ -1006,15 +1162,18 @@ class Hunter:
             try:
                 waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
                 self.status["phase"] = "testing the connections"
-                await self.check_services()
+                await self.task("health", self.check_services())
                 self.status["phase"] = "reading the library"
-                await self.refresh_versions()
-                if await self.sync_library() and self.working("INDEXERS"):
+                if self.versions_due():
+                    await self.task("versions", self.refresh_versions())
+                if await self.task("library", self.sync_library()) and self.working("INDEXERS"):
                     self.status["phase"] = "checking new posts"
-                    await self.feed()
-                    await self.backlog()
+                    await self.task("rss", self.feed())
+                    start = time.time()
+                    if await self.backlog():
+                        self.did("search", start)
                 self.status["phase"] = "following the downloads"
-                await self.follow_grabs()
+                await self.followed()
                 if self.working("DOWNLOAD_CLIENTS"):
                     self.status["phase"] = "sending"
                     await self.auto_grab()

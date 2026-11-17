@@ -31,6 +31,8 @@ At the first start NSWHunter makes the user `admin` with a password it makes up,
 
 With that password the panel lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until then the lines are in the log at every start; after that they are gone and the made-up password no longer works.
 
+Forgot your password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: a new password is made up and written to the log.
+
 ## Setting up
 
 The settings are in the menu on the left; every field has its explanation next to it. Three things have to be filled in:
@@ -40,17 +42,6 @@ The settings are in the menu on the left; every field has its explanation next t
 3. **Settings > Download Clients**: NZBGet or SABnzbd for usenet; qBittorrent, Transmission or uTorrent for torrents. Torrents are only searched when a torrent client is enabled.
 
 The rest has defaults that work: **Media Management** (automatic download, searching, DLC), **General** (login, logging, backups) and **UI** (theme, dates).
-
-## The panel
-
-The panel is laid out as Sonarr and Radarr are.
-
-- **Games**: every game of your library and whether it is complete.
-- **Wanted**: every game that misses an update or DLC, with the releases that were found. A row has a **Download** button for its best release; a click on the name shows all of them. The tiles on top filter the list.
-- **Activity**: the **Queue** (sent, not in the library yet), the **History** (sent, arrived, failed) and the **Blocklist** (rejected and failed releases).
-- **System**: **Status** (what does not work), **Backup**, **Events** and **Log Files**.
-
-In the toolbar of Wanted, **Search All** searches every game now and **Download All** sends the best release of every game that scores 9 or 10. If a round breaks, every page says so in a red bar.
 
 ## How a release is judged
 
@@ -96,15 +87,6 @@ Bundles are sent automatically only with `AUTO_BUNDLES=true`. Per round at most 
 
 Start with off and watch for a few days whether the scores match how updates are named on your indexers. From 9 is careful; from 7 also takes releases whose version is derived.
 
-## After sending
-
-NSWHunter asks the download client every two minutes how a sent release is doing.
-
-- **Failed:** the release goes to the blocklist and the next one gets its turn.
-- **Downloaded:** Switch-library-manager-web is asked to scan and the library is read again. Scanning on request needs an API key with the Editor role.
-- **Downloaded, but not in the library after the waiting time** (default 60 minutes, under Media Management): you get a notification and nothing else is sent.
-- **Unknown to the client after the waiting time:** it counts as failed.
-
 ## Choosing in Telegram
 
 **Choose in Telegram** is a setting of a Telegram connection (Settings > Connect) and is off until you switch it on. It also needs the trigger On Manual Interaction Required. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
@@ -114,32 +96,6 @@ NSWHunter asks the download client every two minutes how a sent release is doing
 - Switch it on only for a bot that NSWHunter has to itself. NSWHunter then reads what the bot receives, and two programs cannot read one bot: the other one would miss its messages, or NSWHunter its presses. NSWHunter only listens to Telegram while a question is open.
 - Switched off, you get one message that says how many releases await your choice.
 
-## Security
-
-- **Login.** The panel has a login screen of its own; the browser shows no pop-up. The first start makes up a password that has to be changed at the first login (see [The first login](#the-first-login)). A login lasts 30 days in a cookie that scripts cannot read and that other sites cannot send. **Log out** ends it. Only a hash of the password is stored, and a new password logs every other browser out.
-- **Wrong logins.** After 5 wrong logins from one address it has to wait: 30 seconds, and twice as long after every next wrong one, up to 15 minutes.
-- **No encryption by itself.** The panel speaks HTTP. Inside your home network that is usual; to reach it from outside, put it behind a reverse proxy with HTTPS. The password then crosses the network once per login instead of with every request.
-- **Host names.** The panel answers to an IP address and to names that only exist inside a home network (`nas`, `nas.local`, `nas.lan`). Any other name is refused, so a website cannot reach the panel through your browser by pointing a name of its own at your NAS. If you use a domain name, fill it in under **Host names** on the General page or in `PANEL_HOSTS`.
-- **Keys stay with their address.** A saved key or password is never sent to a changed address; you fill it in again.
-- **The page.** It runs only its own script, loads nothing from elsewhere and cannot be shown inside another page.
-- **The container.** Read-only file system, no privileges, every answer of a service limited in size.
-
-Forgot the password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: NSWHunter makes up a new password and writes it to the log of the container.
-
 ## Backups
 
 A backup is a zip of the settings (with their keys and passwords) and the state. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. **System > Backup** lists the backups, with **Backup Now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
-
-## Searching and API limits
-
-Every hour (`SYNC_INTERVAL_MINUTES`) NSWHunter fetches the library and does one search without a search term: the newest posts of all your indexers, compared with everything that is missing.
-
-In addition, every game that misses something is searched by name. You set how often on the Media Management page under **Automatic search**: every 6, 12, 24 or 48 hours. That costs one API call per indexer per game. With 40 games and 3 indexers that is 160 calls per indexer per day at 6 hours; choose 24 or 48 hours if an indexer has a daily limit. With **Search now** in the panel you search one game at once.
-
-## DLC
-
-With **Also search for missing DLC** on the Media Management page the DLC that your library misses is searched as well. It is in the card of the game, below the update.
-
-- A release with the title ID of the DLC gets score 10.
-- If the name of the DLC is in the title, the score is 8. If a game has several DLC with almost the same name ("In-Game Commentary - Dutch", "... - Spanish"), a release belongs to the DLC it names best and is ruled out for the others.
-- A release that names no DLC ("DLC Unlocker", "DLC Pack") is listed once per game, under **DLC pack**, with score 5.

@@ -40,7 +40,7 @@ def _hash(tag):
 HEADERS = {
     "Content-Security-Policy": (
         f"default-src 'none'; script-src {_hash('script')}; style-src {_hash('style')}; "
-        "img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+        "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -211,17 +211,17 @@ async def api_test_all(request):
     return web.json_response({"ok": True})
 
 
-LOG_FILE = re.compile(r"nswhunter\.txt(\.\d)?")
+LOG_FILE = re.compile(r"nswhunter_\d{4}-\d{2}-\d{2}\.txt|nswhunter\.txt(\.\d)?")
 
 
 async def api_logfiles(request):
-    """The log files in /data/logs: the current one and the older ones next to it."""
+    """The log files in /data/logs: one per day, the newest first."""
     try:
         names = [n for n in os.listdir(config.LOG_DIR) if LOG_FILE.fullmatch(n)]
     except OSError:
         names = []
     files = [{"name": n, "size": os.path.getsize(os.path.join(config.LOG_DIR, n)),
-              "at": int(os.path.getmtime(os.path.join(config.LOG_DIR, n)))} for n in sorted(names)]
+              "at": int(os.path.getmtime(os.path.join(config.LOG_DIR, n)))} for n in sorted(names, reverse=True)]
     return web.json_response({"ok": True, "folder": config.LOG_DIR, "files": files})
 
 
@@ -233,6 +233,32 @@ async def api_logfile(request):
         return refuse(404, "That log file is not there")
     return web.FileResponse(full, headers={
         "Content-Disposition": f'attachment; filename="{name}"', "Content-Type": "text/plain; charset=utf-8"})
+
+
+async def api_tasks(request):
+    return web.json_response({"ok": True, "tasks": request.app["hunter"].tasks(), "now": int(time.time())})
+
+
+async def api_task(request):
+    """Run one of the tasks now. A task that is part of a round starts a round."""
+    try:
+        if await request.app["hunter"].run_task(str((await request.json())["name"])):
+            request.app["wake"].set()
+    except clients.ServiceError as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=502)
+    except (KeyError, ValueError, TypeError):
+        return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
+    return web.json_response({"ok": True, "tasks": request.app["hunter"].tasks()})
+
+
+async def api_cover(request):
+    """The small picture of a game, as switch-library-manager-web has it; kept after the first time."""
+    found = await request.app["hunter"].cover(request.match_info["id"].upper())
+    if found is None:
+        return web.Response(status=404)
+    kind, data = found
+    # The browser may keep it: a picture of a game does not change from one look to the next.
+    return web.Response(body=data, content_type=kind, headers={"Cache-Control": "private, max-age=604800"})
 
 
 async def api_games(request):
@@ -495,6 +521,9 @@ def make_app():
         web.get("/api/state", api_state),
         web.get("/api/log", api_log),
         web.get("/api/games", api_games),
+        web.get("/api/cover/{id}", api_cover),
+        web.get("/api/tasks", api_tasks),
+        web.post("/api/task", api_task),
         web.get("/api/history", api_history),
         web.post("/api/search-all", api_search_all),
         web.post("/api/test-all", api_test_all),

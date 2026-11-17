@@ -1,51 +1,88 @@
-"""The log of NSWHunter: to the output of the container and to files in /data/logs.
+"""The log of NSWHunter: to the output of the container and to a file per day in /data/logs,
+named nswhunter_2026-03-25.txt.
 
 Three levels, chosen in the settings: info says what happens; debug also every search and
 every talk with a service; trace also every release that was judged, with the verdict."""
 import datetime
-import logging
-import logging.handlers
 import os
+import re
 
 import config
 
 LEVELS = {"info": 0, "debug": 1, "trace": 2}
-FILES_KEPT = 5
-_file = {"handler": None, "opened": None}  # opened: (path, size) of the file that is open
-_logger = logging.getLogger("nswhunter")
-_logger.setLevel(logging.INFO)
-_logger.propagate = False
+NAME = re.compile(r"nswhunter_(\d{4}-\d{2}-\d{2})\.txt")
+OLD_NAME = re.compile(r"nswhunter\.txt(\.\d)?")  # the files of a version that named them by number
+_file = {"handle": None, "path": None}
+
+
+def path_for(day):
+    return os.path.join(config.LOG_DIR, f"nswhunter_{day.isoformat()}.txt")
+
+
+def prune(today=None):
+    """Remove the log files that are older than the settings keep them."""
+    today = today or datetime.date.today()
+    oldest = today - datetime.timedelta(days=config.LOG_KEEP_DAYS)
+    try:
+        names = os.listdir(config.LOG_DIR)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(config.LOG_DIR, name)
+        match = NAME.fullmatch(name)
+        try:
+            if match:
+                day = datetime.date.fromisoformat(match.group(1))
+            elif OLD_NAME.fullmatch(name):
+                day = datetime.date.fromtimestamp(os.path.getmtime(full))
+            else:
+                continue
+            if day < oldest:
+                os.remove(full)
+        except (OSError, ValueError):
+            continue
 
 
 def setup():
-    """Open the log file with the size from the settings. Called at start and after the
-    settings changed. Without a folder to write in, the output of the container is all there is."""
-    size, path = config.LOG_SIZE_MB, os.path.join(config.LOG_DIR, "nswhunter.txt")
-    if _file["handler"] is not None and _file["opened"] == (path, size):
-        return
-    if _file["handler"] is not None:
-        _logger.removeHandler(_file["handler"])
-        _file["handler"].close()
-        _file["handler"] = None
-    try:
-        os.makedirs(config.LOG_DIR, exist_ok=True)
-        handler = logging.handlers.RotatingFileHandler(
-            path, maxBytes=size * 2**20, backupCount=FILES_KEPT, encoding="utf-8")
-    except OSError:
-        return
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    _logger.addHandler(handler)
-    _file.update(handler=handler, opened=(path, size))
+    """Called at start and after the settings changed: the file of today is opened again at
+    the next line, and what is too old is removed."""
+    if _file["handle"] is not None:
+        _file["handle"].close()
+    _file.update(handle=None, path=None)
+    prune()
+
+
+def _handle(day):
+    """The open file of this day; a new day starts a new file. None without a folder to write in:
+    the output of the container is then all there is."""
+    path = path_for(day)
+    if _file["path"] != path:
+        if _file["handle"] is not None:
+            _file["handle"].close()
+        _file.update(handle=None, path=path)
+        try:
+            os.makedirs(config.LOG_DIR, exist_ok=True)
+            _file["handle"] = open(path, "a", encoding="utf-8")
+        except OSError:
+            return None
+        prune(day)
+    return _file["handle"]
 
 
 def _write(level, args):
     if LEVELS[level] > LEVELS.get(config.LOG_LEVEL, 0):
         return
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = " ".join([stamp, f"[{level}]" if level != "info" else ""] + [str(a) for a in args]).replace("  ", " ")
+    now = datetime.datetime.now()
+    line = " ".join([now.strftime("%Y-%m-%d %H:%M:%S"), f"[{level}]" if level != "info" else ""]
+                    + [str(a) for a in args]).replace("  ", " ")
     print(line, flush=True)
-    if _file["handler"] is not None:
-        _logger.info(line)
+    handle = _handle(now.date())
+    if handle is not None:
+        try:
+            handle.write(line + "\n")
+            handle.flush()
+        except OSError:
+            pass
 
 
 def info(*args):
