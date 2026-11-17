@@ -36,6 +36,7 @@ TASKS = {"health": "Check Health", "library": "Library Sync", "rss": "Rss Sync",
 MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
+DISK_SECONDS = 60  # how long the free space of the disks is taken as known
 MAX_ASKS = 10  # questions in Telegram per round
 ASK_DELAY = 1.1  # seconds between two messages: Telegram allows about one per second to a chat
 DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
@@ -76,7 +77,8 @@ class Hunter:
         self.lock = asyncio.Lock()  # one round or search at a time
         self.tell_later, self.dropped, self.finished = [], False, False  # of follow_grabs
         self.games = {}  # game id -> matcher.Game, only games that miss something
-        self.files = {}  # game id -> where its files are, as the library names them
+        self.files = {}  # game id -> where its files are, as the library names them; of every game
+        self.disks = (0, [])  # (when it was looked at, the free space of the folders that matter)
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
         # (id of a Prowlarr in the settings, id that Prowlarr has for an indexer) -> priority
         self.priorities = {}
@@ -444,11 +446,12 @@ class Hunter:
             "dlc_missing": sum(1 for d in all_dlc if d["status"] == "missing"),
             "dlc_owned": sum(1 for d in all_dlc if d["status"] == "owned"),
             "size": sum(int(f.get("size") or 0) for f in title.get("files") or [] if isinstance(f, dict))})
-        if not update and not missing_dlc:
-            return
-        # Where the files of the game are, as the library names them: a download is put next to them.
+        # Where the files of the game are, as the library names them: a download is put next to
+        # them. Of every game, so one that misses nothing can take a manual import too.
         self.files[game_id] = [{"type": str(f.get("type") or ""), "path": f["path"], "version": int(f.get("version") or 0)}
                                for f in title.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
+        if not update and not missing_dlc:
+            return
         game = matcher.Game(
             id=game_id, name=name,
             local_version=int(title.get("localUpdate") or 0),
@@ -879,6 +882,9 @@ class Hunter:
                 return
         state = (known or {}).get("state")
         grab["percent"] = (known or {}).get("percent")
+        grab["left"] = (known or {}).get("left")  # seconds still to go, if the client says
+        if (known or {}).get("size"):
+            grab["size"] = known["size"]  # kept: a client may forget a download, not its size
         if (known or {}).get("path"):
             grab["path"] = known["path"]  # where the download client says the download is
             # And where this client keeps its finished downloads: for one it no longer lists.
@@ -1051,8 +1057,10 @@ class Hunter:
         of a game. key: the item of the Queue it is done for; its download then counts as put
         in the library. dry: only say what would be moved. Returns {"files": [{"file",
         "folder", "how"}], "left": [names of files that stay where they are]}."""
-        game = self.games.get(game_id)
-        if game is None:
+        name = next((g.get("name") for g in self.state.get("games", []) if g.get("id") == game_id), None)
+        if name is None and game_id in self.games:
+            name = self.games[game_id].name or game_id
+        if name is None:
             raise clients.ServiceError("This game is not in your library")
         item = self.state["items"].get(key) if key else None
         if item is not None and item["game_id"] != game_id:
@@ -1060,13 +1068,13 @@ class Hunter:
         wanted = "DLC" if item is not None and item["type"] != "update" else "UPD"
         try:
             done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,
-                                                 (game_id, game.name or game_id), dry)
+                                                 (game_id, name), dry)
         except importer.ImportProblem as e:
             raise clients.ServiceError(str(e)[:1].upper() + str(e)[1:]) from e
         result = {"files": done, "left": [os.path.basename(f) for f in left]}
         if dry:
             return result
-        folder, name = done[0]["folder"], os.path.basename(str(path).rstrip("/")) or str(path)
+        folder, chosen = done[0]["folder"], os.path.basename(str(path).rstrip("/")) or str(path)
         moved = sum(d["how"] == "moved" for d in done)
         more = f" ({len(left)} file(s) left where they are)" if left else ""
         if config.DELETE_EMPTY_FOLDERS and moved:
@@ -1074,9 +1082,9 @@ class Hunter:
                      for f in [self.state.get("download_folders", {}).get(c["id"])] if f]
             if await asyncio.to_thread(importer.tidy, {}, path, spare):
                 more += "; the empty folder was removed"
-        self.event(f"Manual import: {name}: {len(done)} file(s) of {game.name or game_id} to {folder}{more}", "grab")
-        shown = item or {"game_id": game_id, "name": game.name or game_id, "type": "update"}
-        self.record("imported", shown, name, client="Manual Import", note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}",
+        self.event(f"Manual import: {chosen}: {len(done)} file(s) of {name} to {folder}{more}", "grab")
+        shown = item or {"game_id": game_id, "name": name, "type": "update"}
+        self.record("imported", shown, chosen, client="Manual Import", note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}",
                     **({} if item else {"what": "manual import"}))
         grab = (item or {}).get("grab")
         if grab and not grab.get("imported"):
@@ -1242,6 +1250,15 @@ class Hunter:
             item["ask"] = None
         if release:
             self.turn_down(item, release)
+        self.save()
+
+    def forget(self, key, guid):
+        """Forget that a release was sent before: it is a choice to make again, and may go out
+        by itself again. Not the release that is in the queue now."""
+        item = self.state["items"][key]
+        if (item.get("grab") or {}).get("guid") == guid:
+            raise clients.ServiceError("This release is in the queue: take it out of the queue first")
+        item["sent"] = [g for g in item.get("sent") or [] if g != guid]
         self.save()
 
     def dismiss(self, key, guid):
@@ -1536,6 +1553,21 @@ class Hunter:
             shown["status"] = "new"
         return shown
 
+    def disk_space(self):
+        """The free space where the settings, the library and the downloads are, for the Status
+        page. Looked at once a minute at most: the panel asks every few seconds."""
+        at, known = self.disks
+        if time.time() - at < DISK_SECONDS:
+            return known
+        places = [("Config folder", config.DATA_DIR)]
+        places += [("Root folder", r["path"]) for r in config.ROOT_FOLDERS]
+        for client in config.providers("DOWNLOAD_CLIENTS"):
+            folder = self.state.get("download_folders", {}).get(client["id"])
+            if folder:
+                places.append((f"Downloads of {client['name']}", importer.local_download(client, folder)))
+        self.disks = (time.time(), importer.disks(places))
+        return self.disks[1]
+
     def view(self):
         """Everything the panel shows. Download links stay inside: they hold the Prowlarr key."""
         items = []
@@ -1563,4 +1595,5 @@ class Hunter:
             },
             "configured": not config.problems(),
             "missing": config.problems(),
+            "disks": self.disk_space(),
         }

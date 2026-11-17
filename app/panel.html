@@ -681,6 +681,7 @@ const WANTED = {
   updates: {text: "Update Missing", has: g => g.items.some(i => i.type === "update"), none: "No game misses an update."},
   dlc: {text: "DLC Missing", has: g => g.items.some(i => i.type === "dlc"), none: "No game misses DLC."},
   choice: {text: "Awaiting Choice", has: g => g.items.some(waiting), none: "Nothing awaits your choice. Releases that are found show up here."},
+  tried: {text: "Already Tried", has: g => live(g).some(i => i.status === "tried"), none: "No game has only releases that were sent before."},
   queue: {text: "In Queue", has: g => live(g).some(i => i.grab), none: "Nothing is in the queue."},
   ignored: {text: "Ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
 };
@@ -760,6 +761,9 @@ function candidate(item, c) {
     [score(c.score), c.guid === item.auto_guid ? h("div", {class: "sub", title: "Goes to the download client by itself in the next round"}, "automatic") : null],
     c, [version, c.reasons.join("; ")],
     [sent ? h("span", {class: "label sent"}, "sent") : null,
+     // Sent before and not in the queue now: the mark can be taken off, so it is a choice again.
+     sent && !(item.grab && item.grab.guid === c.guid)
+       ? ibtn("restore", "Forget that this was sent: it is a choice to make again", () => post("/api/forget", {key: item.key, guid: c.guid}, "f" + c.guid), busy.has("f" + c.guid)) : null,
      ibtn("download", sent ? "Send this release again" : "Download this release", () => grab(item, c), busy.has(c.guid)),
      ibtn("remove", "Reject: do not show this release again. It moves to the blocklist and can be restored there.",
           () => post("/api/block", {key: item.key, guid: c.guid}, c.guid))]);
@@ -1231,7 +1235,17 @@ const queuePercent = g => g.state === "done" || g.state === "stuck" ? 100 : g.pe
 const QUEUE_COLUMNS = ["",
   {text: "Game", of: r => r.item.name}, {text: "Release", of: r => r.item.grab.title}, {text: "Protocol", of: r => r.item.grab.protocol || "usenet"},
   {text: "Download Client", of: r => r.item.grab.client_name}, {text: "Indexer", of: r => r.item.grab.indexer},
-  {text: "Added", of: r => r.item.grab.at, down: true}, {text: "Progress", of: r => queuePercent(r.item.grab), down: true}, ""];
+  {text: "Size", num: true, of: r => r.item.grab.size || null, down: true},
+  {text: "Added", of: r => r.item.grab.at, down: true}, {text: "Progress", of: r => queuePercent(r.item.grab), down: true},
+  {text: "Time Left", num: true, of: r => timeLeftOf(r.item.grab)}, ""];
+// The seconds a download still takes, if it is on its way and its client says; else nothing.
+const timeLeftOf = g => g.state === "downloading" && typeof g.left === "number" ? g.left : null;
+// "45s", "12m", "1h 05m", "2d 3h": short, for a column.
+function shortTime(seconds) {
+  if (seconds < 60) return Math.max(1, Math.round(seconds)) + "s";
+  const d = Math.floor(seconds / 86400), hours = Math.floor(seconds / 3600) % 24, m = Math.floor(seconds / 60) % 60;
+  return d ? d + "d " + hours + "h" : hours ? hours + "h " + String(m).padStart(2, "0") + "m" : m + "m";
+}
 function renderQueue() {
   const all = sortedBy("queue", QUEUE_COLUMNS, queueRows()), set = ticked.queue;
   const head = tickAll(set, all.map(r => r.id));
@@ -1248,9 +1262,11 @@ function renderQueue() {
           : g.imported_to ? h("div", {class: "sub"}, "Put in " + g.imported_to) : null),
       h("td", {class: "tight"}, protocol(g.protocol)),
       h("td", {}, g.client_name || "–"), h("td", {}, g.indexer || "–"),
+      h("td", {class: "num"}, size(g.size) || "–"),
       h("td", {class: "tight"}, ago(g.at) + (g.auto ? " · automatic" : "")),
       h("td", {class: "tight"}, percent !== null && percent !== undefined
         ? h("progress", {max: "100", value: String(percent), title: percent + "%", "aria-label": percent + "%"}) : "–"),
+      h("td", {class: "num", title: "At the speed of this moment, as the download client says"}, timeLeftOf(g) === null ? "–" : shortTime(g.left)),
       h("td", {}, h("div", {class: "acts"},
         unplaced ? ibtn("refresh", "Try the import again", () => post("/api/import", {key: item.key}, "m" + item.key).then(d => d.ok && toast("Put in your library")),
                         busy.has("m" + item.key)) : null,
@@ -1384,10 +1400,17 @@ function health() {
   if (state.settings.importing && !state.settings.root_folders) {
     issues.push(["warn", "Import Completed Downloads is on, but there is no root folder yet (Settings > Media Management > Root Folders)."]);
   }
+  for (const d of state.disks || []) {
+    if (d.low) issues.push(["warn", "Only " + (size(d.free) || "0 MB") + " free on the disk of " + placesOf(d) + "."]);
+  }
   for (const [name, s] of Object.entries(state.services)) {
     if (!s.ok && name !== "config") issues.push(["error", s.name && !s.text.startsWith(s.name) ? s.name + ": " + s.text : s.text]);
   }
   return issues;
+}
+// The folders that are on one disk, in words: "the root folder /games/switch and the downloads of NZBGet (/downloads)".
+function placesOf(disk) {
+  return disk.places.map(p => p.what.charAt(0).toLowerCase() + p.what.slice(1) + " " + p.path).join(", ");
 }
 function renderStatus() {
   const st = state.status, s = state.services, issues = health();
@@ -1411,6 +1434,18 @@ function renderStatus() {
         listed("INDEXERS"), listed("DOWNLOAD_CLIENTS"), listed("CONNECTIONS"),
         s.backup ? row("Backups", s.backup) : null,
         s.ssl ? row("HTTPS", s.ssl) : null))),
+    h("h2", {}, "Disk Space"),
+    (state.disks || []).length ? h("div", {class: "scroll"}, h("table", {class: "table", id: "disks"},
+      h("thead", {}, h("tr", {}, h("th", {}, "Location"), h("th", {class: "num"}, "Free Space"), h("th", {class: "num"}, "Total Space"), h("th", {}))),
+      h("tbody", {}, state.disks.map(d => {
+        const used = d.total ? Math.round(100 * (d.total - d.free) / d.total) : 0;
+        return h("tr", {},
+          h("td", {class: "wrap"}, d.places.map(p => h("div", {}, h("span", {class: "mono"}, p.path), h("span", {class: "sub"}, " · " + p.what)))),
+          h("td", {class: "num"}, d.low ? h("span", {class: "label error", title: "Little space left"}, size(d.free) || "0 MB") : size(d.free) || "0 MB"),
+          h("td", {class: "num"}, size(d.total) || "–"),
+          h("td", {class: "tight"}, h("progress", {max: "100", value: String(used), title: used + "% used", "aria-label": used + "% used"})));
+      }))))
+      : h("div", {class: "line"}, "No folder to measure yet"),
     h("h2", {}, "About"),
     facts([
       ["Version", state.version],

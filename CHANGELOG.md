@@ -2,6 +2,19 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.15.0] - 2026-11-18
+
+### Added
+
+- **Already Tried in the Filter menu of Wanted**: only the games of which every release was sent before.
+- **Forget that a release was sent**: a button next to the label "sent" in Interactive Search. The release is a choice to make again, and its game is back on Awaiting Choice. Not for the release that is in the queue.
+- **Disk Space on System > Status**: the free and the total space of the disks the config folder, the root folders and the finished downloads of each download client are on. Folders on one disk are one row. Under Health there is a warning when less than 5 GB is free where the library or the downloads are, or less than 100 MB where only the settings are.
+- **Size and Time Left in the Queue**: the size of a download and how long it still takes at the speed of the moment, as the download client says. NZBGet, SABnzbd, qBittorrent, Transmission and uTorrent; a download that is paused or waits its turn has no time left to show.
+
+### Fixed
+
+- Manual Import works for every game of the library. For a game that misses nothing it said that the game was not in the library.
+
 ## [3.14.0] - 2026-11-17
 
 ### Added

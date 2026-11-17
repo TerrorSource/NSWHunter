@@ -539,6 +539,11 @@ async def api_root_folders_change(request):
     return web.json_response({"ok": True, "folders": importer.root_folders()})
 
 
+async def do_forget(hunter, body):
+    """Forget that a release was sent before: it is a choice to make again."""
+    hunter.forget(str(body["key"]), str(body["guid"]))
+
+
 async def do_dismiss(hunter, body):
     """Take a failed download off the list. The release stays rejected."""
     hunter.dismiss(str(body["key"]), str(body["guid"]))
@@ -791,6 +796,7 @@ def make_app():
         web.post("/api/restore", action(do_restore)),
         web.post("/api/unsend", action(do_unsend)),
         web.post("/api/dismiss", action(do_dismiss)),
+        web.post("/api/forget", action(do_forget)),
         web.post("/api/import", action(do_import)),
         web.post("/api/manual-import", action(do_manual_import)),
         web.post("/api/browse", api_browse),

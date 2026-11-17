@@ -325,6 +325,30 @@ def root_folders():
     return listed
 
 
+LOW_LIBRARY = 5 * 2**30  # less free than this where the library or the downloads are: a warning
+LOW_CONFIG = 100 * 2**20  # and where only the settings are
+
+
+def disks(places):
+    """The disks a list of (what, path) is on, each once: [{"places": [{"what", "path"}],
+    "free", "total", "low"}]. Two folders on one disk share its space, so they are one row.
+    low: there is so little left that a download or the settings may no longer fit. A folder
+    that is not there or cannot be read is left out."""
+    found = {}
+    for what, path in places:
+        try:
+            device, usage = os.stat(path).st_dev, shutil.disk_usage(path)
+        except OSError:
+            continue
+        disk = found.setdefault(device, {"places": [], "free": usage.free, "total": usage.total, "low": False})
+        if {"what": what, "path": path} not in disk["places"]:
+            disk["places"].append({"what": what, "path": path})
+    for disk in found.values():
+        only_config = all(p["what"] == "Config folder" for p in disk["places"])
+        disk["low"] = disk["free"] < (LOW_CONFIG if only_config else LOW_LIBRARY)
+    return list(found.values())
+
+
 MAX_LISTED = 1000
 
 
