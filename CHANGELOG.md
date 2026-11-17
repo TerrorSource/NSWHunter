@@ -2,6 +2,15 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.7.0] - 2026-11-17
+
+### Added
+
+- **Every list sorts by the heads of its columns.** A click on a head sorts on that column, a second click turns the order around; an arrow shows which. That is Wanted, the lists on the page of a game, the Queue, the History, the Blocklist, Tasks, Backup, Events and Log Files (Games already did). The choice is kept per list, in your browser.
+- **Download All in Interactive Search.** The button on top of the window sends the best release of every update and DLC of that game that awaits your choice, and says how many that is. A DLC pack is left out: it would bring what the DLC themselves bring.
+- **Interactive Search on every row of the page of a game**, between Download and Ignore. It opens the window at that update or DLC.
+- **Hide Failed Downloads** (Settings > Media Management, on by default). Failed downloads stay out of the lists: there is no "failed" label on Wanted and on the page of a game, and they are not listed in Interactive Search. And the same usenet release is not offered again when another indexer has it too: it is the same post, and would fail the same way. Failed downloads stay on Activity > Blocklist, where one can be tried again or removed, and in the History.
+
 ## [3.6.1] - 2026-11-17
 
 ### Fixed

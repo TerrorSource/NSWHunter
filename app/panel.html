@@ -255,6 +255,7 @@
            padding: 5vh 12px 12px; overflow-y: auto; z-index: 20; }
   .dialog.wide { max-width: 1280px; }
   .dialog .about { margin: 0 8px 4px; }
+  .abouttop { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .dialog { background: var(--panel); border-radius: 6px; width: 100%; max-width: 860px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); }
   .mhead { display: flex; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--line); font-size: 18px; color: var(--head); }
   .mhead button { all: unset; cursor: pointer; margin-left: auto; padding: 0 6px; font-size: 26px; line-height: 1; color: var(--head); }
@@ -642,9 +643,21 @@ const SORTS = {
     return u ? Math.round((u.latest_version - u.local_version) / 65536) : 0; }},
   missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
   searched: {text: "Last Search", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
+  release: {text: "Best Release", down: false, of: g => { const top = topOf(g); return top ? top.release.title : "\uffff"; }},
+  status: {text: "Status", down: false, of: g => ["Awaiting Choice", "In Queue", "Nothing Found", "Not Searched", "Ignored"].indexOf(gameStatus(g)[1])},
 };
+// The heads of the Wanted table and what each sorts on; the Sort menu of the toolbar does the same.
+const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
+function sortWanted(key) {
+  flipped = key === sortBy ? !flipped : false; sortBy = key;
+  remember("sort", sortBy); remember("flipped", flipped ? "1" : "");
+  render();
+}
 const live = g => g.items.filter(i => !i.ignored);
-const failed = g => g.items.flatMap(i => i.failed || []);
+// Failed downloads are kept out of the lists if the settings say so; the Blocklist always has them.
+const hideFailed = () => state.settings.hide_failed !== false;
+const failedOf = item => hideFailed() ? [] : item.failed || [];
+const failed = g => g.items.flatMap(failedOf);
 const waiting = i => i.status === "review";
 const queued = () => state.items.filter(i => i.grab && !i.ignored);
 // What the Missing page can be limited to, in the Filter menu of its toolbar.
@@ -738,7 +751,7 @@ function candidate(item, c) {
 }
 // One missing thing of a game (the update, or one DLC) with its releases.
 function part(item) {
-  const rows = [h("div", {class: "part"},
+  const rows = [h("div", {class: "part", "data-part": item.key},
     h("span", {class: "grow"}, h("b", {}, item.type === "dlcpack" ? "DLC pack (for all missing DLC of this game)" : whatOf(item)),
       item.type === "update" && item.ladder && item.ladder.length > 1
         ? h("span", {class: "sub", title: "Which version in release names is which update"},
@@ -755,7 +768,7 @@ function part(item) {
       h("button", {class: "small quiet", title: "Forget that this was sent, so it awaits your choice again",
                    onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Not sent")));
   }
-  for (const f of item.failed || []) {
+  for (const f of failedOf(item)) {
     rows.push(h("div", {class: "sent-row"},
       h("span", {class: "label error"}, "Download failed"),
       h("span", {class: "grow"}, f.title, h("span", {class: "sub"}, " · " + f.why + " · " + ago(f.failed_at))),
@@ -777,7 +790,7 @@ function part(item) {
     if (open) rows.push(...rejected.map(r => releaseRow(h("span", {class: "label"}, "ruled out"), r, [r.reason],
       ibtn("download", "Download anyway: send this release to the download client after all", () => grab(item, r), busy.has(r.guid)), "fell")));
   }
-  const blocked = (item.turned_down || []).length + (item.unnamed || 0);
+  const blocked = (item.turned_down || []).length + (item.unnamed || 0) + (hideFailed() ? (item.failed || []).length : 0);
   if (blocked) rows.push(h("div", {class: "rest"},
     h("button", {class: "quiet", onclick: () => { closeModal(); show("blocklist"); }}, plural(blocked, "release") + " of this on the blocklist")));
   return rows;
@@ -825,7 +838,11 @@ function renderWanted() {
       h("thead", {}, h("tr", {},
         h("th", {class: "check"}, h("input", {type: "checkbox", checked: all, "aria-label": "Select all",
           onchange: e => { rows.forEach(g => e.target.checked ? selected.add(g.id) : selected.delete(g.id)); render(); }})),
-        ["Game", "Missing", "Best Release", "Score", "Status", "Last Search"].map(c => h("th", {}, c)), h("th", {}))),
+        WANTED_HEADS.map(([text, key]) => {
+          const on = sortBy === key, down = on && SORTS[key].down !== flipped;
+          return h("th", {"aria-sort": on ? (down ? "descending" : "ascending") : null},
+            h("button", {type: "button", title: "Sort by " + text, onclick: () => sortWanted(key)}, text + (on ? (down ? " ↓" : " ↑") : "")));
+        }), h("th", {}))),
       h("tbody", {}, rows.map(wantedRow)))),
     h("div", {class: "total"}, "Total records: " + rows.length)]
     : h("div", {class: "alert"}, filter.none));
@@ -855,7 +872,29 @@ const ignoreSelected = () => eachSelected("ignored", g => request("/api/ignore",
 // The window of one game, as the Interactive Search of Sonarr and Radarr: everything that was
 // found for it, per missing thing, to choose from.
 let viewing = null, ownWords = "";
-function openGame(id) { editing = null; viewing = id; ownWords = ""; renderGame(); }
+// `key`: the missing thing the window opens at, if it was opened from the row of one.
+function openGame(id, key) {
+  editing = null; viewing = id; ownWords = ""; renderGame();
+  const at = key && [...document.querySelectorAll("#modal .part")].find(el => el.dataset.part === key);
+  if (at) at.scrollIntoView({block: "start"});
+}
+// "Download All" of the window: the best release of everything of this game that awaits a choice.
+// A DLC pack is left out: it would bring what the DLC themselves bring.
+const sendable = game => live(game).filter(i => waiting(i) && i.type !== "dlcpack");
+async function downloadAllOf(game) {
+  const items = sendable(game);
+  busy.add("all" + game.id); render();
+  let count = 0, wrong = "";
+  for (const item of items) {
+    try {
+      const {data} = await request("/api/grab", {key: item.key, guid: item.candidates[0].guid});
+      if (data.ok) count++; else wrong = wrong || data.error || "Failed";
+    } catch (e) { if (e === LOGIN) break; wrong = wrong || "No connection to NSWHunter"; }
+  }
+  busy.delete("all" + game.id);
+  await load();
+  toast(plural(count, "release") + " sent to the download client" + (wrong ? ". " + wrong : ""));
+}
 function renderGame() {
   if (!viewing || !state) return;
   // Someone is typing words to search with: leave the window alone until they are done.
@@ -863,7 +902,7 @@ function renderGame() {
   const game = games().find(g => g.id === viewing);
   if (!game) return closeModal();  // it left the list: what it missed has arrived
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
-  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length
+  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length  // hidden or not: the line to the blocklist is there
     || (i.turned_down || []).length || i.unnamed;
   const first = i => (i.type === "update" ? 0 : 1) * 100 - Math.max(0, ...i.candidates.map(c => c.score || 0));
   const found = game.items.filter(something).sort((a, b) => first(a) - first(b));
@@ -871,8 +910,13 @@ function renderGame() {
   const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
   put($("modal"), dialog("Interactive Search - " + game.name,
-    [h("div", {class: "sub about"}, h("span", {class: "mono"}, game.id), update ? " · " + versions(update) : "",
-       dlc.length ? " · " + dlc.length + " DLC missing" : "", searched ? " · searched " + ago(searched) : ""),
+    [h("div", {class: "abouttop"},
+       h("div", {class: "sub about grow"}, h("span", {class: "mono"}, game.id), update ? " · " + versions(update) : "",
+         dlc.length ? " · " + dlc.length + " DLC missing" : "", searched ? " · searched " + ago(searched) : ""),
+       h("button", {type: "button", class: "primary", disabled: !sendable(game).length || busy.has("all" + game.id),
+                    title: "Send the best release of every update and DLC of this game that awaits your choice. A DLC pack is left out.",
+                    onclick: () => downloadAllOf(game)},
+         busy.has("all" + game.id) ? "Sending…" : "Download All" + (sendable(game).length ? " (" + sendable(game).length + ")" : ""))),
      found.map(part),
      empty.length ? h("div", {class: "rest"}, "Nothing found yet for: " + empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "the update").join(" · ")) : null],
     [h("button", {type: "button", title: "Ignore everything of this game",
@@ -990,6 +1034,11 @@ function itemStatus(item) {
   if (item.grab) return [item.grab.state === "stuck" ? "warn" : "info", sentText(item.grab)];
   return {review: ["warn", "Awaiting Choice"], covered: ["info", "Covered by the Queue"], none: ["danger", "Nothing Found"]}[item.status] || ["mute", "Not Searched"];
 }
+const bestOf = item => item.status === "review" ? item.candidates[0] : null;
+const MISSING_COLUMNS = [
+  {text: "For", of: whatOf}, {text: "Status", of: i => itemStatus(i)[1]},
+  {text: "Best Release", of: i => i.grab ? i.grab.title : bestOf(i) ? bestOf(i).title : ""},
+  {text: "Score", of: i => bestOf(i) ? bestOf(i).score : null, down: true}, {text: "Last Search", of: i => i.last_search || null, down: true}, ""];
 function renderGamePage() {
   if (page !== "game" || !state) return;
   if (!library) return put($("game"), h("div", {class: "line"}, "Loading…"));
@@ -1011,31 +1060,62 @@ function renderGamePage() {
           g ? fact("Size on Disk", size(g.size)) : null),
         h("div", {}, g ? gameLabels(g) : null))),
     h("h2", {}, "Missing"),
-    table(["For", "Status", "Best Release", "Score", "Last Search", ""], items.filter(i => i.type !== "dlcpack" || i.candidates.length || i.grab).map(item => {
-      const [cls, text] = itemStatus(item), best = item.status === "review" ? item.candidates[0] : null;
+    table(MISSING_COLUMNS, sortedBy("gamemissing", MISSING_COLUMNS, items.filter(i => i.type !== "dlcpack" || i.candidates.length || i.grab)).map(item => {
+      const [cls, text] = itemStatus(item), best = bestOf(item);
       return h("tr", {},
         h("td", {}, whatOf(item), item.type === "update" ? h("div", {class: "sub"}, upd(item.local_version) + " → " + upd(item.latest_version)) : null),
         h("td", {class: "tight"}, h("span", {class: "label wide " + cls}, text),
-          (item.failed || []).length ? h("span", {class: "label error"}, item.failed.length + " failed") : null),
+          failedOf(item).length ? h("span", {class: "label error"}, failedOf(item).length + " failed") : null),
         h("td", {class: "wrap"}, item.grab ? item.grab.title : best ? [best.title, item.candidates.length > 1 ? h("span", {class: "sub"}, " · " + (item.candidates.length - 1) + " more") : null] : "–"),
         h("td", {class: "tight"}, best ? score(best.score) : "–"),
         h("td", {class: "tight"}, item.last_search ? ago(item.last_search) : "never"),
         h("td", {}, h("div", {class: "acts"},
           ibtn("download", best ? "Download the best release: " + best.title : "No release to download", () => grab(item, best), !best || busy.has(best.guid)),
+          ibtn("person", "Interactive Search: choose a release for this yourself", () => openGame(gameId, item.key)),
           ibtn("bookmark", item.ignored ? "Stop ignoring this" : "Ignore this: it is not searched or sent any more",
                () => post("/api/ignore", {key: item.key, ignored: !item.ignored}, "i" + item.key), busy.has("i" + item.key)))));
-    }), "This game misses nothing."),
+    }), "This game misses nothing.", "gamemissing", renderGamePage),
     h("h2", {}, "History"),
-    past ? table(["", "For", "Release", "Download Client", "Date#", ""], history.map(e => pastRow(e, true)), "Nothing was sent for this game yet.")
+    past ? table(OWN_HISTORY_COLUMNS, sortedBy("gamehistory", OWN_HISTORY_COLUMNS, history).map(e => pastRow(e, true)), "Nothing was sent for this game yet.",
+                 "gamehistory", renderGamePage)
       : h("div", {class: "line"}, "Loading…"));
 }
 
 // ---------------------------------------------------------------- Activity
-// A column is its name ("Size#" for one with numbers) or the cell of the head itself.
-function table(columns, rows, none) {
+// A list is sorted by a click on the head of a column, as in Sonarr and Radarr; a second click
+// turns the order around. Which column and which way is kept per list, in this browser.
+let sorts = {};
+try { sorts = JSON.parse(remembered("sorts", "{}")) || {}; } catch (e) { sorts = {}; }
+// A column is its name ("Size#" for one with numbers), the cell of the head itself, or
+// {text, of, num, down}: `of` gives what a row is sorted on, `down` says the first click sorts
+// highest first.
+function heads(id, columns, again) {
+  return columns.map(c => {
+    if (c instanceof Node) return c;
+    if (typeof c === "string") c = {text: c.replace("#", ""), num: c.endsWith("#")};
+    const chosen = id && sorts[id] && sorts[id].by === c.text ? sorts[id] : null;
+    return h("th", {class: c.num ? "num" : "", "aria-sort": chosen ? (chosen.down ? "descending" : "ascending") : null},
+      c.of && id ? h("button", {type: "button", title: "Sort by " + c.text, onclick: () => {
+        sorts[id] = {by: c.text, down: chosen ? !chosen.down : Boolean(c.down)};
+        remember("sorts", JSON.stringify(sorts)); again();
+      }}, c.text + (chosen ? (chosen.down ? " ↓" : " ↑") : "")) : c.text);
+  });
+}
+// The rows of a list in the order its head asks for; as they came while no column was clicked.
+function sortedBy(id, columns, items) {
+  const chosen = sorts[id], column = chosen && columns.find(c => c && c.of && c.text === chosen.by);
+  if (!column) return items;
+  const empty = v => v === null || v === undefined || v === "";
+  return [...items].sort((a, b) => {
+    const x = column.of(a), y = column.of(b);
+    if (empty(x) || empty(y)) return empty(x) - empty(y);  // what has no value goes last, either way
+    return (typeof x === "string" ? x.localeCompare(String(y), undefined, {sensitivity: "base", numeric: true}) : x - y) * (chosen.down ? -1 : 1);
+  });
+}
+function table(columns, rows, none, id, again) {
   if (!rows.length) return h("div", {class: "alert"}, none);
   return h("div", {class: "scroll"}, h("table", {class: "table"},
-    h("thead", {}, h("tr", {}, columns.map(c => c instanceof Node ? c : h("th", {class: c.endsWith("#") ? "num" : ""}, c.replace("#", ""))))),
+    h("thead", {}, h("tr", {}, heads(id, columns, again))),
     h("tbody", {}, rows)));
 }
 // The tick boxes of a list: one per row, and one in the head for all of them.
@@ -1131,8 +1211,13 @@ async function unqueue(rows, remove, block) {
   await load();
   toast(wrong ? (count ? plural(count, "release") + " removed, then: " : "") + wrong : plural(count, "release") + " removed from the queue");
 }
+const queuePercent = g => g.state === "done" || g.state === "stuck" ? 100 : g.percent;
+const QUEUE_COLUMNS = ["",
+  {text: "Game", of: r => r.item.name}, {text: "Release", of: r => r.item.grab.title}, {text: "Protocol", of: r => r.item.grab.protocol || "usenet"},
+  {text: "Download Client", of: r => r.item.grab.client_name}, {text: "Indexer", of: r => r.item.grab.indexer},
+  {text: "Added", of: r => r.item.grab.at, down: true}, {text: "Progress", of: r => queuePercent(r.item.grab), down: true}, ""];
 function renderQueue() {
-  const all = queueRows(), set = ticked.queue;
+  const all = sortedBy("queue", QUEUE_COLUMNS, queueRows()), set = ticked.queue;
   const head = tickAll(set, all.map(r => r.id));
   const rows = paged("queue", all).map(({id, item}) => {
     const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent, [drawing, cls] = QUEUE_MARK[g.state] || QUEUE_MARK.sent;
@@ -1149,7 +1234,7 @@ function renderQueue() {
         ? h("progress", {max: "100", value: String(percent), title: percent + "%", "aria-label": percent + "%"}) : "–"),
       h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the queue", () => removeDialog([{id, item}]), busy.has("bulk")))));
   });
-  put($("queue"), table([head, "", "Game", "Release", "Protocol", "Download Client", "Indexer", "Added", "Progress", ""], rows, "Queue is empty"),
+  put($("queue"), table([head, ...QUEUE_COLUMNS], rows, "Queue is empty", "queue", render),
     all.length ? pager("queue", all.length, render) : null);
 }
 // History: what was sent, what arrived and what failed.
@@ -1165,11 +1250,15 @@ async function loadHistory() {
     if (e !== LOGIN) toast("Could not load the history");
   }
 }
+const HISTORY_COLUMNS = ["", {text: "Game", of: e => e.name}, {text: "Release", of: e => e.title}, {text: "Download Client", of: e => e.client},
+                         {text: "Date", num: true, of: e => e.at, down: true}, ""];
+const OWN_HISTORY_COLUMNS = ["", {text: "For", of: e => e.what}, ...HISTORY_COLUMNS.slice(2)];
 function renderHistory() {
   if (!past) return;
-  const rows = past.filter(e => pastOnly === "all" || e.kind === pastOnly);
-  put($("history"), table(["", "Game", "Release", "Download Client", "Date#", ""], paged("history", rows).map(e => pastRow(e)),
-    past.length ? "Nothing in the history matches the filter." : "No history yet. What is sent, arrives or fails from now on is listed here."),
+  const rows = sortedBy("history", HISTORY_COLUMNS, past.filter(e => pastOnly === "all" || e.kind === pastOnly));
+  put($("history"), table(HISTORY_COLUMNS, paged("history", rows).map(e => pastRow(e)),
+    past.length ? "Nothing in the history matches the filter." : "No history yet. What is sent, arrives or fails from now on is listed here.",
+    "history", renderHistory),
     rows.length ? pager("history", rows.length, renderHistory) : null);
   if (page === "game") renderGamePage();
 }
@@ -1204,8 +1293,10 @@ async function unblock(row) {
   if (row.kind === "failed" && !(await request("/api/dismiss", {key, guid})).data.ok) return false;
   return (await request("/api/restore", row.kind === "unnamed" ? {key} : {key, guid})).data.ok === true;
 }
+const BLOCK_COLUMNS = [{text: "Game", of: r => r.item.name}, {text: "Release", of: r => r.release.title}, {text: "Indexer", of: r => r.release.indexer},
+                       {text: "Reason", of: r => r.kind}, {text: "Date", num: true, of: r => r.at > 0 ? r.at : null, down: true}, ""];
 function renderBlocklist() {
-  const all = blockRows(), set = ticked.blocklist;
+  const all = sortedBy("blocklist", BLOCK_COLUMNS, blockRows()), set = ticked.blocklist;
   const head = tickAll(set, all.map(r => r.id));
   const rows = paged("blocklist", all).map(row => {
     const {id, item, kind, release} = row, failed = kind === "failed";
@@ -1226,7 +1317,7 @@ function renderBlocklist() {
         ibtn("remove", kind === "unnamed" ? "Remove them all from the blocklist: they return at the next search" : "Remove from the blocklist: it is offered again",
              () => post("/api/restore", {}, id, () => unblock(row)), busy.has(id)))));
   });
-  put($("blocklist"), table([head, "Game", "Release", "Indexer", "Reason", "Date#", ""], rows, "No history blocklist"),
+  put($("blocklist"), table([head, ...BLOCK_COLUMNS], rows, "No history blocklist", "blocklist", render),
     all.length ? pager("blocklist", all.length, render) : null);
 }
 
@@ -1293,14 +1384,15 @@ async function loadLog() {
   }
 }
 const LOG_MARK = {error: ["warn", "Error", "bad"], warn: ["warn", "Warning", "warn"], grab: ["download", "Sent to a download client", "good"]};
+const LOG_COLUMNS = ["", {text: "Time", of: e => e.at, down: true}, {text: "Message", of: e => e.text}];
 function renderLog() {
   if (!events) return;
   const word = logNeedle.trim().toLowerCase();
   const rows = events.filter(e => (logLevel === "all" || e.level === "error" || (logLevel === "warn" && e.level === "warn"))
     && (!word || e.text.toLowerCase().includes(word)));
   put($("log"), rows.length ? [h("div", {class: "scroll"}, h("table", {class: "table log"},
-      h("thead", {}, h("tr", {}, h("th", {}), h("th", {}, "Time"), h("th", {}, "Message"))),
-      h("tbody", {}, paged("log", rows).map(e => {
+      h("thead", {}, h("tr", {}, heads("log", LOG_COLUMNS, renderLog))),
+      h("tbody", {}, paged("log", sortedBy("log", LOG_COLUMNS, rows)).map(e => {
         const [drawing, text, cls] = LOG_MARK[e.level] || ["info", "Info", "info"];
         return h("tr", {class: e.level}, h("td", {class: "tight"}, mark(drawing, text, cls)),
           h("td", {class: "tight"}, moment(e.at)), h("td", {class: "wrap"}, e.text));
@@ -1314,14 +1406,16 @@ async function loadLogFiles() {
   } catch (e) { /* the list stays as it was */ }
 }
 function kb(bytes) { return bytes >= 1048576 ? size(bytes) : Math.max(1, Math.round(bytes / 1024)) + " kB"; }
+const FILE_COLUMNS = [{text: "Filename", of: f => f.name}, {text: "Size", num: true, of: f => f.size, down: true},
+                      {text: "Last Write Time", num: true, of: f => f.at, down: true}, ""];
 function renderLogFiles() {
   if (!logFiles) return;
   put($("logfiles"),
     h("div", {class: "alert"}, "Log files are located in: " + logFiles.folder + ". There is one per day; the log level and how long they are kept are under Settings > General."),
-    table(["Filename", "Size#", "Last Write Time#", ""], logFiles.files.map(f => h("tr", {},
+    table(FILE_COLUMNS, sortedBy("logfiles", FILE_COLUMNS, logFiles.files).map(f => h("tr", {},
       h("td", {class: "mono"}, f.name), h("td", {class: "num"}, kb(f.size)), h("td", {class: "num"}, moment(f.at)),
       h("td", {}, h("div", {class: "acts"}, h("a", {href: "/api/logfile?name=" + encodeURIComponent(f.name), download: f.name}, "Download"))))),
-      "No log files yet"));
+      "No log files yet", "logfiles", renderLogFiles));
 }
 // Tasks: what runs by itself, as in Sonarr and Radarr: how often, when last, how long, when next.
 let tasks = null, taskRuns = [];
@@ -1363,23 +1457,27 @@ async function runTask(name) {
   busy.delete("t" + name);
   await load(); loadTasks();
 }
+const TASK_COLUMNS = [{text: "Name", of: t => t.text}, {text: "Interval", of: t => t.interval}, {text: "Last Execution", of: t => t.last || null, down: true},
+                      {text: "Last Duration", of: t => t.duration, down: true}, {text: "Next Execution", of: t => t.next || null}, ""];
+const RUN_COLUMNS = ["", {text: "Name", of: r => r.text}, {text: "Started", of: r => r.started, down: true}, {text: "Ended", of: r => r.ended, down: true},
+                     {text: "Duration", num: true, of: r => r.duration, down: true}];
 function renderTasks() {
   if (!tasks) return;
-  const st = state.status, rows = [...tasks].sort((a, b) => a.text.localeCompare(b.text));
+  const st = state.status, rows = sortedBy("tasks", TASK_COLUMNS, [...tasks].sort((a, b) => a.text.localeCompare(b.text)));
   put($("tasks"), h("h2", {}, "Scheduled"),
-    table(["Name", "Interval", "Last Execution", "Last Duration", "Next Execution", ""], rows.map(t => h("tr", {title: t.about},
+    table(TASK_COLUMNS, rows.map(t => h("tr", {title: t.about},
       h("td", {}, t.text),
       h("td", {class: "tight"}, span(t.interval)),
       h("td", {class: "tight"}, t.last ? ago(t.last) : "never"),
       h("td", {class: "tight"}, clock(t.duration)),
       h("td", {class: "tight"}, t.next ? ahead(t.next) : (t.name === "downloads" ? "when something is queued" : "–")),
-      h("td", {}, h("div", {class: "acts"}, ibtn("refresh", "Run " + t.text + " now", () => runTask(t.name), busy.has("t" + t.name) || st.running))))), ""),
+      h("td", {}, h("div", {class: "acts"}, ibtn("refresh", "Run " + t.text + " now", () => runTask(t.name), busy.has("t" + t.name) || st.running))))), "", "tasks", renderTasks),
     // What ran, newest first; a round that is running is on top.
     h("h2", {}, "Queue"),
-    table(["", "Name", "Started", "Ended", "Duration#"], [
+    table(RUN_COLUMNS, [
       st.running ? h("tr", {}, h("td", {class: "tight"}, icon("refresh")), h("td", {}, "Round: " + (st.phase || "…")), h("td", {}, "now"), h("td", {}, "–"), h("td", {class: "num"}, "–")) : null,
-      ...taskRuns.map(r => h("tr", {}, h("td", {class: "tight done"}, icon("check")), h("td", {}, r.text), h("td", {class: "tight"}, ago(r.started)),
-        h("td", {class: "tight"}, ago(r.ended)), h("td", {class: "num"}, clock(r.duration))))].filter(Boolean), "No task has run yet"));
+      ...sortedBy("runs", RUN_COLUMNS, taskRuns).map(r => h("tr", {}, h("td", {class: "tight done"}, icon("check")), h("td", {}, r.text), h("td", {class: "tight"}, ago(r.started)),
+        h("td", {class: "tight"}, ago(r.ended)), h("td", {class: "num"}, clock(r.duration))))].filter(Boolean), "No task has run yet", "runs", renderTasks));
 }
 // Backup: the backups that are there; the settings for them are under Settings > General.
 async function loadBackups() {
@@ -1417,13 +1515,15 @@ function backupPassword(name, wrong) {
   $("modal").hidden = false;
   field.focus();
 }
+const BACKUP_COLUMNS = ["", {text: "Name", of: b => b.name}, {text: "Size", num: true, of: b => b.size, down: true},
+                        {text: "Time", num: true, of: b => b.at, down: true}, ""];
 function renderBackups() {
   if (!backups) return;
   put($("backups"),
     h("div", {class: "alert"}, "Backups are located in: " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state. "
       + (backups.encrypting ? "New backups are encrypted with your backup password. " : "New backups are not encrypted: set a backup password under Settings > General to change that. ")
       + "Interval and retention are under Settings > General."),
-    table(["", "Name", "Size#", "Time#", ""], backups.backups.map(b => h("tr", {},
+    table(BACKUP_COLUMNS, sortedBy("backups", BACKUP_COLUMNS, backups.backups).map(b => h("tr", {},
       h("td", {class: "tight"}, b.kind === "manual" ? mark("person", "Manual: made with Backup Now", "") : mark("clock", "Scheduled", "")),
       h("td", {class: "mono"}, h("a", {href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name, title: "Download this backup"}, b.name),
         b.encrypted ? h("span", {class: "label sent", title: "Encrypted with the backup password it was made with"}, "encrypted") : null),
@@ -1432,7 +1532,7 @@ function renderBackups() {
         ibtn("restore", "Restore: replace the settings and the state by this backup",
              () => ask("Replace the settings and the state by " + b.name + "?", "Restore", () => backupDo("restore", b.name)), busy.has("b" + b.name)),
         ibtn("trash", "Delete this backup", () => backupDo("delete", b.name), busy.has("b" + b.name)))))),
-      "No backups are available"));
+      "No backups are available", "backups", renderBackups));
 }
 // Updates: what changed in every version up to the one that runs, as the changelog has it.
 let updates = null;
@@ -1465,7 +1565,9 @@ const FORMS = {
        help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
       {name: "GRAB_WAIT_MINUTES", label: "Wait for the Library", options: [
         ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
-       help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."}]},
+       help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."},
+      {name: "HIDE_FAILED_DOWNLOADS", label: "Hide Failed Downloads", checkbox: true,
+       help: "Keep failed downloads out of the lists: no \"failed\" label on Wanted and on the page of a game, and the same usenet release is not offered again when another indexer has it too. They stay on Activity > Blocklist, where one can be tried again."}]},
     {title: "Searching", fields: [
       {name: "SEARCH_INTERVAL_HOURS", label: "Automatic Search", options: [
         ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
@@ -1993,7 +2095,7 @@ function renderToolbar() {
         () => post("/api/grab-best", {min_score: BULK}, "bulk").then(d => d.ok && toast(plural(d.sent, "release") + " added to the queue"))),
         {disabled: !n || working, title: "The best release of every game, if its score is " + BULK + " or 10. Bundles are left for a click of their own."}));
     right.push(menuTool("sort", "sort", "Sort", sortItems(Object.entries(SORTS).map(([key, v]) => [key, v.text]), sortBy, (SORTS[sortBy] || SORTS.score).down !== flipped,
-      key => { flipped = key === sortBy ? !flipped : false; sortBy = key; remember("sort", sortBy); remember("flipped", flipped ? "1" : ""); render(); })));
+      sortWanted)));
     if (page === "wanted") right.push(menuTool("filter", "filter", "Filter", Object.entries(WANTED).map(([key, v]) =>
       [v.text, key === only, () => { only = key; remember("wantedfilter", key); render(); }])));
   } else if (page === "queue") {

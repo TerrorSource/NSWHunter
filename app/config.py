@@ -88,6 +88,9 @@ SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # the clock does not run.
 WAITS = (30, 60, 120, 360, 1440)
 GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 60)
+# Keep failed downloads out of the lists of the panel, and do not offer the same usenet release
+# again when another indexer has it too: it is the same post, and would fail the same way.
+HIDE_FAILED_DOWNLOADS = flag("HIDE_FAILED_DOWNLOADS", True)
 # How often the download clients are asked how the sent releases are doing.
 WATCH_SECONDS = max(5, number("WATCH_SECONDS", 120))
 
@@ -170,7 +173,7 @@ UI_RELATIVE_DATES = flag("UI_RELATIVE_DATES", True)
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
-    "GRAB_WAIT_MINUTES": WAITS,
+    "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,

@@ -563,6 +563,8 @@ class Hunter:
             return False
         if any(c["guid"] == release["guid"] for c in item["candidates"]):
             return False
+        if self.failed_before(item, release):
+            return False
         return self.place(item, release)
 
     def place(self, item, release):
@@ -753,9 +755,20 @@ class Hunter:
         self.record("failed", item, grab["title"], note=why, client=grab.get("client_name", ""))
         item["blocked"].append(grab["guid"])
         item["candidates"] = [c for c in item["candidates"] if c["guid"] != grab["guid"]]
+        # The same usenet release from another indexer is the same post: it leaves with it.
+        item["candidates"] = [c for c in item["candidates"] if not self.failed_before(item, c)]
         item["grab"] = None
         self.event(text, "warn")
         return text
+
+    def failed_before(self, item, release):
+        """Is this the usenet release of a download that failed, found once more: on another
+        indexer, or posted again under the same name? Only if failed downloads are hidden."""
+        if not config.HIDE_FAILED_DOWNLOADS or (release.get("protocol") or "usenet") != "usenet":
+            return False
+        same = matcher.same_release(release["title"])
+        return any((f.get("protocol") or "usenet") == "usenet" and f["guid"] != release["guid"]
+                   and matcher.same_release(f["title"]) == same for f in item.get("failed", []))
 
     async def follow_grabs(self):
         """Ask the download clients how the sent releases are doing.
@@ -1293,6 +1306,7 @@ class Hunter:
                 "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
                 "wait_minutes": config.GRAB_WAIT_MINUTES, "asking": self.asking(),
+                "hide_failed": config.HIDE_FAILED_DOWNLOADS,
             },
             "configured": not config.problems(),
             "missing": config.problems(),
