@@ -2,6 +2,15 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.14.0] - 2026-11-17
+
+### Added
+
+- **Manual Import**: on the page of a game, and in the Queue for a download that could not be put in the library. Choose a folder or a file in the File Browser; a window shows which Switch files would be moved to the folder of the game, and Import moves them. A file with the title ID of another game in its name is left where it is, and so is the game itself. For a download of the Queue, that download then counts as put in the library. Nothing is taken out of a root folder.
+- **A DLC unlocker is a kind of its own.** A release named "DLC Unlocker" is a small file that opens DLC, and a library may go on missing the DLC itself. It is listed with the DLC packs as "DLC unlocker", scores 3 instead of 5, and is never sent by automatic download or Download All: only with a click on that release.
+- **An imported download the library never recognises leaves the queue.** If the files were put in the folder of the game, the library scanned on request after that, and it still misses the update or DLC when the waiting time (Wait for the Library) is over, the download goes to History as **Not Recognised** and you are told once. Its files stay where they are and the release is not rejected, but it counts as tried, so the next release gets its turn. With a library that refuses to scan on request nothing changes: such a download stays in the queue as "not seen in your library".
+- The task **Rescan Download Folder** also removes the empty folders that earlier downloads left where a download client keeps its finished downloads, if Delete Empty Folders in Download Folder is on. Only a folder without a single file in it, and not one that changed in the last ten minutes.
+
 ## [3.13.1] - 2026-11-17
 
 ### Fixed

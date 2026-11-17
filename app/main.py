@@ -498,6 +498,14 @@ async def do_import(hunter, body):
     await hunter.import_now(str(body["key"]))
 
 
+async def do_manual_import(hunter, body):
+    """Manual Import: the files of a folder or file the user chose, to the folder of a game.
+    With `preview` nothing is moved: the answer says what would be."""
+    key = body.get("key")
+    return await hunter.manual_import(str(body["game_id"]).upper(), str(body["path"]), str(key) if key else None,
+                                      dry=bool(body.get("preview")))
+
+
 async def api_browse(request):
     """The File Browser of the panel: the folders of a path in this container."""
     try:
@@ -784,6 +792,7 @@ def make_app():
         web.post("/api/unsend", action(do_unsend)),
         web.post("/api/dismiss", action(do_dismiss)),
         web.post("/api/import", action(do_import)),
+        web.post("/api/manual-import", action(do_manual_import)),
         web.post("/api/browse", api_browse),
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),

@@ -23,6 +23,8 @@ KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0, "dlcpack": 1
 WHOLE_GAME = 0.75  # an "update" as big as the game itself: the game is probably in it
 ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the library
 PACK = 0.55  # a pack of DLC that does not say which DLC
+UNLOCKER = 0.35  # a "DLC Unlocker": a small file that opens DLC, not the DLC as the library counts it
+UNLOCKER_WORDS = {"unlocker", "unlockers", "unlock"}
 CRACK = 0.9  # an update with a crack holds changed files
 NAMED = 0.6  # the share of a DLC's own words that must be in a title to call it named
 
@@ -88,7 +90,7 @@ class Game:
 @dataclass
 class Candidate:
     score: int  # 1-10: how likely it is that this download is the right one
-    kind: str  # update | bundle | dlc | unknown
+    kind: str  # update | bundle | dlc | dlcpack | unlocker | unknown
     name_match: str  # tid | exact | fuzzy
     internal_version: int | None
     display_version: str | None
@@ -610,8 +612,10 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
         # "DLC Unlocker", "DLC Pack": listed once per game, not under every missing DLC.
         if mine[0] >= NAMED or rival[0][0] >= NAMED:
             return Rejection("names one DLC: listed under that DLC")
-        chance = PACK
-        reasons.append("pack with DLC of this game; cannot tell which are in it")
+        unlocker = bool(words & UNLOCKER_WORDS)
+        chance = UNLOCKER if unlocker else PACK
+        reasons.append("a DLC unlocker: a small file that opens DLC, which your library may not count as the DLC it misses"
+                       if unlocker else "pack with DLC of this game; cannot tell which are in it")
     elif mine[0] >= NAMED:
         only = rival[0] < mine
         chance = 0.85 if only else 0.6
@@ -622,5 +626,6 @@ def _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons, s
         chance *= UNMARKED
         reasons.append("the title names no platform")
     kind = "bundle" if kind == "bundle" else "dlcpack" if pack else "dlc"
-    return Candidate(mark("extras" if left else "exact", chance, kind), "dlcpack" if pack else "dlc",
+    shown = "unlocker" if pack and words & UNLOCKER_WORDS else "dlcpack" if pack else "dlc"
+    return Candidate(mark("extras" if left else "exact", chance, kind), shown,
                      name_match, None, None, None, reasons)

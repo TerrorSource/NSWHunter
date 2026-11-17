@@ -566,7 +566,7 @@ function score(value, title) {
   const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
   return h("span", {class: "score " + level, title: title || "The chance that this download is the right one"}, String(value || "?"), h("small", {}, "/10"));
 }
-const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unknown: ""};
+const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unlocker: "DLC unlocker", unknown: ""};
 // How a sent release is doing, as the download client tells it.
 const SENT = {sent: "Queued", downloading: "Downloading", done: "Downloaded, waiting for the library",
               stuck: "Downloaded, not seen in your library"};
@@ -692,7 +692,7 @@ function topOf(game) {
 }
 // What "Download All" would send: the best release of every waiting item, if it scores high enough.
 function ready() {
-  return state.items.filter(i => waiting(i) && (i.candidates[0].score || 0) >= BULK && i.candidates[0].kind !== "bundle");
+  return state.items.filter(i => waiting(i) && (i.candidates[0].score || 0) >= BULK && !["bundle", "unlocker"].includes(i.candidates[0].kind));
 }
 
 // `work`: something of more than one request, done in the place of the one to `path`.
@@ -1254,14 +1254,46 @@ function renderQueue() {
       h("td", {}, h("div", {class: "acts"},
         unplaced ? ibtn("refresh", "Try the import again", () => post("/api/import", {key: item.key}, "m" + item.key).then(d => d.ok && toast("Put in your library")),
                         busy.has("m" + item.key)) : null,
+        unplaced ? ibtn("folder", "Manual Import: choose the folder or the file of this download yourself", () => manualImport(item.game_id, item.name, item),
+                        busy.has("mi" + item.game_id)) : null,
         ibtn("remove", "Remove from the queue", () => removeDialog([{id, item}]), busy.has("bulk")))));
   });
   put($("queue"), table([head, ...QUEUE_COLUMNS], rows, "Queue is empty", "queue", render),
     all.length ? pager("queue", all.length, render) : null);
 }
+// Manual Import: choose a folder or a file in the File Browser, see what would be moved, and
+// move it to the folder of the game. item: the download of the Queue it is done for, if any.
+let importFrom = "/";
+function manualImport(id, name, item) {
+  const key = item ? item.key : undefined;
+  browseFor(item && item.grab && item.grab.path ? item.grab.path : importFrom, async chosen => {
+    if (chosen === null) return;
+    importFrom = chosen.replace(/\/[^/]*$/, "") || "/";  // the next one starts in the same folder
+    let data;
+    try { data = (await request("/api/manual-import", {game_id: id, key, path: chosen, preview: true})).data; }
+    catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); return; }
+    if (!data.ok) return toast(data.error || "Failed");
+    const go = async () => {
+      closeModal();
+      const d = await post("/api/manual-import", {game_id: id, key, path: chosen}, "mi" + id);
+      if (d.ok) toast(plural(d.files.length, "file") + " put in your library");
+    };
+    editing = null; viewing = null;
+    put($("modal"), dialog("Manual Import - " + name, [
+      h("p", {}, "From " + chosen + " to the folder of this game:"),
+      table(["File", "Folder", ""], data.files.map(f => h("tr", {},
+        h("td", {class: "wrap"}, f.file), h("td", {class: "wrap"}, f.folder),
+        h("td", {class: "tight"}, f.how === "was there already" ? "is there already" : "will be moved")))),
+      data.left.length ? h("p", {class: "sub"}, "Left where " + (data.left.length === 1 ? "it is" : "they are") + ": " + data.left.join(", ")) : null],
+      [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Cancel"),
+       h("button", {type: "button", class: "primary", id: "manual-go", onclick: go}, "Import")], "wide"));
+    $("modal").hidden = false;
+  }, true);
+}
 // History: what was sent, what arrived and what failed.
-const PAST = {all: "All", grabbed: "Grabbed", imported: "Imported", arrived: "Arrived", failed: "Failed"};
+const PAST = {all: "All", grabbed: "Grabbed", imported: "Imported", arrived: "Arrived", unseen: "Not Recognised", failed: "Failed"};
 const PAST_MARK = {grabbed: ["download", "Grabbed: sent to the download client", "info"], imported: ["box", "Imported: put in the folder of its game", "info"], arrived: ["check", "Arrived in your library", "good"],
+                   unseen: ["warn", "Not recognised: put in the folder of its game, but your library still misses it", "bad"],
                    failed: ["warn", "Download failed", "bad"]};
 async function loadHistory() {
   try {
@@ -1601,7 +1633,7 @@ const FORMS = {
       {name: "REMOVE_COMPLETED", label: "Remove Completed", checkbox: true,
        help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."},
       {name: "DELETE_EMPTY_FOLDERS", label: "Delete Empty Folders in Download Folder", checkbox: true,
-       help: "After the files of a download were moved to your library, look in the folder it came from and remove that folder if nothing is left in it. A folder that still holds a file stays as it is."}]},
+       help: "After the files of a download were moved to your library, look in the folder it came from and remove that folder if nothing is left in it. A folder that still holds a file stays as it is. The task Rescan Download Folder also removes the empty folders that earlier downloads left."}]},
     {title: "Searching", fields: [
       {name: "SEARCH_INTERVAL_HOURS", label: "Automatic Search", options: [
         ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
@@ -2294,6 +2326,8 @@ function renderToolbar() {
     left.push(
       tool("search", searching ? "Searching…" : "Search Game", () => search(game), {disabled: !game || searching, title: "Automatic Search: look for this game on your indexers now"}),
       tool("person", "Interactive Search", () => openGame(gameId), {disabled: !game, title: "Everything that was found for this game, to choose from"}),
+      tool("folder", busy.has("mi" + gameId) ? "Importing…" : "Manual Import", () => manualImport(gameId, ((library || []).find(x => x.id === gameId) || game || {name: gameId}).name),
+        {disabled: busy.has("mi" + gameId), title: "Choose a folder or a file yourself: its Switch files are moved to the folder of this game"}),
       h("span", {class: "sep"}),
       tool("bookmark", allIgnored ? "Stop Ignoring" : "Ignore", () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + gameId),
         {disabled: !game, title: "Ignore everything this game misses: it is not searched or sent any more"}));

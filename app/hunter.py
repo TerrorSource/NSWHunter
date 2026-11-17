@@ -491,7 +491,7 @@ class Hunter:
                 else "DLC pack" if item["type"] == "dlcpack" else "update")
 
     def record(self, kind, item, title, **more):
-        """One line of the History page. kind: "grabbed", "arrived" or "failed"."""
+        """One line of the History page. kind: "grabbed", "imported", "arrived", "unseen" or "failed"."""
         entry = {"at": int(time.time()), "kind": kind, "game_id": item["game_id"], "name": item["name"],
                  "what": self.what(item), "title": title, **more}
         self.state["history"] = [entry] + self.state.get("history", [])[:MAX_HISTORY - 1]
@@ -781,6 +781,28 @@ class Hunter:
         self.event(text, "warn")
         return text
 
+    async def rescan(self):
+        """Ask the library to scan. Remembers when it last agreed to: what is put in a folder
+        can only be called unseen after a scan that came later."""
+        agreed = await clients.library_rescan(self.session)
+        if agreed:
+            self.state["rescan_at"] = int(time.time())
+        return agreed
+
+    def unseen(self, item, waited):
+        """What was sent is in the folder of its game, and the library still misses what it was
+        sent for: it leaves the queue. Its files stay where they are and the release is not
+        rejected, but it counts as tried: it is not sent again by itself."""
+        grab = item["grab"]
+        folder = grab.get("imported_to") or "the folder of its game"
+        self.record("unseen", item, grab["title"], client=grab.get("client_name", ""),
+                    note=f"put in {folder}, and still missing in the library after {waited}")
+        item["grab"] = None
+        text = (f"Imported, but still missing in your library after {waited}: {grab['title']}. It left the queue; "
+                f"its files stay in {folder}.")
+        self.event(text, "warn")
+        return text
+
     def failed_before(self, item, release):
         """Is this the usenet release of a download that failed, found once more: on another
         indexer, or posted again under the same name? Only if failed downloads are hidden."""
@@ -825,11 +847,16 @@ class Hunter:
                     except Exception as e:  # noqa: BLE001
                         self.skip(f"the import of {item['name']}", e)
         tell, dropped, finished = self.tell_later, self.dropped, self.finished
-        if finished and not await clients.library_rescan(self.session) and not self.state.get("rescan_hint"):
+        placed = [i["grab"]["imported"] for i in pending if (i.get("grab") or {}).get("imported")]
+        if placed and (self.state.get("rescan_at") or 0) < max(placed) and now - (self.state.get("rescan_tried") or 0) > wait:
+            self.state["rescan_tried"] = int(now)
+            finished = True
+        if finished and not await self.rescan() and not self.state.get("rescan_hint"):
             self.state["rescan_hint"] = True
             self.event("Switch-library-manager-web refuses to scan on request. Give the API key the Editor "
                        "role, and a download shows up in your library sooner.", "warn")
-        waiting = any((i.get("grab") or {}).get("state") == "done" for i in self.state["items"].values())
+        waiting = any((i.get("grab") or {}).get("state") == "done" or (i.get("grab") or {}).get("imported")
+                      for i in self.state["items"].values())
         if waiting and now - (self.state["library"].get("fetched") or 0) > config.WATCH_SECONDS:
             await self.sync_library()
         for text in tell:
@@ -857,6 +884,16 @@ class Hunter:
             # And where this client keeps its finished downloads: for one it no longer lists.
             if grab.get("client"):
                 self.state.setdefault("download_folders", {})[grab["client"]] = os.path.dirname(str(known["path"]).rstrip("/"))
+        if grab.get("imported"):
+            # Its files are in the folder of the game. If the library scanned on request after
+            # that, was read a while later and still misses it once the waiting time is over,
+            # this release does not bring it. A library that scans only when it wants to may
+            # not have seen the files yet: then the download stays in the queue.
+            read, asked = self.state["library"].get("fetched") or 0, self.state.get("rescan_at") or 0
+            if now - grab["imported"] > wait and asked >= grab["imported"] and read - asked >= config.WATCH_SECONDS:
+                self.tell_later.append(self.unseen(item, waited))
+                self.dropped = True
+                return
         if state == "failed":
             self.tell_later.append(self.drop(
                 item, f"Download failed: {grab['title']}. The next release gets its turn.",
@@ -960,10 +997,24 @@ class Hunter:
             placed += bool(item["grab"].get("imported"))
         self.tell_later = []
         if placed:
-            await clients.library_rescan(self.session)
-        self.event(f"Rescanned the download folder: {placed} of {len(waiting)} finished download(s) put in the library"
-                   if waiting else "Rescanned the download folder: no finished download waits to be put in the library")
+            await self.rescan()
+        swept = await asyncio.to_thread(self.sweep) if config.DELETE_EMPTY_FOLDERS else []
+        self.event((f"Rescanned the download folder: {placed} of {len(waiting)} finished download(s) put in the library"
+                    if waiting else "Rescanned the download folder: no finished download waits to be put in the library")
+                   + (f"; {len(swept)} empty folder(s) removed" if swept else ""))
         return placed, len(waiting)
+
+    def sweep(self):
+        """Remove the empty folders that earlier downloads left where each download client
+        keeps its finished downloads. Returns the folders that are gone."""
+        gone = []
+        for client in config.providers("DOWNLOAD_CLIENTS"):
+            folder = self.state.get("download_folders", {}).get(client["id"])
+            if folder:
+                gone += importer.sweep(client, folder)
+        for folder in gone:
+            logs.debug(f"Removed the empty folder {folder}")
+        return gone
 
     def guessed_path(self, client, grab):
         """Where a finished download probably is when its client no longer lists it (taken out
@@ -992,8 +1043,51 @@ class Hunter:
         self.save()
         if not done:
             raise clients.ServiceError(grab.get("import_error") or "The import failed")
-        await clients.library_rescan(self.session)
+        await self.rescan()
         return True
+
+    async def manual_import(self, game_id, path, key=None, dry=False):
+        """Manual Import: move the Switch files of a folder or file the user chose to the folder
+        of a game. key: the item of the Queue it is done for; its download then counts as put
+        in the library. dry: only say what would be moved. Returns {"files": [{"file",
+        "folder", "how"}], "left": [names of files that stay where they are]}."""
+        game = self.games.get(game_id)
+        if game is None:
+            raise clients.ServiceError("This game is not in your library")
+        item = self.state["items"].get(key) if key else None
+        if item is not None and item["game_id"] != game_id:
+            raise ValueError
+        wanted = "DLC" if item is not None and item["type"] != "update" else "UPD"
+        try:
+            done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,
+                                                 (game_id, game.name or game_id), dry)
+        except importer.ImportProblem as e:
+            raise clients.ServiceError(str(e)[:1].upper() + str(e)[1:]) from e
+        result = {"files": done, "left": [os.path.basename(f) for f in left]}
+        if dry:
+            return result
+        folder, name = done[0]["folder"], os.path.basename(str(path).rstrip("/")) or str(path)
+        moved = sum(d["how"] == "moved" for d in done)
+        more = f" ({len(left)} file(s) left where they are)" if left else ""
+        if config.DELETE_EMPTY_FOLDERS and moved:
+            spare = [importer.local_download(c, f) for c in config.providers("DOWNLOAD_CLIENTS")
+                     for f in [self.state.get("download_folders", {}).get(c["id"])] if f]
+            if await asyncio.to_thread(importer.tidy, {}, path, spare):
+                more += "; the empty folder was removed"
+        self.event(f"Manual import: {name}: {len(done)} file(s) of {game.name or game_id} to {folder}{more}", "grab")
+        shown = item or {"game_id": game_id, "name": game.name or game_id, "type": "update"}
+        self.record("imported", shown, name, client="Manual Import", note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}",
+                    **({} if item else {"what": "manual import"}))
+        grab = (item or {}).get("grab")
+        if grab and not grab.get("imported"):
+            # The download this was done for is in the library now: the queue waits for the library.
+            grab.update(imported=int(time.time()), imported_to=folder)
+            grab.pop("import_error", None)
+            if grab.get("state") not in ("done", "stuck"):
+                grab.update(state="done", done_at=int(time.time()))
+        self.save()
+        await self.rescan()
+        return result
 
     async def watch(self):
         """Between rounds: follow the downloads. Skipped while a round runs; that does it too."""
@@ -1032,6 +1126,8 @@ class Hunter:
             return None
         if best["kind"] == "bundle" and not config.AUTO_BUNDLES:
             return None
+        if best["kind"] == "unlocker":
+            return None  # a DLC unlocker only goes out with a click of its own
         return best
 
     async def grab(self, key, guid, auto=False):
@@ -1093,14 +1189,14 @@ class Hunter:
 
     async def grab_best(self, min_score):
         """The button "Download all": of every item that awaits a choice, send the best
-        release if its score is at least `min_score`. Bundles are left for a click of their
-        own. Returns how many were sent; stops at the first one the download client refuses."""
+        release if its score is at least `min_score`. Bundles and DLC unlockers are left for
+        a click of their own. Returns how many were sent; stops at the first one the download client refuses."""
         sent = 0
         for item in list(self.state["items"].values()):
             if not self.awaits(item):
                 continue
             best = self.untried(item)[0]
-            if best.get("score", 0) < min_score or best["kind"] == "bundle":
+            if best.get("score", 0) < min_score or best["kind"] in ("bundle", "unlocker"):
                 continue
             try:
                 await self.grab(item["key"], best["guid"])

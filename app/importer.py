@@ -13,6 +13,7 @@ Both folders have to be volumes of this container. The library is named by its r
 import os
 import re
 import shutil
+import time
 
 import config
 
@@ -138,14 +139,17 @@ def holds(path):
     return f"it holds {count} file(s): {listed}", any(e in PACKED or e == ".r00-.r99" for e in endings)
 
 
-def put(source, folder, keep):
+def put(source, folder, keep, dry=False):
     """Bring one file into a folder; `keep` leaves the original where it is (a torrent that goes
-    on seeding). Returns (the new file, how it got there). Nothing is overwritten."""
+    on seeding). Returns (the new file, how it got there). Nothing is overwritten. `dry`: only
+    say what would be done."""
     target = os.path.join(folder, os.path.basename(source))
     if os.path.lexists(target):
         if os.path.isfile(target) and os.path.getsize(target) == os.path.getsize(source):
             return target, "was there already"
         raise ImportProblem(f"{target} is there already, with another size")
+    if dry:
+        return target, "linked" if keep else "moved"
     os.makedirs(folder, exist_ok=True)
     part = target + PART
     if keep:
@@ -174,20 +178,55 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
     a folder name template, the folder comes from the template and not from the files the game
     has. Returns ([{"file", "folder", "how"}] of what was brought in, [files that were left
     where they are]). ImportProblem says why not."""
-    templated = bool(game and config.FOLDER_TEMPLATE)
-    if not config.ROOT_FOLDERS:
-        raise ImportProblem("there is no root folder yet (Settings > Media Management > Root Folders)")
+    ready(game_files, game)
     if not reported:
         raise ImportProblem(f"{client['name']} no longer has this download in its list, so it does not say where the files are, "
                             "and no folder named after the release was found where its other downloads are")
-    if not templated and not game_files:
-        raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
     source = local_download(client, str(reported))
+    if not os.path.exists(source):
+        raise ImportProblem(
+            f"{source} is not there in this container. Make the download folder a volume of the container, under "
+            f"the same path as in {client['name']}; or give the download client a Remote Path and a Local Path.")
+    return place(source, game_files, wanted, protocol == "torrent", game)
+
+
+def ready(game_files, game):
+    """What importing needs before a file is looked at; ImportProblem says what is missing."""
+    if not config.ROOT_FOLDERS:
+        raise ImportProblem("there is no root folder yet (Settings > Media Management > Root Folders)")
+    if not (game and config.FOLDER_TEMPLATE) and not game_files:
+        raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
+
+
+def manual(path, game_files, wanted, game, dry=False):
+    """Manual Import: the Switch files of a folder or a file the user chose, moved to the
+    folder of a game. A file that has the title ID of another game in its name is left where
+    it is. `dry`: only say what would be done. Returns what bring() returns."""
+    ready(game_files, game)
+    source = os.path.normpath("/" + str(path or "").strip().lstrip("/"))
+    if not os.path.exists(source):
+        raise ImportProblem(f"{source} is not there in this container")
+    real = os.path.realpath(source)
+    for root in config.ROOT_FOLDERS:
+        inside = os.path.realpath(root["path"])
+        if under(real, inside):
+            raise ImportProblem(f"{source} is in your library already (the root folder {root['path']})")
+        if under(inside, real):
+            raise ImportProblem(f"{source} holds your library (the root folder {root['path']}): choose the folder of the download itself")
+    return place(source, game_files, wanted, False, game, dry=dry, only=game[0])
+
+
+def family(title_id):
+    """Base game, update and DLC of one game share everything but the last 13 bits."""
+    return int(title_id, 16) & ~0x1FFF
+
+
+def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
+    """Put the Switch files of a folder or a file of this container in the library (see bring).
+    keep: leave the originals where they are. only: the title ID of the game; files named with
+    the title ID of another game are left."""
+    templated = bool(game and config.FOLDER_TEMPLATE)
     try:
-        if not os.path.exists(source):
-            raise ImportProblem(
-                f"{source} is not there in this container. Make the download folder a volume of the container, under "
-                f"the same path as in {client['name']}; or give the download client a Remote Path and a Local Path.")
         files = switch_files(source)
         if not files:
             what, packed = holds(source)
@@ -195,8 +234,12 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
                       if packed else "Were its files moved by hand?" if what == "the folder is empty"
                       else "Nothing in it is a file for the Switch.")
             raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
-        done, left = [], []
+        done, left, others = [], [], []
         for file in files:
+            named = TITLE_ID.search(os.path.basename(file))
+            if only and named and family(named.group(1)) != family(only):
+                others.append(file)  # of another game: not for the folder of this one
+                continue
             kind = kind_of(os.path.basename(file), wanted)
             if kind == "BASE":
                 left.append(file)  # the game itself, from a bundle: the library has it already
@@ -205,16 +248,19 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
             # Whatever the library says: nothing is written outside a root folder.
             if not under(os.path.realpath(folder), os.path.realpath(root)):
                 raise ImportProblem(f"{folder} is not inside the root folder {root}")
-            target, how = put(file, folder, keep=protocol == "torrent")
+            target, how = put(file, folder, keep, dry)
             done.append({"file": os.path.basename(target), "folder": folder, "how": how})
     except PermissionError as e:
         raise ImportProblem(f"NSWHunter may not write {e.filename or 'there'}. The user of the container has to own "
                             "the library and the download folder, or be in their group.") from e
     except OSError as e:
         raise ImportProblem(f"{e.filename or source}: {e.strerror or e}") from e
+    if not done and others:
+        names = ", ".join(os.path.basename(f) for f in others[:3]) + (" and more" if len(others) > 3 else "")
+        raise ImportProblem(f"the Switch files in {source} have the title ID of another game: {names}")
     if not done:
         raise ImportProblem("the download only holds the game itself, which the library has already")
-    return done, left
+    return done, left + others
 
 
 def tidy(client, reported, spare=()):
@@ -237,6 +283,32 @@ def tidy(client, reported, spare=()):
         except OSError:
             pass
     return None if os.path.lexists(source) else source
+
+
+EMPTY_AGE = 600  # seconds a folder has to be left alone before the sweep takes it for left behind
+
+
+def sweep(client, folder, age=EMPTY_AGE):
+    """Remove the folders in the folder of finished downloads of a client that hold no file at
+    all: what earlier downloads left when their files went to the library. A folder with a file
+    anywhere in it is not touched, nor one that changed in the last minutes (a download that
+    is just starting). Returns the folders that are gone."""
+    top = local_download(client, str(folder or ""))
+    try:
+        found = sorted(e.path for e in os.scandir(top) if e.is_dir(follow_symlinks=False))
+    except OSError:
+        return []
+    gone, now = [], time.time()
+    for path in found:
+        try:
+            walked = list(os.walk(path))
+            if any(names for _, _, names in walked) or now - max(os.stat(f).st_mtime for f, _, _ in walked) < age:
+                continue
+        except (OSError, ValueError):
+            continue
+        if tidy({}, path):
+            gone.append(path)
+    return gone
 
 
 def root_folders():
