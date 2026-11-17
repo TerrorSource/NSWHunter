@@ -2,7 +2,7 @@
 
 Searches your indexers for the Switch updates and DLC that your library misses and sends them to your download client.
 
-1. Fetches the export of [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) (`/export/library.json`) and takes all games with `updateMissing: true`.
+1. Fetches the export of [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) and takes all games that miss an update or DLC.
 2. Searches for releases of those games: through Prowlarr, or on a Newznab or Torznab indexer directly.
 3. Judges each release: is it the right game, is the version newer than yours, is it an update?
 4. Shows the candidates in a web panel. You click **Download**, or you let certain releases be sent automatically.
@@ -12,110 +12,45 @@ Once the update is in your library, the item disappears by itself.
 
 ## Installing
 
-The image is at `ghcr.io/<account>/nswhunter`. In Portainer: **Stacks > Add stack** and paste [docker-compose.yml](docker-compose.yml):
+Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` folders by folders on your server and set `TZ`, `PUID` and `PGID` to yours. The panel is on port 3033.
 
-```yaml
-services:
-  nswhunter:
-    container_name: nswhunter
-    image: ghcr.io/<account>/nswhunter:latest
-    restart: always
-    network_mode: bridge
-    read_only: true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETGID
-      - SETUID
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp
-    environment:
-      - TZ=Etc/UTC
-      - PUID=1000
-      - PGID=1000
-    ports:
-      - 3033:3033
-    volumes:
-      - /path/to/nswhunter/data:/data
-      - /path/to/nswhunter/backup:/backup
-```
-
-`/data` holds the settings and the state, `/backup` the backups of both. The container runs with a read-only file system and without privileges: it only writes to those two folders. The four capabilities are for the start, where the folders are given to `PUID`:`PGID`; after that the app runs as that user without any.
-
-The repo is private, and so is the image. Portainer then needs a registry to pull it: **Registries > Add registry > Custom**, URL `ghcr.io`, username `<account>` and as password a GitHub token with the `read:packages` scope. Or make the package public under GitHub > Packages > nswhunter > Package settings.
+- `/data` holds the settings and the state, `/backup` the backups of both.
+- The container runs read-only and without privileges; it only writes to those two folders.
+- If the image is private, the server needs a login for `ghcr.io` to pull it: your GitHub username and a token with the `read:packages` scope.
 
 ## The first login
 
 At the first start NSWHunter makes the user `admin` with a password it makes up, and writes both to the log of the container:
 
 ```
-==============================================================
   Log in to the panel on port 3033 with
     username: admin
     password: 4mZ0-example-Qx7
   You have to choose a password of your own at the first login.
-==============================================================
 ```
 
-Open `http://<nas>:3033` and log in with them. The panel then lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until you have done that the lines are in the log at every start, with the same password; after that they are gone and the made-up password no longer works. The password is only written to the output of the container, not to the log files and not to the Log page.
+With that password the panel lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until then the lines are in the log at every start; after that they are gone and the made-up password no longer works.
 
 ## Setting up
 
-The menu on the left has the settings, laid out as in Sonarr and Radarr:
+The settings are in the menu on the left; every field has its explanation next to it. Three things have to be filled in:
 
-| Page | What is there |
-|---|---|
-| **Media Management** | Automatic download (see [Automatic download](#automatic-download)), how long to wait for the library (see [After sending](#after-sending)), how often to search (see [Searching and API limits](#searching-and-api-limits)), and whether missing DLC is searched |
-| **Indexers** | Where releases are searched: your Prowlarr (address and API key, from Prowlarr > Settings > General), or a Newznab (usenet) or Torznab (torrent) indexer directly. Per indexer the categories: `1000` is Console with all its subcategories |
-| **Download Clients** | NZBGet, SABnzbd, qBittorrent, Transmission, uTorrent, or the download client of Prowlarr. A usenet release goes to the first usenet client in the list that is switched on, a torrent to the first torrent client |
-| **Connect** | The library: the address of Switch-library-manager-web and an API key (My account > API keys > Make a key; Read only is enough, with the Editor role NSWHunter can also ask for a scan). And the connections for notifications: Telegram, Discord (a webhook) and Apprise, each with its own notification triggers |
-| **General** | Security (username, password, host names; see [Security](#security)), Logging (log level and the size of a log file) and Backups (folder, interval and retention) |
-| **UI** | Light or dark, the format of dates and times, and whether "3 hours ago" or the date is shown |
+1. **Settings > Connect**: the address of Switch-library-manager-web and an API key (My account > API keys; Read only is enough). Optionally a connection for notifications: Telegram, Discord or Apprise.
+2. **Settings > Indexers**: your Prowlarr, or a Newznab or Torznab indexer directly.
+3. **Settings > Download Clients**: NZBGet or SABnzbd for usenet; qBittorrent, Transmission or uTorrent for torrents. Torrents are only searched when a torrent client is enabled.
 
-The pages with single settings have **Save Changes** in the toolbar; it lights up when something was changed. Indexers, download clients and connections are cards. **+** opens a window to choose what to add, a click on a card changes it; the window has **Delete**, **Test**, **Cancel** and **Save**. A card says whether its service answers, and **Test All** in the toolbar asks all of them.
-
-A connection has **Notification Triggers**: On Grab (a release was sent automatically), On Arrival, On Download Failure, On Manual Interaction Required (releases await your choice) and On Health Issue (a round broke). Each connection is only told what is ticked. Keys and passwords never go back to the browser: an empty field means "keep what is there". A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
-
-Releases that an indexer filed under another console (PS4, Xbox, Wii, …) or that have another platform in the name are ruled out: the Switch has no category of its own.
-
-Torrents are only searched when a torrent client is switched on. NSWHunter follows a torrent as it follows a usenet download; a torrent that is seeding counts as downloaded.
-
-An older version had one Prowlarr and one download client, set on one page or with environment variables (`PROWLARR_URL`, `NZBGET_URL`, …). At the first start of this version they become the first entries of the lists; after that only the lists count. The other settings (timing, which indexers of Prowlarr) are environment variables only, see [.env.example](.env.example).
+The rest has defaults that work: **Media Management** (automatic download, searching, DLC), **General** (login, logging, backups) and **UI** (theme, dates).
 
 ## The panel
 
-The panel is laid out as Sonarr and Radarr are: a bar on top with a search box that finds a game from any page, the menu on the left, and a toolbar per page.
+The panel is laid out as Sonarr and Radarr are.
 
-| Menu | What is there |
-|---|---|
-| **Games** | Every game of your library: the version you have, the latest, the DLC, the size, and whether it is complete. It can be filtered and sorted. A game that misses something leads to its row on the Wanted page |
-| **Activity > Queue** | What was sent to a download client and is not in the library yet, with the client, the indexer and how far the download is |
-| **Activity > History** | What was sent, what arrived and what failed |
-| **Activity > Blocklist** | Releases that are not offered or sent again: the ones you rejected and the downloads that failed. **Remove** takes a release off the list, **Try again** sends a failed one once more |
-| **Wanted** | Every game that misses an update or DLC, with the releases that were found |
-| **Settings** | An overview of the settings pages, see [Setting up](#setting-up) |
-| **System > Status** | Health (what does not work), every service with what it last answered, and facts about this installation |
-| **System > Backup** | The backups, see [Backups](#backups) |
-| **System > Events** | The last 1000 things NSWHunter did; can be limited to warnings and errors, and searched |
-| **System > Log Files** | The log files in `/data/logs`, to download |
+- **Games**: every game of your library and whether it is complete.
+- **Wanted**: every game that misses an update or DLC, with the releases that were found. A row has a **Download** button for its best release; a click on the name shows all of them. The tiles on top filter the list.
+- **Activity**: the **Queue** (sent, not in the library yet), the **History** (sent, arrived, failed) and the **Blocklist** (rejected and failed releases).
+- **System**: **Status** (what does not work), **Backup**, **Events** and **Log Files**.
 
-The numbers in the menu are what waits: downloads in the queue, games awaiting your choice, and things that do not work.
-
-The tiles at the top of the **Wanted** page are buttons. A click on one shows only the games that belong to it:
-
-- **missing something**: every game that misses an update or DLC.
-- **updates missing** and **DLC missing**; the DLC tile is only shown when missing DLC is searched.
-- **awaiting your choice**: games with a candidate release that has not been sent.
-- **ignored**: only shown when you ignore something.
-- **in queue**, **download failed** and **arrived** lead to the Queue, the Blocklist and the History.
-
-A row shows the best release of its game with a **Download** button, so it need not be opened. A click on the name opens it: the releases in columns (score, release, indexer, size, date), each with **Download** and **Reject**. In the toolbar, **Sync Now** starts a round, **Search All** searches every game by name now, and **Download All** sends the best release of every game that scores 9 or 10; both ask once more before they do, and Download All leaves bundles for a click of their own.
-
-If a round breaks, every page says so in a red bar, you get a notification and the health check of the container turns red. If one game cannot be handled, it is left out and the rest of the round goes on; a yellow bar says how many were left out.
+In the toolbar of Wanted, **Search All** searches every game now and **Download All** sends the best release of every game that scores 9 or 10. If a round breaks, every page says so in a red bar.
 
 ## How a release is judged
 
@@ -163,17 +98,12 @@ Start with off and watch for a few days whether the scores match how updates are
 
 ## After sending
 
-NSWHunter asks the download client every two minutes how a sent release is doing. That works with NZBGet, SABnzbd, qBittorrent, Transmission and uTorrent; if the download goes through the download client of Prowlarr, there is no status and only the time counts. A client that does not answer is not concluded from: its downloads are left as they are.
+NSWHunter asks the download client every two minutes how a sent release is doing.
 
-| What the download client says | What NSWHunter does |
-|---|---|
-| Busy or in the queue | Wait, however long it takes. The panel shows how far the download is |
-| Failed | The release is skipped and listed under **download failed**; the next one gets its turn at once |
-| Downloaded | Switch-library-manager-web gets the request to scan, and the library is read again |
-| Downloaded, but not in the library after the waiting time | You get a notification. No next release is sent: the folder of your download client apparently does not reach the library |
-| Does not know the release | After the waiting time it counts as not arrived: it is listed under **download failed** and the next one gets its turn |
-
-You set the waiting time on the Media Management page (**Wait for the library**, default 60 minutes). Scanning on request only works if the API key of Switch-library-manager-web has the Editor role; with "Read only" NSWHunter waits for the library's own scan.
+- **Failed:** the release goes to the blocklist and the next one gets its turn.
+- **Downloaded:** Switch-library-manager-web is asked to scan and the library is read again. Scanning on request needs an API key with the Editor role.
+- **Downloaded, but not in the library after the waiting time** (default 60 minutes, under Media Management): you get a notification and nothing else is sent.
+- **Unknown to the client after the waiting time:** it counts as failed.
 
 ## Choosing in Telegram
 
@@ -213,56 +143,3 @@ With **Also search for missing DLC** on the Media Management page the DLC that y
 - A release with the title ID of the DLC gets score 10.
 - If the name of the DLC is in the title, the score is 8. If a game has several DLC with almost the same name ("In-Game Commentary - Dutch", "... - Spanish"), a release belongs to the DLC it names best and is ruled out for the others.
 - A release that names no DLC ("DLC Unlocker", "DLC Pack") is listed once per game, under **DLC pack**, with score 5.
-
-## Developing and testing
-
-```bash
-docker compose -f docker-compose.dev.yml up -d --build
-```
-
-The tests run against fake versions of the library, Prowlarr, a Newznab and a Torznab indexer, NZBGet, Telegram and Discord (`tests/fakes.py`) and of the three torrent clients (`tests/fake_torrents.py`). `commit-git.sh` runs them by itself in the image. To run them separately:
-
-```bash
-pip install -r requirements.txt -r requirements-dev.txt
-```
-
-```bash
-python -m pytest
-```
-
-## Releasing a new version
-
-1. Raise `__version__` in `app/version.py`.
-2. Put a section `## [X.Y.Z] - YYYY-MM-DD` at the top of [CHANGELOG.md](CHANGELOG.md) with what changed.
-3. Run `./commit-git.sh -r "short description"`.
-
-The script runs the tests, checks for secrets, pushes to `main` and creates release `vX.Y.Z` with the text from the changelog. GitHub then builds the images:
-
-| Event | Image |
-|---|---|
-| Push to `main` | `ghcr.io/<account>/nswhunter:latest` |
-| Release `vX.Y.Z` | `ghcr.io/<account>/nswhunter:X.Y.Z` and `:X.Y` |
-
-Without `-r` the script only pushes; `latest` is then rebuilt, without a new release. After that, pull the stack again in Portainer (**Pull and redeploy**).
-
-## Layout
-
-| File | Contents |
-|---|---|
-| `app/matcher.py` | Judges one release name for one game |
-| `app/clients.py` | What every talk with a service shares, the library, NZBGet and SABnzbd |
-| `app/indexers.py` | Prowlarr and the direct Newznab and Torznab indexers |
-| `app/torrent.py` | qBittorrent, Transmission and uTorrent |
-| `app/downloads.py` | Hands a release to a download client and asks how it is doing |
-| `app/notify.py` | Telegram, Discord and Apprise |
-| `app/backup.py` | The backups |
-| `app/logs.py` | The log, in three levels |
-| `app/hunter.py` | One round: fetch, search, judge, send |
-| `app/main.py` | Web panel and scheduling |
-| `app/auth.py` | The login, its sessions and the host names the panel answers to |
-| `app/config.py` | The settings: single ones and the lists of indexers, download clients and connections |
-| `entrypoint.sh` | Starts the app as `PUID`:`PGID` |
-| `commit-git.sh` | Puts the working directory on GitHub and creates a release |
-| `.github/workflows/docker.yml` | Tests, scans and builds the image on GitHub |
-
-The state is in `/data/state.json`. Delete that file to start over.

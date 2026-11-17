@@ -2,6 +2,14 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.1.1] - 2026-11-17
+
+### Changed
+
+- **Nothing in the repository names an account or a server any more.** `docker-compose.yml` has placeholders for the two folders (`/path/to/nswhunter/data` and `/path/to/nswhunter/backup`), the build names the image after the repository it runs in, and `commit-git.sh` pushes to the remote of its folder.
+- **The defaults are the usual ones:** `PUID` and `PGID` 1000 and `TZ` `Etc/UTC`. A stack that sets them itself, as the compose file always did, notices nothing.
+- The README is a good deal shorter.
+
 ## [3.1.0] - 2026-11-17
 
 ### Changed
@@ -233,5 +241,5 @@ First version.
 - Judges releases without a fixed name format on game (title ID or name), version (internal number or visible version) and kind (update, bundle, DLC, base game).
 - Sends a chosen release to NZBGet, SABnzbd or the download client of Prowlarr. Sending automatically can be set with `AUTO_DOWNLOAD`.
 - Web panel on port 3033 to judge candidates, send them, reject them and ignore games.
-- Runs as `PUID`:`PGID` (default 1000:1000); `/data` gets that owner at start.
-- Image at `ghcr.io/<account>/nswhunter` for amd64 and arm64: `latest` on every push, `X.Y.Z` and `X.Y` on a release.
+- Runs as `PUID`:`PGID`; `/data` gets that owner at start.
+- Image on the GitHub Container Registry for amd64 and arm64: `latest` on every push, `X.Y.Z` and `X.Y` on a release.

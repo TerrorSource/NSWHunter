@@ -1,8 +1,7 @@
 FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="NSWHunter" \
-      org.opencontainers.image.description="Finds the Switch updates that switch-library-manager-web misses through Prowlarr and sends them to your usenet client" \
-      org.opencontainers.image.source="https://github.com/<account>/NSWHunter"
+      org.opencontainers.image.description="Finds the Switch updates and DLC that switch-library-manager-web misses on your indexers and sends them to your download client"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

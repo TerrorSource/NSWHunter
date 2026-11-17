@@ -14,7 +14,7 @@
 #   push to main     -> ghcr.io/<account>/nswhunter:latest
 #   release vX.Y.Z   -> ghcr.io/<account>/nswhunter:X.Y.Z and :X.Y
 #
-# After that on the NAS / in Portainer: fetch the stack again (pull and redeploy).
+# After that on the server: fetch the stack again (pull and redeploy).
 #
 # Releasing a new version:
 #   1. raise __version__ in app/version.py
@@ -26,13 +26,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_SLUG="<account>/NSWHunter"
-REPO_URL="https://github.com/${REPO_SLUG}.git"
 BRANCH="main"
 LOCAL_TAG="nswhunter"
 
 cd "$(dirname "$0")"
 echo "📁 $(pwd)"
+
+# Where it goes is the remote 'origin' of this folder; no account is named in this script.
+REPO_URL="$(git remote get-url origin 2>/dev/null || true)"
+if [ -z "$REPO_URL" ]; then
+  echo "❌ This folder has no git remote 'origin'. Set it once:" >&2
+  echo "     git init -b ${BRANCH} && git remote add origin https://github.com/<account>/<repo>.git" >&2
+  exit 1
+fi
+REPO_SLUG="$(printf '%s' "$REPO_URL" | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 MSG="update from the working folder"
@@ -106,18 +113,6 @@ else
 fi
 rm -f "$TEST_LOG"
 
-# ── 1. Initialise the repo ────────────────────────────────────────────────────
-if [ ! -d .git ]; then
-  echo "🔧 Creating a new git repo…"
-  git init -q
-  git symbolic-ref HEAD "refs/heads/${BRANCH}"
-fi
-
-if ! git remote get-url origin >/dev/null 2>&1; then
-  echo "🔗 Setting remote 'origin' → ${REPO_URL}"
-  git remote add origin "${REPO_URL}"
-fi
-
 # ── 2. Only the files that are needed─────────────────────────────────────────
 if [ ! -f .gitignore ]; then
   echo "❌ .gitignore is missing — stopping (or data/ would go along)."
@@ -144,7 +139,7 @@ done <<< "${STAGED}"
 #     source code, the tests and the documentation:
 #       • SLM-key  : slm_ followed by 40 characters (the tests use "slm_test")
 #       • compose  : a filled-in ..._API_KEY= or ..._PASSWORD= (must be empty; fill it in
-#                    on the NAS or in Portainer, not in this folder)
+#                    on the server, not in this folder)
 #       • JWT      : a complete three-part token with a long payload
 #       • Telegram : a bot token (digits, a colon, 30 or more characters)
 while IFS= read -r f; do
@@ -209,7 +204,7 @@ else
   echo "   • First time? GitHub wants a Personal Access Token as the password"
   echo "     (your normal password no longer works):"
   echo "       https://github.com/settings/tokens   -> scope: repo, workflow"
-  echo "     Username = <account>, password = the token."
+  echo "     Username = your GitHub username, password = the token."
   echo "   • The repo already had commits (a README made on GitHub)? Fetch them first:"
   echo "       git pull --rebase origin ${BRANCH} && ./commit-git.sh"
   echo ""

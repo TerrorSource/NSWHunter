@@ -20,4 +20,6 @@ def test_compose_file_holds_no_filled_in_secrets():
     with open(os.path.join(ROOT, "docker-compose.yml"), encoding="utf-8") as f:
         text = f.read()
     assert not re.search(r"(API_KEY|PASSWORD)=\S", text)
-    assert "3033:3033" in text and "ghcr.io/<account>/nswhunter" in text
+    assert "3033:3033" in text and re.search(r"image: ghcr\.io/[a-z0-9-]+/nswhunter:latest", text)
+    # And nothing of one particular server: the folders are placeholders.
+    assert "/path/to/nswhunter/data:/data" in text and "/mnt/" not in text

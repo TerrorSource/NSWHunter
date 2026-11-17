@@ -1,7 +1,7 @@
-# Builds the image and puts it on ghcr.io/<account>/nswhunter
+# Builds the image and puts it on ghcr.io/<account>/<repository>
 #   push to main        -> :latest  (+ :sha-xxxxxxx)
 #   release vX.Y.Z      -> :X.Y.Z and :X.Y
-# Platforms: linux/amd64 (NAS, server) and linux/arm64 (Apple Silicon, Raspberry Pi).
+# Platforms: linux/amd64 and linux/arm64 (Apple Silicon, Raspberry Pi).
 name: Docker image
 
 on:
@@ -19,9 +19,6 @@ permissions:
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  IMAGE: ghcr.io/<account>/nswhunter
 
 jobs:
   # The tests first: if one fails, no image is built.
@@ -70,6 +67,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The image is named after the repository this runs in; a registry wants lower case.
+      - name: Name the image
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
