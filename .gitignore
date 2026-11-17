@@ -5,4 +5,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# The tests are run from the working folder, before every push (see commit-git.sh): they are
+# not in the repository.
+/tests/
 .DS_Store

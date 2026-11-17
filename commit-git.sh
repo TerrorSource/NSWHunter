@@ -87,14 +87,17 @@ if [ "$MAKE_RELEASE" -eq 1 ]; then
 fi
 
 # ── 0. Tests before the push────────────────────────────────────────────────────
-# A red test on GitHub costs a build and a wait; here it costs half a minute.
-# The tests run inside the image itself, so the Dockerfile is tested too.
+# The tests are not in the repository: this is the only place they run, so nothing is pushed
+# while one fails. They run inside the image itself, so the Dockerfile is tested too, and
+# then the panel is clicked through in a real browser (tests/panel/run.sh).
 # Without Docker: in .venv or with python3, if pytest and aiohttp are there.
 TEST_LOG="$(mktemp -t nswhunter-tests)"
 PY_BIN="python3"
 [ -x ".venv/bin/python" ] && PY_BIN=".venv/bin/python"
 if [ "$SKIP_TESTS" -eq 1 ]; then
   echo "⚠️  Tests skipped (--no-test)."
+elif [ ! -d tests ]; then
+  echo "⚠️  No tests folder here — tests skipped."
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "🧪 Building the image and running the tests…"
   docker build -q -t "${LOCAL_TAG}:prepush" . > "$TEST_LOG" 2>&1 \
@@ -103,6 +106,12 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     "pip install -q --root-user-action=ignore -r tests/requirements.txt >/dev/null 2>&1 && python3 -m pytest tests" > "$TEST_LOG" 2>&1 \
     || { tail -25 "$TEST_LOG"; echo "🛑 Tests failed — nothing committed."; exit 1; }
   tail -1 "$TEST_LOG"
+  if [ -x tests/panel/run.sh ]; then
+    echo "🧪 The panel in a browser…"
+    IMAGE="${LOCAL_TAG}:prepush" tests/panel/run.sh > "$TEST_LOG" 2>&1 \
+      || { tail -40 "$TEST_LOG"; echo "🛑 The browser test of the panel failed — nothing committed."; exit 1; }
+    tail -1 "$TEST_LOG"
+  fi
 elif "$PY_BIN" -c "import pytest, aiohttp" 2>/dev/null; then
   echo "🧪 Tests…"
   "$PY_BIN" -m pytest tests > "$TEST_LOG" 2>&1 || { tail -25 "$TEST_LOG"; echo "🛑 Tests failed — nothing committed."; exit 1; }

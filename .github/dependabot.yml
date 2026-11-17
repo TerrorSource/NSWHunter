@@ -1,11 +1,11 @@
 # Dependabot: proposes weekly updates of the Python packages, the base image and GitHub Actions.
 # Note: the code on GitHub is updated through commit-git.sh from the working folder. So take the
 # updates over there (the pull requests then close by themselves) instead of merging them on GitHub.
+# The tests are not in the repository, so nothing tests a proposal here: commit-git.sh does, there.
 version: 2
 updates:
-  # The packages of the app, of the tests, and of the browser test of the panel.
   - package-ecosystem: pip
-    directories: ["/", "/tests", "/tests/panel"]
+    directory: /
     schedule: { interval: weekly }
     groups:
       python-packages:
