@@ -902,6 +902,13 @@ class Hunter:
         grab.update(imported=int(time.time()), imported_to=folder)
         grab.pop("import_error", None)
         more = f" ({len(left)} file(s) of the game itself left in the download)" if left else ""
+        if config.DELETE_EMPTY_FOLDERS and any(d["how"] == "moved" for d in done):
+            # The files went to the library: an empty folder is all that is left of the download.
+            where = grab.get("path") or self.guessed_path(client, grab)
+            gone = await asyncio.to_thread(importer.tidy, client, where,
+                                           (self.state.get("download_folders", {}).get(client["id"]),))
+            if gone:
+                more += "; the empty folder of the download was removed"
         self.event(f"Imported: {grab['title']}: {len(done)} file(s) to {folder}{more}", "grab")
         self.record("imported", item, grab["title"], client=grab.get("client_name", ""),
                     note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}")

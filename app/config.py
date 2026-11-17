@@ -102,6 +102,8 @@ IMPORT_COMPLETED = flag("IMPORT_COMPLETED")
 FOLDER_TEMPLATE = env("FOLDER_TEMPLATE", "{TITLE_NAME} [{TITLE_ID}]")
 # After a usenet download was put in the library: take it out of the download client too.
 REMOVE_COMPLETED = flag("REMOVE_COMPLETED")
+# After the files of a download were moved to the library: remove its folder if nothing is left in it.
+DELETE_EMPTY_FOLDERS = flag("DELETE_EMPTY_FOLDERS")
 # Where the library is: [{"path": the folder in this container, "library_path": the same folder
 # as Switch-library-manager-web names it}]. Set in the panel only (see add_root_folder).
 ROOT_FOLDERS = []
@@ -201,7 +203,7 @@ EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
-    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "FOLDER_TEMPLATE": "template",
+    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,

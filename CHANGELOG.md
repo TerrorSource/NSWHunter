@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.13.0] - 2026-11-17
+
+### Added
+
+- **Delete Empty Folders in Download Folder** (Settings > Media Management > Importing, off by default): after the files of a download were moved to the library, the folder it came from is looked at and removed if nothing is left in it, with the empty folders inside it. A folder that still holds a file stays as it is, so nothing is lost. The folder all downloads are in, a root folder and a volume are never removed, and neither is the folder of a torrent, whose files stay to go on seeding. As an environment variable: `DELETE_EMPTY_FOLDERS`.
+
 ## [3.12.0] - 2026-11-17
 
 ### Added

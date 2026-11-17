@@ -1595,7 +1595,9 @@ const FORMS = {
       {name: "FOLDER_TEMPLATE", label: "Folder Name Template", placeholder: "{TITLE_NAME} [{TITLE_ID}]",
        help: "The folder of a game in the root folder, as Organize of Switch-library-manager-web names it: {TITLE_NAME} is the name of the game and {TITLE_ID} its title ID, so the default gives a folder like \"Some Game [0100ABCD0000A000]\". A folder that already has the title ID in its name is used as it is. Empty: a download goes next to the files its game already has."},
       {name: "REMOVE_COMPLETED", label: "Remove Completed", checkbox: true,
-       help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."}]},
+       help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."},
+      {name: "DELETE_EMPTY_FOLDERS", label: "Delete Empty Folders in Download Folder", checkbox: true,
+       help: "After the files of a download were moved to your library, look in the folder it came from and remove that folder if nothing is left in it. A folder that still holds a file stays as it is."}]},
     {title: "Searching", fields: [
       {name: "SEARCH_INTERVAL_HOURS", label: "Automatic Search", options: [
         ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],

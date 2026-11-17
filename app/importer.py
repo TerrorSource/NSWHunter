@@ -217,6 +217,28 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
     return done, left
 
 
+def tidy(client, reported, spare=()):
+    """Remove the folder of a download if nothing is left in it, with the empty folders inside
+    it. Only a folder without a single file goes: one leftover (an .nfo, a sample, the game
+    itself from a bundle) and it stays as it is, with every folder that leads to that file.
+    Never a root folder or a folder one is in, never a volume, never a folder in `spare`
+    (where the other downloads of the client are). Returns the folder if it is gone."""
+    source = local_download(client, str(reported or ""))
+    if not reported or os.path.islink(source) or not os.path.isdir(source):
+        return None
+    real = os.path.realpath(source)
+    kept = [os.path.realpath(r["path"]) for r in config.ROOT_FOLDERS]
+    kept += [os.path.realpath(local_download(client, str(s))) for s in spare if s]
+    if os.path.ismount(source) or any(under(k, real) for k in kept):
+        return None
+    for folder, _, _ in os.walk(source, topdown=False):  # the deepest first; a link is not followed
+        try:
+            os.rmdir(folder)  # refuses a folder that holds anything, so nothing is lost
+        except OSError:
+            pass
+    return None if os.path.lexists(source) else source
+
+
 def root_folders():
     """The root folders for the panel: their paths, whether they are there, and the free space."""
     listed = []
