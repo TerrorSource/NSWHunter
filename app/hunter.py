@@ -230,8 +230,12 @@ class Hunter:
         self.state["services"][name] = {"ok": ok, "text": text, "at": int(time.time())}
 
     def did(self, name, start):
-        """Remember when a task ran and how long it took, for the Tasks page."""
-        self.state.setdefault("tasks", {})[name] = {"last": int(start), "duration": round(time.time() - start, 2)}
+        """Remember when a task ran and how long it took, for the Tasks page: per task the last
+        time, and the last twenty runs of any task."""
+        duration = round(time.time() - start, 2)
+        self.state.setdefault("tasks", {})[name] = {"last": int(start), "duration": duration}
+        run = {"name": name, "text": TASKS[name], "started": int(start), "ended": int(time.time()), "duration": duration}
+        self.state["task_runs"] = [run] + self.state.get("task_runs", [])[:19]
 
     async def task(self, name, work):
         start = time.time()

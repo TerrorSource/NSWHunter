@@ -2,6 +2,23 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.3.0] - 2026-11-17
+
+### Changed
+
+- **Wanted is a table now, as Wanted > Missing in Sonarr and Radarr.** One row per game with a tick box, what it misses, the best release that was found, its score, a status label and when it was last searched, and three small buttons: Automatic Search, Interactive Search and Download. The toolbar has **Search All**, **Search Selected**, **Download Selected**, **Ignore Selected** and **Download All**; under the table stands the total number of records.
+- **Wanted has two pages in the menu:** **Missing** (everything) and **Awaiting Choice** (only the games with a release to decide on). The tiles on top made way for the **Filter** menu of the toolbar: All, Update Missing, DLC Missing, Awaiting Choice, In Queue, Ignored.
+- **Interactive Search.** The name of a game, on Wanted, Games and in the Queue, opens a window with everything that was found for it: per missing update or DLC the releases with score, indexer, size and age, and a button to download or reject each. What was ruled out and what is on the blocklist is there too.
+- **Sort and Filter are menus** on the right of the toolbar, with a drawing and a name like the other buttons, instead of select boxes.
+- **Games** has **Update All**, **RSS Sync** and **Search All** in its toolbar, the name of a game as a link, a status label in one colour (Complete, Update Missing, DLC Missing) and the two search buttons at the end of a row.
+- **System > Tasks** has no toolbar any more and a second list, **Queue**: the last twenty tasks that ran, with when they started and ended and how long they took. The button to run a task is a small drawing at the end of its row.
+- **Lists use the whole width** of the window, with the total number of records under them. The buttons in the rows of the Queue, the Blocklist and the backups are small drawings; the name of a backup downloads it.
+- The **account** is behind the drawing in the bar on top, with Log out. What NSWHunter is doing and when the next round starts is at the foot of the menu.
+
+### Fixed
+
+- On the Blocklist the line under the name of a game ("Update", "DLC: ...") was missing on all but one of its rows.
+
 ## [3.2.0] - 2026-11-17
 
 ### Added

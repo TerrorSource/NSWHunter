@@ -353,8 +353,17 @@ def test_tasks_say_when_they_ran_and_can_be_run_by_hand():
         # Searched a moment ago: the next search is a day away, the next backup a week.
         assert 86000 < tasks["search"]["next"] - time.time() < 86500
         assert 6.9 * 86400 < tasks["backup"]["next"] - time.time() < 7.1 * 86400
+        # What ran is kept too, newest first, for the queue of the Tasks page.
+        runs = hunter.state["task_runs"]
+        assert {r["name"] for r in runs} == set(tasks) - {"downloads"}
+        assert all(r["text"] and r["started"] <= r["ended"] and r["duration"] >= 0 for r in runs)
         queries = len(fakes["queries"])
         assert await hunter.run_task("rss") is False and len(fakes["queries"]) == queries + 1
+        assert hunter.state["task_runs"][0]["name"] == "rss" and len(hunter.state["task_runs"]) == len(runs) + 1
+        # No more than the last twenty are kept.
+        for _ in range(25):
+            hunter.did("health", time.time())
+        assert len(hunter.state["task_runs"]) == 20
         # Search Missing is done by a round that starts now.
         assert await hunter.run_task("search") is True and hunter.state["searched"] == {}
         await hunter.grab(ALAN, hunter.state["items"][ALAN]["candidates"][0]["guid"])

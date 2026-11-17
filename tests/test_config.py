@@ -447,6 +447,7 @@ def test_api_covers_and_tasks():
         assert (await client.get("/api/cover/0100CCCC0000C000")).status == 404
         data = await (await client.get("/api/tasks")).json()
         assert [t["text"] for t in data["tasks"]][:3] == ["Check Health", "Library Sync", "Rss Sync"]
+        assert data["runs"] == []  # nothing ran yet
         # Not set up: a task cannot be run, and says so instead of failing.
         r = await client.post("/api/task", json={"name": "rss"})
         assert r.status == 502 and "not set up" in (await r.json())["error"]

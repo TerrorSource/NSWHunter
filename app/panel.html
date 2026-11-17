@@ -52,12 +52,14 @@
   .find input { all: unset; width: 200px; padding: 4px 2px; border-bottom: 1px solid var(--on-dark); color: var(--on-dark); font-size: 14px; }
   .find input::placeholder { color: var(--on-dark); opacity: .8; }
   .find input:focus { border-bottom-color: var(--accent-on-dark); }
-  #top .line { color: var(--on-dark); opacity: .7; font-size: 13px; }
+  #topright { display: flex; align-items: center; }
   #top button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; white-space: nowrap; }
   #top button:hover { color: var(--accent-on-dark); }
   #top button:focus-visible { outline: 2px solid var(--accent-on-dark); }
   #menu { display: none !important; font-size: 20px; margin-left: 10px; }
-  aside { background: var(--side); color: var(--on-dark); }
+  aside { background: var(--side); color: var(--on-dark); display: flex; flex-direction: column; }
+  /* What NSWHunter is doing, at the foot of the menu, where Sonarr and Radarr put their messages. */
+  #sidefoot { margin-top: auto; position: sticky; bottom: 0; padding: 14px 24px; font-size: 12px; line-height: 1.4; opacity: .75; overflow-wrap: anywhere; }
   nav button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; cursor: pointer;
                padding: 12px 24px; border-left: 3px solid transparent; font-size: 14px; }
   nav button:hover { color: var(--accent-on-dark); }
@@ -78,14 +80,20 @@
   .toolbar .tool:disabled { opacity: .45; cursor: default; color: inherit; }
   .toolbar .tool:focus-visible { outline: 2px solid var(--accent-on-dark); outline-offset: -2px; }
   .toolbar .sep { width: 1px; margin: 12px 8px; background: rgba(255, 255, 255, .25); }
-  .toolbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; min-width: 0; max-width: 100%; }
-  .toolbar .right input { min-width: 0; flex: 1 1 120px; }
-  .toolbar label { font-size: 12px; opacity: .8; }
-  .toolbar select, .toolbar input { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--edge);
-                                    background: var(--input); color: var(--text); }
-  .toolbar .right button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 4px; border: 1px solid var(--edge);
-                           background: var(--input); color: var(--text); cursor: pointer; }
-  .content { padding: 20px; max-width: 1400px; width: 100%; }
+  .toolbar .right { margin-left: auto; display: flex; align-items: stretch; gap: 2px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .toolbar .right input { min-width: 0; flex: 0 1 220px; align-self: center; margin-right: 8px; font: inherit; font-size: 13px; padding: 5px 8px;
+                          border-radius: 4px; border: 1px solid var(--edge); background: var(--input); color: var(--text); }
+  /* A button with a short list under it: Sort and Filter in the toolbar, the account in the bar on top. */
+  .menuwrap { position: relative; display: flex; }
+  .menu { position: absolute; top: 100%; right: 0; z-index: 15; min-width: 190px; padding: 4px 0; background: var(--bar); color: var(--on-dark);
+          border-radius: 0 0 4px 4px; box-shadow: 0 6px 16px rgba(0, 0, 0, .35); }
+  .menu button, #top .menu button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; justify-content: space-between; gap: 24px; width: 100%;
+                                    padding: 10px 20px; font-size: 14px; white-space: nowrap; }
+  .menu button:hover, #top .menu button:hover { background: rgba(255, 255, 255, .08); color: var(--accent-on-dark); }
+  .menu button:focus-visible, #top .menu button:focus-visible { outline: 2px solid var(--accent-on-dark); outline-offset: -2px; }
+  .menu button.on { font-weight: 700; }
+  .menu .about { padding: 10px 20px; font-size: 12px; opacity: .7; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, .15); }
+  .content { padding: 20px; width: 100%; }
 
   /* ---- what the pages are made of */
   h1 { font-size: 22px; margin: 0; }
@@ -111,19 +119,14 @@
   .label.error { background: var(--bad-bg); color: var(--bad); }
   .label.sent { background: var(--info-bg); color: var(--link); }
   .label.review { background: var(--warn-bg); color: var(--warn); }
+  /* The state of a row, wide and in one colour, as the status of a movie in Radarr. */
+  .label.wide { min-width: 104px; padding: 2px 8px; text-align: center; color: #fff; background: #6b6b6b; }
+  .label.wide.ok { background: #1f8f3a; } .label.wide.danger { background: #d9342b; } .label.wide.warn { background: #b36b00; }
+  .label.wide.info { background: #3a7bd5; } .label.wide.mute { background: #6b6b6b; }
   .alert { border: 1px solid var(--info-line); background: var(--info-bg); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
   .notice { background: var(--bad-bg); color: var(--bad); border-radius: 4px; padding: 10px 14px; margin-bottom: 14px; overflow-wrap: anywhere; }
   .notice.warn { background: var(--warn-bg); color: var(--warn); }
   .ask { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
-  /* Each tile is a button: it shows only the games that belong to it. */
-  .stat { background: var(--card); border: 1px solid transparent; box-shadow: var(--shadow); border-radius: 3px; padding: 10px 14px; text-align: left; font-size: 14px; }
-  .stat b { display: block; font-size: 26px; font-weight: 300; color: var(--head); font-variant-numeric: tabular-nums; }
-  .stat span { color: var(--soft); font-size: 13px; }
-  .stat.on { border-color: var(--accent); }
-  .stat.on span { color: var(--head); }
-  .stat.alert b { color: var(--bad); }
-  .title { font-weight: 600; color: var(--head); }
   .sub { color: var(--soft); font-size: 13px; font-variant-numeric: tabular-nums; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   .score { display: inline-flex; align-items: baseline; justify-content: center; min-width: 50px; padding: 2px 8px;
@@ -132,20 +135,8 @@
   .score.high { background: var(--good-bg); color: var(--good); }
   .score.good { background: var(--info-bg); color: var(--link); }
   .score.mid { background: var(--warn-bg); color: var(--warn); }
-  /* The games of the Wanted page: rows of one list, each opening to its releases. */
-  .rows { border-top: 1px solid var(--line); }
-  .item { border-bottom: 1px solid var(--line); }
-  .item.open { background: var(--panel); }
-  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 8px; }
-  .head:hover { background: var(--panel); }
-  .head > .grow { min-width: 230px; }
-  .toggle { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; flex: 1; min-width: 230px; }
-  .toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
-  .toggle .arrow { color: var(--soft); width: 14px; flex: none; transition: transform .12s; margin-top: 2px; }
-  .toggle[aria-expanded=true] .arrow { transform: rotate(90deg); }
-  .toggle:hover .title { color: var(--link); }
-  .more { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; font-weight: 400; }
-  .part { margin: 0 8px; padding: 8px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--edge); }
+  /* One missing thing of a game in the window of its releases. */
+  .part { margin: 14px 8px 0; padding: 8px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--edge); }
   .part b { font-size: 16px; font-weight: 400; color: var(--head); }
   /* The releases of one missing thing, in columns like a table. */
   .cand { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px 80px 96px auto; gap: 2px 12px; margin: 0 8px; padding: 8px 10px;
@@ -160,29 +151,41 @@
   .rest button.quiet { padding: 2px 4px; font-size: 13px; }
   .sent-row { margin: 0 8px; padding: 8px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
   .empty { color: var(--soft); text-align: center; padding: 40px 0; }
-  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--head); color: var(--bg);
            padding: 9px 16px; border-radius: 4px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 30; }
   #toast.show { opacity: 1; }
   /* A table, as on every list page of Sonarr and Radarr. */
   .scroll { overflow-x: auto; }
   .table { width: 100%; border-collapse: collapse; }
-  .table th, .table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .table th, .table td { text-align: left; padding: 8px; vertical-align: middle; }
+  .table td { border-top: 1px solid var(--line); }
   .table th { color: var(--head); font-weight: 700; white-space: nowrap; }
   .table tbody tr:hover { background: var(--panel); }
   .table th button { all: unset; cursor: pointer; }
-  .table th button:hover, .table td button.linkish:hover { color: var(--link); }
+  .table th button:hover { color: var(--link); }
   .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .table td.tight { white-space: nowrap; }
-  .table td button.linkish { all: unset; cursor: pointer; color: var(--head); }
+  .table td button.linkish { all: unset; cursor: pointer; color: var(--link); }
+  .table td button.linkish:hover { text-decoration: underline; }
+  .table td button.linkish:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  .table td.check, .table th.check { width: 34px; padding-right: 0; }
+  .table input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: #5d9cec; vertical-align: middle; }
+  .table tr.picked { background: var(--info-bg); }
+  .table td.done { color: var(--good); width: 40px; }
+  /* A button in a row that is only a drawing. */
+  .ibtn { all: unset; cursor: pointer; display: inline-flex; padding: 4px 6px; border-radius: 4px; color: var(--text); }
+  .ibtn:hover { color: var(--link); }
+  .ibtn:disabled { opacity: .35; cursor: default; color: var(--text); }
+  .ibtn:focus-visible { outline: 2px solid var(--link); }
+  .table .acts { flex-wrap: nowrap; gap: 2px; }
+  .total { padding: 14px 8px; text-align: right; color: var(--soft); font-size: 13px; }
   .table td.wrap { overflow-wrap: anywhere; min-width: 220px; }
   .table.plain td:first-child { width: 220px; color: var(--head); font-weight: 700; }
   .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
   progress { width: 110px; height: 14px; accent-color: #5d9cec; vertical-align: middle; }
   /* The small picture of a game in front of its row; a grey square while there is none. */
   .cover { display: block; width: 40px; height: 40px; border-radius: 4px; object-fit: cover; background: var(--mute-bg); }
-  .table td.pic { width: 56px; padding-top: 4px; padding-bottom: 4px; vertical-align: middle; }
-  .table td.mid { vertical-align: middle; }
+  .table td.pic { width: 56px; padding-top: 4px; padding-bottom: 4px; }
   /* The overview of the settings: a link and a line per page. */
   .overview button { all: unset; cursor: pointer; display: block; margin-bottom: 26px; }
   .overview button span { display: inline-block; font-size: 26px; font-weight: 300; color: var(--head); border-bottom: 1px solid var(--head); line-height: 1.25; }
@@ -207,6 +210,8 @@
   /* The window over the page in which one of them is added or changed. */
   #modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-start; justify-content: center;
            padding: 5vh 12px 12px; overflow-y: auto; z-index: 20; }
+  .dialog.wide { max-width: 1280px; }
+  .dialog .about { margin: 0 8px 4px; }
   .dialog { background: var(--panel); border-radius: 6px; width: 100%; max-width: 860px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); }
   .mhead { display: flex; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--line); font-size: 18px; color: var(--head); }
   .mhead button { all: unset; cursor: pointer; margin-left: auto; padding: 0 6px; font-size: 26px; line-height: 1; color: var(--head); }
@@ -248,7 +253,7 @@
     .find input { width: 70px; }
     .brand small { display: none; }
     .toolbar .right { width: 100%; }
-    #statusline { display: none; }
+    .toolbar .menu { left: 0; right: auto; }
     aside:not(.open) { display: none; }
     .toolbar { padding: 0 8px; }
     .content { padding: 14px 12px; }
@@ -268,32 +273,27 @@
     <div class="brand">NSWHunter<small id="version"></small></div>
     <label class="find" id="findbox"><input id="find" type="search" placeholder="Search" aria-label="Search a game"></label>
     <span class="grow"></span>
-    <span class="line" id="statusline">Loading…</span>
-    <button id="logout" title="Log out of the panel in this browser">Log out</button>
+    <div id="topright"></div>
   </header>
-  <aside id="side"><nav id="nav" aria-label="Pages"></nav></aside>
+  <aside id="side"><nav id="nav" aria-label="Pages"></nav><div id="sidefoot">Loading…</div></aside>
   <div class="page">
     <div class="toolbar" id="toolbar"></div>
     <div class="content">
       <div id="notice"></div>
       <div id="ask"></div>
       <section id="page-games" hidden>
-        <div class="tabs"><span class="line grow" id="gamecount"></span></div>
         <div class="scroll" id="gamelist"></div>
         <div class="empty" id="gamemore"></div>
+        <div class="total" id="gamecount"></div>
       </section>
       <section id="page-queue" hidden><div id="queue"></div></section>
       <section id="page-history" hidden>
-        <div class="tabs"><span class="line grow" id="historycount"></span></div>
         <div class="scroll" id="history"></div>
         <div class="empty" id="historymore"></div>
+        <div class="total" id="historycount"></div>
       </section>
       <section id="page-blocklist" hidden><div id="blocklist"></div></section>
-      <section id="page-wanted" hidden>
-        <div class="stats" id="stats"></div>
-        <div class="tabs"><span class="line grow" id="shown"></span></div>
-        <div id="list"></div>
-      </section>
+      <section id="page-wanted" hidden><div id="list"></div></section>
       <section id="page-settings" hidden>
         <form id="config" autocomplete="off"></form>
         <div id="extra"></div>
@@ -302,9 +302,9 @@
       <section id="page-tasks" hidden><div id="tasks"></div></section>
       <section id="page-backup" hidden><div id="backups"></div></section>
       <section id="page-log" hidden>
-        <div class="tabs"><span class="line grow" id="logcount"></span></div>
         <div class="scroll"><table class="table log"><tbody id="log"></tbody></table></div>
         <div class="empty" id="logmore"></div>
+        <div class="total" id="logcount"></div>
       </section>
       <section id="page-logfiles" hidden><div id="logfiles"></div></section>
     </div>
@@ -359,6 +359,15 @@ const ICONS = {
   test: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.5 14.5L6 12l1.4-1.4 3.1 3.1 6.1-6.1L18 9z",
   download: "M11 3h2v9l3.3-3.3 1.4 1.4L12 15.8 6.3 10.1l1.4-1.4L11 12zM5 18h14v2H5z",
   box: "M4 4h16v5H4zm1 7h14v9H5zm4 2v2h6v-2z",
+  sort: "M7 4l4 5H8v11H6V9H3zM17 20l-4-5h3V4h2v11h3z",
+  filter: "M3 4h18l-7 8v6l-4 2v-8z",
+  person: "M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0 10c4.4 0 8 1.8 8 4v2H4v-2c0-2.2 3.6-4 8-4z",
+  rss: "M5 3a16 16 0 0 1 16 16h-3A13 13 0 0 0 5 6zm0 6a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7zm2 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z",
+  bookmark: "M6 3h12v18l-6-4-6 4z",
+  check: "M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z",
+  trash: "M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7z",
+  restore: "M12 4a8 8 0 1 1-7.7 10h2.1A6 6 0 1 0 8 7.5L10.5 10H4V3.5l2.6 2.6A8 8 0 0 1 12 4zm-1 4h2v4.2l3 1.8-1 1.7-4-2.4z",
+  remove: "M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z",
 };
 function icon(name) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -383,7 +392,8 @@ const MENU = [
   {id: "games", text: "Games", icon: "play"},
   {id: "activity", text: "Activity", icon: "clock", first: "queue", children: [
     {id: "queue", text: "Queue"}, {id: "history", text: "History"}, {id: "blocklist", text: "Blocklist"}]},
-  {id: "wanted", text: "Wanted", icon: "warn"},
+  {id: "want", text: "Wanted", icon: "warn", first: "wanted", children: [
+    {id: "wanted", text: "Missing"}, {id: "choice", text: "Awaiting Choice"}]},
   {id: "settings", text: "Settings", icon: "sliders", first: "settings", children: [
     {id: "media", text: "Media Management", form: true, about: "Automatic download, waiting for the library, searching and DLC"},
     {id: "indexers", text: "Indexers", kind: "INDEXERS", about: "Prowlarr, and Newznab and Torznab indexers"},
@@ -400,12 +410,14 @@ for (const top of MENU) {
   if (!top.children) PAGES[top.id] = {...top, group: top.id};
   for (const child of top.children || []) PAGES[child.id] = {...child, group: top.id, parent: top.text};
 }
-const SECTION = id => (PAGES[id].group === "settings" ? "settings" : id);
+// The part of the page a menu item shows: the settings share one, and so do the two lists of Wanted.
+const SECTION = id => (PAGES[id].group === "settings" ? "settings" : PAGES[id].group === "want" ? "wanted" : id);
 
-let state = null, needle = "", busy = new Set(), expanded = new Set(), fallen = new Set(), thrown = new Set();
+let state = null, busy = new Set(), fallen = new Set();
 let page = PAGES[location.hash.slice(1)] ? location.hash.slice(1) : "wanted";
 let settings = null, clearing = new Set(), opened = false, confirming = false, editing = null, backups = null, dirty = false;
-let only = remembered("only", "choice"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
+let selected = new Set();  // the games that are ticked on a Wanted page
+let only = remembered("wantedfilter", "all"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
 let auth = null;  // "login" or "change" while the login screen is up
 let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logShown = 100, logFiles = null;
 let library = null, gameNeedle = "", gameOnly = remembered("games", "all"), gameSort = "name", gameDown = false, gameShown = 200;
@@ -465,11 +477,11 @@ $("authform").addEventListener("submit", async e => {
     $("authgo").disabled = false;
   }
 });
-$("logout").addEventListener("click", async () => {
+async function logout() {
   try { await request("/api/logout", {}); } catch (e) { /* the screen below comes up either way */ }
   state = null;
   needLogin("login");
-});
+}
 
 // ---------------------------------------------------------------- small things
 // The score is the chance that a download is the right one, from 1 to 10.
@@ -556,37 +568,33 @@ function games() {
 const releases = g => g.items.filter(i => !i.ignored).flatMap(i => i.candidates);
 const SORTS = {
   score: {text: "Score", down: true, of: g => Math.max(0, ...releases(g).map(c => c.score || 0))},
-  name: {text: "Name", down: false, of: g => g.name},
-  newest: {text: "Newest release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
-  count: {text: "Number of releases", down: true, of: g => releases(g).length},
-  behind: {text: "Updates behind", down: true, of: g => {
+  name: {text: "Game", down: false, of: g => g.name},
+  newest: {text: "Newest Release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
+  count: {text: "Number of Releases", down: true, of: g => releases(g).length},
+  behind: {text: "Updates Behind", down: true, of: g => {
     const u = g.items.find(i => i.type === "update");
     return u ? Math.round((u.latest_version - u.local_version) / 65536) : 0; }},
   missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
-  searched: {text: "Last searched", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
+  searched: {text: "Last Search", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
 };
-// The tiles at the top. A click on one shows only the games that belong to it; the last three
-// lead to the page of Activity that holds them.
 const live = g => g.items.filter(i => !i.ignored);
 const failed = g => g.items.flatMap(i => i.failed || []);
 const waiting = i => i.status === "review";
 const queued = () => state.items.filter(i => i.grab && !i.ignored);
-const TILES = {
-  all: {text: "missing something", has: () => true,
-        none: "Your library misses no updates. Or the first round is still running."},
-  updates: {text: "updates missing", has: g => g.items.some(i => i.type === "update"), none: "No game misses an update."},
-  dlc: {text: "DLC missing", has: g => g.items.some(i => i.type === "dlc"), number: () => state.library.dlc, none: "No game misses DLC."},
-  choice: {text: "awaiting your choice", has: g => g.items.some(waiting),
-           none: "Nothing awaits your choice. Releases that are found show up here."},
-  ignored: {text: "ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
-  queue: {text: "in queue", go: "queue", number: () => queued().length},
-  failed: {text: "download failed", go: "blocklist", number: () => state.items.reduce((n, i) => n + (i.failed || []).length, 0)},
-  arrived: {text: "arrived", go: "history", number: () => state.arrived.length},
+// What the Missing page can be limited to, in the Filter menu of its toolbar.
+const WANTED = {
+  all: {text: "All", has: () => true, none: "Your library misses no updates. Or the first round is still running."},
+  updates: {text: "Update Missing", has: g => g.items.some(i => i.type === "update"), none: "No game misses an update."},
+  dlc: {text: "DLC Missing", has: g => g.items.some(i => i.type === "dlc"), none: "No game misses DLC."},
+  choice: {text: "Awaiting Choice", has: g => g.items.some(waiting), none: "Nothing awaits your choice. Releases that are found show up here."},
+  queue: {text: "In Queue", has: g => live(g).some(i => i.grab), none: "Nothing is in the queue."},
+  ignored: {text: "Ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
 };
-function tiles(all) {
-  const count = key => all.filter(TILES[key].has).length;
-  return Object.keys(TILES).filter(key =>
-    (key !== "dlc" || state.settings.dlc) && (key !== "ignored" || count(key) > 0 || only === key));
+// The best release of a game: the one the download button of its row sends. Of equal scores
+// the update goes before DLC.
+function topOf(game) {
+  const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
+  return live(game).filter(waiting).map(i => ({item: i, release: i.candidates[0]})).sort((a, b) => rank(b) - rank(a))[0];
 }
 // What "Download All" would send: the best release of every waiting item, if it scores high enough.
 function ready() {
@@ -608,6 +616,14 @@ async function post(path, body, key) {
 }
 function grab(item, release) {
   return post("/api/grab", {key: item.key, guid: release.guid}, release.guid).then(d => d.ok && toast("Added to the queue of the download client"));
+}
+function search(game) {
+  return post("/api/search", {key: game.items[0].key}, "s" + game.id)
+    .then(d => d.ok && toast(d.found ? plural(d.found, "new candidate release") : "Nothing new found"));
+}
+// A small button that is only a drawing, as in the rows of Sonarr and Radarr.
+function ibtn(name, title, onclick, disabled) {
+  return h("button", {class: "ibtn", type: "button", title, "aria-label": title, disabled, onclick}, icon(name));
 }
 function versions(item) {
   if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
@@ -648,9 +664,9 @@ function candidate(item, c) {
     [score(c.score), c.guid === item.auto_guid ? h("div", {class: "sub", title: "Goes to the download client by itself in the next round"}, "automatic") : null],
     c, [version, c.reasons.join("; ")],
     [sent ? h("span", {class: "label sent"}, "sent") : null,
-     h("button", {class: "small", disabled: busy.has(c.guid), onclick: () => grab(item, c)}, sent ? "Send again" : "Download"),
-     h("button", {class: "small quiet", title: "Do not show this release again. It moves to the blocklist and can be restored there.",
-                  onclick: () => post("/api/block", {key: item.key, guid: c.guid}, c.guid)}, "Reject")]);
+     ibtn("download", sent ? "Send this release again" : "Download this release", () => grab(item, c), busy.has(c.guid)),
+     ibtn("remove", "Reject: do not show this release again. It moves to the blocklist and can be restored there.",
+          () => post("/api/block", {key: item.key, guid: c.guid}, c.guid))]);
 }
 // One missing thing of a game (the update, or one DLC) with its releases.
 function part(item) {
@@ -689,94 +705,110 @@ function part(item) {
   if (rejected.length) {
     const open = fallen.has(item.key);
     rows.push(fold(open, plural(rejected.length, "release") + " ruled out",
-      () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderList(); }));
+      () => { open ? fallen.delete(item.key) : fallen.add(item.key); renderGame(); }));
     if (open) rows.push(...rejected.map(r => releaseRow(h("span", {class: "label"}, "ruled out"), r, [r.reason],
-      h("button", {class: "small", disabled: busy.has(r.guid), title: "Send this release to the download client after all",
-                   onclick: () => grab(item, r)}, "Download anyway"), "fell")));
+      ibtn("download", "Download anyway: send this release to the download client after all", () => grab(item, r), busy.has(r.guid)), "fell")));
   }
   const blocked = (item.turned_down || []).length + (item.unnamed || 0);
   if (blocked) rows.push(h("div", {class: "rest"},
-    h("button", {class: "quiet", onclick: () => show("blocklist")}, plural(blocked, "release") + " of this on the blocklist")));
+    h("button", {class: "quiet", onclick: () => { closeModal(); show("blocklist"); }}, plural(blocked, "release") + " of this on the blocklist")));
   return rows;
 }
-function gameCard(game) {
-  const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
-  const review = live(game).filter(i => i.status === "review"), sent = live(game).filter(i => i.grab);
-  const count = review.reduce((n, i) => n + i.candidates.length, 0);
-  // The best release of the game: the one a click on Download in the row sends. Of equal
-  // scores the update goes before DLC.
-  const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
-  const top = review.map(i => ({item: i, release: i.candidates[0]})).sort((a, b) => rank(b) - rank(a))[0];
-  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length
-    || (i.turned_down || []).length || i.unnamed;
-  const withSomething = game.items.filter(something);
-  const empty = game.items.filter(i => !something(i) && i.type !== "dlcpack");
-  const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
+// What a game is waiting for, as a wide label like the status of a movie in Radarr.
+function gameStatus(game) {
+  if (game.items.every(i => i.ignored)) return ["mute", "Ignored"];
+  if (game.items.some(waiting)) return ["warn", "Awaiting Choice"];
+  if (live(game).some(i => i.grab)) return ["info", "In Queue"];
+  return game.items.some(i => i.status === "none") ? ["danger", "Nothing Found"] : ["mute", "Not Searched"];
+}
+function missingText(game) {
+  const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc").length;
+  return [update ? upd(update.local_version) + " → " + upd(update.latest_version) : null, dlc ? dlc + " DLC" : null].filter(Boolean).join(" · ");
+}
+function wantedRow(game) {
+  const top = topOf(game), [cls, text] = gameStatus(game), searching = busy.has("s" + game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
-  const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
-  const label = allIgnored ? ["", "ignored"] : sent.length ? ["sent", "in queue"]
-    : game.items.some(i => i.status === "none") ? ["", "nothing found"] : ["", "not searched yet"];
-  const names = h("div", {},
-    h("div", {class: "title"}, game.name),
-    h("div", {class: "sub"}, h("span", {class: "mono"}, game.id),
-      update ? " · " + versions(update) : "",
-      dlc.length ? " · " + dlc.length + " DLC missing" : "",
-      searched ? " · searched " + ago(searched) : ""),
-    top ? h("div", {class: "more"}, "best: " + top.release.title) : null);
-  const card = h("div", {class: "item" + (shown ? " open" : "")},
-    h("div", {class: "head"},
-      // Closed by default: a click on the name shows what is missing and the releases.
-      can ? h("button", {class: "toggle", "aria-expanded": shown ? "true" : "false",
-                         onclick: () => { shown ? expanded.delete(game.id) : expanded.add(game.id); renderList(); }},
-              h("span", {class: "arrow"}, "▸"), names)
-          : h("div", {class: "grow"}, names),
-      count ? h("span", {class: "sub"}, plural(count, "release")) : null,
-      failed(game).length ? h("span", {class: "label error"}, failed(game).length + " failed") : null,
-      sent.length && count ? h("span", {class: "label sent"}, sent.length + " in queue") : null,
-      top ? score(top.release.score, "Score of the best release that was found") : h("span", {class: "label " + label[0]}, label[1]),
-      top ? h("button", {class: "small", disabled: busy.has(top.release.guid),
-                         title: "Send the best release to the download client: " + top.release.title,
-                         onclick: () => grab(top.item, top.release)}, "Download") : null,
-      h("button", {class: "small", disabled: searching, title: "Search this game on your indexers now",
-                   onclick: () => post("/api/search", {key: game.items[0].key}, "s" + game.id).then(d => d.ok && toast(d.found ? plural(d.found, "new candidate release") : "Nothing new found"))},
-        searching ? "Searching…" : "Search"),
-      h("button", {class: "small quiet", title: "Ignore everything of this game",
-                   onclick: () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + game.id)},
-        allIgnored ? "Stop ignoring" : "Ignore")));
-  if (shown) {
-    const first = i => (i.type === "update" ? 0 : 1) * 100 - Math.max(0, ...i.candidates.map(c => c.score || 0));
-    for (const item of withSomething.sort((a, b) => first(a) - first(b))) card.append(...part(item));
-    if (empty.length) {
-      card.append(h("div", {class: "rest"}, "Nothing found yet for: " +
-        empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "the update").join(" · ")));
-    }
-  }
-  return card;
+  const count = live(game).filter(waiting).reduce((n, i) => n + i.candidates.length, 0);
+  return h("tr", {class: selected.has(game.id) ? "picked" : ""},
+    h("td", {class: "check"}, h("input", {type: "checkbox", checked: selected.has(game.id), "aria-label": "Select " + game.name,
+      onchange: e => { e.target.checked ? selected.add(game.id) : selected.delete(game.id); render(); }})),
+    h("td", {}, h("button", {class: "linkish", title: "Show the releases that were found", onclick: () => openGame(game.id)}, game.name)),
+    h("td", {class: "tight"}, missingText(game)),
+    h("td", {class: "wrap"}, top ? [top.release.title, count > 1 ? h("span", {class: "sub"}, " · " + (count - 1) + " more") : null] : "–"),
+    h("td", {class: "tight"}, top ? score(top.release.score, "Score of the best release that was found") : "–"),
+    h("td", {class: "tight"}, h("span", {class: "label wide " + cls}, text),
+      failed(game).length ? h("span", {class: "label error"}, failed(game).length + " failed") : null),
+    h("td", {class: "tight"}, searched ? ago(searched) : "never"),
+    h("td", {}, h("div", {class: "acts"},
+      ibtn("search", searching ? "Searching…" : "Automatic Search: look for this game on your indexers now", () => search(game), searching),
+      ibtn("person", "Interactive Search: choose a release yourself", () => openGame(game.id)),
+      ibtn("download", top ? "Download the best release: " + top.release.title : "No release to download yet",
+           () => grab(top.item, top.release), !top || busy.has(top.release.guid)))));
+}
+function wantedRows() {
+  const key = page === "choice" ? "choice" : (WANTED[only] ? only : "all");
+  return {filter: WANTED[key], rows: games().filter(WANTED[key].has)};
 }
 function renderWanted() {
-  const all = games(), keys = tiles(all);
-  if (!keys.includes(only) || TILES[only].go) only = "choice";
-  put($("stats"), ...keys.map(key => {
-    const tile = TILES[key], number = tile.number ? tile.number() : all.filter(tile.has).length;
-    return h("button", {class: "stat" + (only === key ? " on" : "") + (key === "failed" && number ? " alert" : ""),
-                        "aria-pressed": tile.go ? null : (only === key ? "true" : "false"),
-                        title: tile.go ? "Go to " + PAGES[tile.go].parent + " > " + PAGES[tile.go].text : "Show only these",
-                        onclick: () => {
-                          if (tile.go) { if (key === "arrived") pastOnly = "arrived"; return show(tile.go); }
-                          only = key; remember("only", key); render();
-                        }},
-      h("b", {}, number), h("span", {}, tile.text));
-  }));
-  renderList();
+  const {filter, rows} = wantedRows();
+  for (const id of [...selected]) if (!rows.some(g => g.id === id)) selected.delete(id);  // no longer in the list
+  const all = rows.length > 0 && rows.every(g => selected.has(g.id));
+  put($("list"), rows.length ? [h("div", {class: "scroll"}, h("table", {class: "table"},
+      h("thead", {}, h("tr", {},
+        h("th", {class: "check"}, h("input", {type: "checkbox", checked: all, "aria-label": "Select all",
+          onchange: e => { rows.forEach(g => e.target.checked ? selected.add(g.id) : selected.delete(g.id)); render(); }})),
+        ["Game", "Missing", "Best Release", "Score", "Status", "Last Search"].map(c => h("th", {}, c)), h("th", {}))),
+      h("tbody", {}, rows.map(wantedRow)))),
+    h("div", {class: "total"}, "Total records: " + rows.length)]
+    : h("div", {class: "alert"}, filter.none));
 }
-function renderList() {
-  const tile = TILES[only] || TILES.choice, word = needle.trim().toLowerCase();
-  const mine = games().filter(tile.has);
-  const items = mine.filter(g => !word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word));
-  const what = only === "all" ? " that miss an update" + (state.settings.dlc ? " or DLC" : "") : " · " + tile.text;
-  $("shown").textContent = (word ? items.length + " of " : "") + plural(mine.length, "game") + what;
-  put($("list"), items.length ? h("div", {class: "rows"}, items.map(gameCard))
-    : h("div", {class: "empty"}, word && mine.length ? "No game with that name in this list." : tile.none));
+// What the toolbar does with the rows that are ticked, one game after the other.
+async function eachSelected(done, work) {
+  const chosen = games().filter(g => selected.has(g.id));
+  busy.add("bulk"); render();
+  let count = 0;
+  for (const game of chosen) {
+    try { if (await work(game)) count++; } catch (e) { if (e === LOGIN) break; }
+  }
+  busy.delete("bulk"); selected.clear();
+  await load();
+  toast(plural(count, "game") + " " + done);
+}
+const sent = r => r.data.ok === true;
+const searchSelected = () => eachSelected("searched", g => request("/api/search", {key: g.items[0].key}).then(sent));
+const downloadSelected = () => eachSelected("sent to the download client", g => {
+  const top = topOf(g);
+  return top ? request("/api/grab", {key: top.item.key, guid: top.release.guid}).then(sent) : false;
+});
+const ignoreSelected = () => eachSelected("ignored", g => request("/api/ignore", {keys: g.items.map(i => i.key), ignored: true}).then(sent));
+// The window of one game, as the Interactive Search of Sonarr and Radarr: everything that was
+// found for it, per missing thing, to choose from.
+let viewing = null;
+function openGame(id) { editing = null; viewing = id; renderGame(); }
+function renderGame() {
+  if (!viewing || !state) return;
+  const game = games().find(g => g.id === viewing);
+  if (!game) return closeModal();  // it left the list: what it missed has arrived
+  const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
+  const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length
+    || (i.turned_down || []).length || i.unnamed;
+  const first = i => (i.type === "update" ? 0 : 1) * 100 - Math.max(0, ...i.candidates.map(c => c.score || 0));
+  const found = game.items.filter(something).sort((a, b) => first(a) - first(b));
+  const empty = game.items.filter(i => !something(i) && i.type !== "dlcpack");
+  const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
+  const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
+  put($("modal"), dialog("Interactive Search - " + game.name,
+    [h("div", {class: "sub about"}, h("span", {class: "mono"}, game.id), update ? " · " + versions(update) : "",
+       dlc.length ? " · " + dlc.length + " DLC missing" : "", searched ? " · searched " + ago(searched) : ""),
+     found.map(part),
+     empty.length ? h("div", {class: "rest"}, "Nothing found yet for: " + empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "the update").join(" · ")) : null],
+    [h("button", {type: "button", title: "Ignore everything of this game",
+                  onclick: () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + game.id)},
+       allIgnored ? "Stop ignoring" : "Ignore"),
+     h("span", {class: "grow"}),
+     h("button", {type: "button", disabled: searching, onclick: () => search(game)}, searching ? "Searching…" : "Search"),
+     h("button", {type: "button", onclick: closeModal}, "Close")], "wide"));
+  $("modal").hidden = false;
 }
 
 // ---------------------------------------------------------------- Games
@@ -806,30 +838,33 @@ function renderGames() {
   const word = gameNeedle.trim().toLowerCase(), column = GAME_COLUMNS.find(c => c.key === gameSort) || GAME_COLUMNS[0];
   const rows = library.filter(g => (GAME_HAS[gameOnly] || GAME_HAS.all)(g) && (!word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word)))
     .sort((a, b) => { const x = column.of(a), y = column.of(b); return (x < y ? -1 : x > y ? 1 : 0) * (gameDown ? -1 : 1) || a.name.localeCompare(b.name); });
-  $("gamecount").textContent = rows.length === library.length ? plural(library.length, "game") : rows.length + " of " + plural(library.length, "game");
+  $("gamecount").textContent = "Total records: " + rows.length + (rows.length === library.length ? "" : " of " + library.length);
   const wanted = new Set(state.items.map(i => i.game_id));
   const head = h("tr", {}, h("th", {"aria-label": "Cover"}), GAME_COLUMNS.map(c => h("th", {class: c.num ? "num" : "", "aria-sort": gameSort === c.key ? (gameDown ? "descending" : "ascending") : null},
-    h("button", {onclick: () => { gameDown = gameSort === c.key ? !gameDown : false; gameSort = c.key; renderGames(); }},
-      c.text + (gameSort === c.key ? (gameDown ? " ↓" : " ↑") : "")))), h("th", {}, "Status"));
+    h("button", {onclick: () => { gameDown = gameSort === c.key ? !gameDown : false; gameSort = c.key; render(); }},
+      c.text + (gameSort === c.key ? (gameDown ? " ↓" : " ↑") : "")))), h("th", {}, "Status"), h("th", {}));
   const body = rows.slice(0, gameShown).map(g => h("tr", {},
     // The picture comes from Switch-library-manager-web, through NSWHunter; only the rows in view ask for theirs.
     h("td", {class: "pic"}, g.cover ? h("img", {class: "cover", src: "/api/cover/" + g.id, alt: "", loading: "lazy", width: "40", height: "40",
                                                  onerror: e => e.target.replaceWith(h("span", {class: "cover"}))})
       : h("span", {class: "cover"})),
-    // A game that misses something leads to its row on the Wanted page.
-    h("td", {class: "mid"}, wanted.has(g.id)
-      ? h("button", {class: "linkish", title: "Show what was found for this game", onclick: () => { needle = g.name; only = "all"; expanded.add(g.id); show("wanted"); }}, g.name)
+    // A game that misses something opens the window with what was found for it.
+    h("td", {}, wanted.has(g.id)
+      ? h("button", {class: "linkish", title: "Show the releases that were found", onclick: () => openGame(g.id)}, g.name)
       : g.name),
     h("td", {class: "mono tight"}, g.id),
-    h("td", {}, upd(g.local) + (g.version ? " (v" + g.version + ")" : "")),
-    h("td", {}, g.latest ? upd(g.latest) : "–"),
-    h("td", {}, g.dlc_owned + g.dlc_missing ? g.dlc_owned + " of " + (g.dlc_owned + g.dlc_missing) : "–"),
+    h("td", {class: "tight"}, upd(g.local) + (g.version ? " (v" + g.version + ")" : "")),
+    h("td", {class: "tight"}, g.latest ? upd(g.latest) : "–"),
+    h("td", {class: "tight"}, g.dlc_owned + g.dlc_missing ? g.dlc_owned + " of " + (g.dlc_owned + g.dlc_missing) : "–"),
     h("td", {class: "num"}, size(g.size) || "–"),
     h("td", {},
-      g.update_missing ? h("span", {class: "label review"}, "Update missing") : null,
-      g.updates_ignored ? h("span", {class: "label", title: "Ignored in Switch-library-manager-web"}, "Updates ignored") : null,
-      g.dlc_missing ? h("span", {class: "label " + (state.settings.dlc ? "review" : ""), title: state.settings.dlc ? null : "Missing DLC is not searched (Settings > Media Management)"}, g.dlc_missing + " DLC missing") : null,
-      !g.update_missing && !g.dlc_missing ? h("span", {class: "label ok"}, "Complete") : null)));
+      g.update_missing ? h("span", {class: "label wide danger"}, "Update Missing") : null,
+      g.updates_ignored ? h("span", {class: "label wide mute", title: "Ignored in Switch-library-manager-web"}, "Updates Ignored") : null,
+      g.dlc_missing ? h("span", {class: "label wide " + (state.settings.dlc ? "warn" : "mute"), title: state.settings.dlc ? null : "Missing DLC is not searched (Settings > Media Management)"}, g.dlc_missing + " DLC Missing") : null,
+      !g.update_missing && !g.dlc_missing ? h("span", {class: "label wide ok"}, "Complete") : null),
+    h("td", {}, wanted.has(g.id) ? h("div", {class: "acts"},
+      ibtn("search", "Automatic Search: look for this game on your indexers now", () => { const game = games().find(x => x.id === g.id); if (game) search(game); }, busy.has("s" + g.id)),
+      ibtn("person", "Interactive Search: choose a release yourself", () => openGame(g.id))) : null)));
   put($("gamelist"), rows.length ? h("table", {class: "table"}, h("thead", {}, head), h("tbody", {}, body))
     : h("div", {class: "empty"}, library.length ? "No game matches." : "The library has not been read yet."));
   put($("gamemore"), rows.length > gameShown
@@ -849,15 +884,15 @@ function renderQueue() {
     const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent;
     return h("tr", {},
       h("td", {class: "tight"}, h("span", {class: "label " + (g.state === "stuck" ? "review" : "sent")}, SENT[g.state] || SENT.sent)),
-      h("td", {}, h("button", {class: "linkish", onclick: () => { needle = item.name; only = "all"; expanded.add(item.game_id); show("wanted"); }}, item.name),
+      h("td", {}, h("button", {class: "linkish", onclick: () => openGame(item.game_id)}, item.name),
         h("div", {class: "sub"}, whatOf(item))),
       h("td", {class: "wrap"}, g.title),
       h("td", {}, g.protocol || "usenet"),
       h("td", {}, g.client_name || "–"), h("td", {}, g.indexer || "–"),
       h("td", {class: "tight"}, ago(g.at) + (g.auto ? " · automatic" : "")),
       h("td", {class: "tight"}, percent !== null && percent !== undefined ? [h("progress", {max: "100", value: String(percent)}), " " + percent + "%"] : "–"),
-      h("td", {}, h("div", {class: "acts"}, h("button", {class: "small", title: "Forget that this was sent, so it awaits your choice again. The download client keeps the download.",
-        disabled: busy.has("u" + item.key), onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Remove"))));
+      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the queue: forget that this was sent, so it awaits your choice again. The download client keeps the download.",
+        () => post("/api/unsend", {key: item.key}, "u" + item.key), busy.has("u" + item.key)))));
   });
   put($("queue"), table(["Status", "Game", "Release", "Protocol", "Download Client", "Indexer", "Added", "Progress", ""], rows, "Queue is empty"));
 }
@@ -875,7 +910,7 @@ async function loadHistory() {
 function renderHistory() {
   if (!past) return;
   const rows = past.filter(e => pastOnly === "all" || e.kind === pastOnly);
-  $("historycount").textContent = rows.length === past.length ? plural(past.length, "event") : rows.length + " of " + plural(past.length, "event");
+  $("historycount").textContent = "Total records: " + rows.length + (rows.length === past.length ? "" : " of " + past.length);
   const cls = {grabbed: "sent", arrived: "ok", failed: "error"};
   put($("history"), table(["Event", "Game", "Release", "Details", "Date#"], rows.slice(0, pastShown).map(e => h("tr", {},
     h("td", {class: "tight"}, h("span", {class: "label " + cls[e.kind]}, PAST[e.kind] || e.kind)),
@@ -891,24 +926,24 @@ function renderHistory() {
 function renderBlocklist() {
   const rows = [];
   for (const item of state.items) {
-    const game = [item.name, h("div", {class: "sub"}, whatOf(item))];
+    const game = () => [item.name, h("div", {class: "sub"}, whatOf(item))];  // made anew for every row it is in
     for (const f of item.failed || []) rows.push({at: f.failed_at, row: h("tr", {},
-      h("td", {}, game), h("td", {class: "wrap"}, f.title), h("td", {}, f.indexer || "–"),
+      h("td", {}, game()), h("td", {class: "wrap"}, f.title), h("td", {}, f.indexer || "–"),
       h("td", {}, h("span", {class: "label error"}, "Download failed"), h("div", {class: "sub"}, f.why)), h("td", {class: "num"}, moment(f.failed_at)),
       h("td", {}, h("div", {class: "acts"},
-        h("button", {class: "small", disabled: busy.has(f.guid), title: "Send this release to the download client once more", onclick: () => grab(item, f)}, "Try again"),
-        h("button", {class: "small quiet", title: "Take it off the failed downloads. It stays on the blocklist as a rejected release.",
-                     onclick: () => post("/api/dismiss", {key: item.key, guid: f.guid}, "d" + f.guid)}, "Dismiss"))))});
+        ibtn("refresh", "Try again: send this release to the download client once more", () => grab(item, f), busy.has(f.guid)),
+        ibtn("remove", "Dismiss: take it off the failed downloads. It stays on the blocklist as a rejected release.",
+             () => post("/api/dismiss", {key: item.key, guid: f.guid}, "d" + f.guid)))))});
     for (const r of item.turned_down || []) rows.push({at: r.at || 0, row: h("tr", {},
-      h("td", {}, game), h("td", {class: "wrap"}, r.title), h("td", {}, r.indexer || "–"),
+      h("td", {}, game()), h("td", {class: "wrap"}, r.title), h("td", {}, r.indexer || "–"),
       h("td", {}, h("span", {class: "label"}, "Rejected")), h("td", {class: "num"}, r.at ? moment(r.at) : "–"),
-      h("td", {}, h("div", {class: "acts"}, h("button", {class: "small", disabled: busy.has(r.guid), title: "Take it off the blocklist: it is offered again",
-        onclick: () => post("/api/restore", {key: item.key, guid: r.guid}, r.guid)}, "Remove"))))});
+      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the blocklist: it is offered again",
+        () => post("/api/restore", {key: item.key, guid: r.guid}, r.guid), busy.has(r.guid)))))});
     if (item.unnamed) rows.push({at: -1, row: h("tr", {},
-      h("td", {}, game), h("td", {class: "wrap"}, plural(item.unnamed, "release") + " rejected before their names were kept"), h("td", {}, "–"),
+      h("td", {}, game()), h("td", {class: "wrap"}, plural(item.unnamed, "release") + " rejected before their names were kept"), h("td", {}, "–"),
       h("td", {}, h("span", {class: "label"}, "Rejected")), h("td", {class: "num"}, "–"),
-      h("td", {}, h("div", {class: "acts"}, h("button", {class: "small", disabled: busy.has("r" + item.key), title: "They return at the next search",
-        onclick: () => post("/api/restore", {key: item.key}, "r" + item.key)}, "Remove all"))))});
+      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove them all from the blocklist: they return at the next search",
+        () => post("/api/restore", {key: item.key}, "r" + item.key), busy.has("r" + item.key)))))});
   }
   rows.sort((a, b) => b.at - a.at);
   put($("blocklist"), table(["Game", "Release", "Indexer", "Reason", "Date#", ""], rows.map(r => r.row), "No history blocklist"));
@@ -972,7 +1007,7 @@ function renderLog() {
   const word = logNeedle.trim().toLowerCase();
   const rows = events.filter(e => (logLevel === "all" || e.level === "error" || (logLevel === "warn" && e.level === "warn"))
     && (!word || e.text.toLowerCase().includes(word)));
-  $("logcount").textContent = rows.length === events.length ? plural(events.length, "event") : rows.length + " of " + plural(events.length, "event");
+  $("logcount").textContent = "Total records: " + rows.length + (rows.length === events.length ? "" : " of " + events.length);
   const names = {error: "Error", warn: "Warn", grab: "Info", info: "Info"};
   put($("log"), rows.length ? rows.slice(0, logShown).map(e => h("tr", {class: e.level},
       h("td", {class: "tight"}, h("span", {class: "label " + (e.level === "error" ? "error" : e.level === "warn" ? "review" : "")}, names[e.level] || "Info")),
@@ -994,14 +1029,15 @@ function renderLogFiles() {
     h("div", {class: "alert"}, "Log files are located in: " + logFiles.folder + ". There is one per day; the log level and how long they are kept are under Settings > General."),
     table(["Filename", "Size#", "Last Write Time#", ""], logFiles.files.map(f => h("tr", {},
       h("td", {class: "mono"}, f.name), h("td", {class: "num"}, kb(f.size)), h("td", {class: "num"}, moment(f.at)),
-      h("td", {}, h("div", {class: "acts"}, h("a", {class: "btn small", href: "/api/logfile?name=" + encodeURIComponent(f.name), download: f.name}, "Download"))))),
+      h("td", {}, h("div", {class: "acts"}, h("a", {href: "/api/logfile?name=" + encodeURIComponent(f.name), download: f.name}, "Download"))))),
       "No log files yet"));
 }
 // Tasks: what runs by itself, as in Sonarr and Radarr: how often, when last, how long, when next.
-let tasks = null;
+let tasks = null, taskRuns = [];
 async function loadTasks() {
   try {
-    tasks = (await request("/api/tasks")).data.tasks;
+    const {data} = await request("/api/tasks");
+    tasks = data.tasks; taskRuns = data.runs || [];
     if (page === "tasks") renderTasks();
   } catch (e) { /* the list stays as it was */ }
 }
@@ -1028,7 +1064,7 @@ async function runTask(name) {
   try {
     const {data} = await request("/api/task", {name});
     if (!data.ok) toast(data.error || "Failed");
-    else { tasks = data.tasks; toast(data.round ? "Round started" : "Done"); }
+    else { tasks = data.tasks; taskRuns = data.runs || []; toast(data.round ? "Round started" : "Done"); }
   } catch (e) {
     if (e !== LOGIN) toast("No connection to NSWHunter");
   }
@@ -1037,15 +1073,21 @@ async function runTask(name) {
 }
 function renderTasks() {
   if (!tasks) return;
+  const st = state.status, rows = [...tasks].sort((a, b) => a.text.localeCompare(b.text));
   put($("tasks"), h("h2", {}, "Scheduled"),
-    table(["Name", "Interval", "Last Execution", "Last Duration", "Next Execution", ""], tasks.map(t => h("tr", {},
-      h("td", {}, t.text, h("div", {class: "sub"}, t.about)),
+    table(["Name", "Interval", "Last Execution", "Last Duration", "Next Execution", ""], rows.map(t => h("tr", {title: t.about},
+      h("td", {}, t.text),
       h("td", {class: "tight"}, span(t.interval)),
       h("td", {class: "tight"}, t.last ? ago(t.last) : "never"),
       h("td", {class: "tight"}, clock(t.duration)),
       h("td", {class: "tight"}, t.next ? ahead(t.next) : (t.name === "downloads" ? "when something is queued" : "–")),
-      h("td", {}, h("div", {class: "acts"}, h("button", {class: "small", disabled: busy.has("t" + t.name) || state.status.running,
-        title: "Run this task now", "aria-label": "Run " + t.text + " now", onclick: () => runTask(t.name)}, busy.has("t" + t.name) ? "Running…" : "Run"))))), ""));
+      h("td", {}, h("div", {class: "acts"}, ibtn("refresh", "Run " + t.text + " now", () => runTask(t.name), busy.has("t" + t.name) || st.running))))), ""),
+    // What ran, newest first; a round that is running is on top.
+    h("h2", {}, "Queue"),
+    table(["", "Name", "Started", "Ended", "Duration#"], [
+      st.running ? h("tr", {}, h("td", {class: "tight"}, icon("refresh")), h("td", {}, "Round: " + (st.phase || "…")), h("td", {}, "now"), h("td", {}, "–"), h("td", {class: "num"}, "–")) : null,
+      ...taskRuns.map(r => h("tr", {}, h("td", {class: "tight done"}, icon("check")), h("td", {}, r.text), h("td", {class: "tight"}, ago(r.started)),
+        h("td", {class: "tight"}, ago(r.ended)), h("td", {class: "num"}, clock(r.duration))))].filter(Boolean), "No task has run yet"));
 }
 // Backup: the backups that are there; the settings for them are under Settings > General.
 async function loadBackups() {
@@ -1075,13 +1117,13 @@ function renderBackups() {
   put($("backups"),
     h("div", {class: "alert"}, "Backups are located in: " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state. Interval and retention are under Settings > General."),
     table(["Name", "Type", "Size#", "Time#", ""], backups.backups.map(b => h("tr", {},
-      h("td", {class: "mono"}, b.name), h("td", {}, b.kind === "manual" ? "Manual" : "Scheduled"),
+      h("td", {class: "mono"}, h("a", {href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name, title: "Download this backup"}, b.name)),
+      h("td", {}, b.kind === "manual" ? "Manual" : "Scheduled"),
       h("td", {class: "num"}, kb(b.size)), h("td", {class: "num"}, ago(b.at)),
       h("td", {}, h("div", {class: "acts"},
-        h("a", {class: "btn small", href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name}, "Download"),
-        h("button", {class: "small", disabled: busy.has("b" + b.name),
-                     onclick: () => ask("Replace the settings and the state by " + b.name + "?", "Restore", () => backupDo("restore", b.name))}, "Restore"),
-        h("button", {class: "small quiet", disabled: busy.has("b" + b.name), onclick: () => backupDo("delete", b.name)}, "Delete"))))),
+        ibtn("restore", "Restore: replace the settings and the state by this backup",
+             () => ask("Replace the settings and the state by " + b.name + "?", "Restore", () => backupDo("restore", b.name)), busy.has("b" + b.name)),
+        ibtn("trash", "Delete this backup", () => backupDo("delete", b.name), busy.has("b" + b.name)))))),
       "No backups are available"));
 }
 
@@ -1277,9 +1319,9 @@ function renderCards() {
 }
 // The window in which one entry is added or changed.
 function openEditor(what) { editing = {...what, test: null, busy: false, remove: false}; clearing.clear(); renderEditor(); }
-function closeModal() { editing = null; $("modal").hidden = true; put($("modal")); }
-function dialog(title, body, foot) {
-  return h("div", {class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title},
+function closeModal() { editing = null; viewing = null; $("modal").hidden = true; put($("modal")); }
+function dialog(title, body, foot, cls) {
+  return h("div", {class: "dialog " + (cls || ""), role: "dialog", "aria-modal": "true", "aria-label": title},
     h("div", {class: "mhead"}, title, h("button", {type: "button", "aria-label": "Close", onclick: closeModal}, "×")),
     h("div", {class: "mbody"}, body), h("div", {class: "mfoot"}, foot));
 }
@@ -1398,7 +1440,7 @@ async function deleteEditor() {
     if (e !== LOGIN) toast("No connection to NSWHunter");
   }
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape" && editing) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && (editing || viewing)) closeModal(); });
 $("modal").addEventListener("mousedown", e => { if (e.target === $("modal")) closeModal(); });
 
 // ---------------------------------------------------------------- the frame
@@ -1429,49 +1471,83 @@ function renderSettings() {
 function tool(name, text, onclick, more) {
   return h("button", {class: "tool", type: "button", onclick, ...(more || {})}, icon(name), h("span", {}, text));
 }
+// A button that opens a short list under it, as Sort and Filter do in Sonarr and Radarr.
+// items: [text, is it the chosen one, what a click does, a mark behind it].
+let openMenu = null;
+function menu(id, attrs, content, items, about) {
+  const open = openMenu === id;
+  return h("div", {class: "menuwrap"},
+    h("button", {...attrs, type: "button", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false",
+                 onclick: e => { e.stopPropagation(); openMenu = open ? null : id; render(); }}, content),
+    open ? h("div", {class: "menu", role: "menu"}, about ? h("div", {class: "about"}, about) : null,
+      items.map(([text, on, pick, mark]) => h("button", {type: "button", role: "menuitem", class: on ? "on" : "",
+        onclick: () => { openMenu = null; pick(); }}, h("span", {}, text), h("span", {}, mark || (on ? "✓" : ""))))) : null);
+}
+document.addEventListener("click", () => { if (openMenu) { openMenu = null; render(); } });
+function menuTool(id, name, text, items) {
+  return menu(id, {class: "tool"}, [icon(name), h("span", {}, text)], items);
+}
+// The Sort menu: a click on what it is sorted on turns the order around.
+function sortItems(options, current, descending, pick) {
+  return options.map(([key, text]) => [text, key === current, () => pick(key), key === current ? (descending ? "↓" : "↑") : ""]);
+}
+async function quickTask(name, done) {
+  busy.add("t" + name); render();
+  try {
+    const {data} = await request("/api/task", {name});
+    toast(data.ok ? done : (data.error || "Failed"));
+  } catch (e) {
+    if (e !== LOGIN) toast("No connection to NSWHunter");
+  }
+  busy.delete("t" + name);
+  await load();
+  if (page === "games") loadGames();
+}
 function renderToolbar() {
   if (!state) return;
   const bar = $("toolbar"), focused = document.activeElement;
-  // Someone is typing or choosing in the toolbar: leave it alone until they are done.
-  if (bar.contains(focused) && ["INPUT", "SELECT"].includes(focused.tagName)) return;
+  // Someone is typing in the toolbar: leave it alone until they are done.
+  if (bar.contains(focused) && focused.tagName === "INPUT") return;
   const here = PAGES[page], st = state.status, left = [], right = [];
-  const sync = tool("refresh", st.running ? "Busy…" : "Sync Now", syncNow, {disabled: st.running || !state.configured, title: "Read the library and look at the newest posts now"});
+  const wanted = new Set(state.items.map(i => i.game_id)).size;
+  const searchAll = tool("search", "Search All", () => ask("Search all " + plural(wanted, "game") + " that miss something by name now? That is one API call per indexer per game.", "Search",
+    () => post("/api/search-all", {}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")))),
+    {disabled: !wanted || st.running, title: "Search every game that misses something on your indexers now, not only the ones whose turn it is"});
   const testAll = tool("test", busy.has("testall") ? "Testing…" : "Test All", async () => {
     busy.add("testall"); renderToolbar();
     try { await request("/api/test-all", {}); toast("Tested"); } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); }
     busy.delete("testall"); await load();
   }, {disabled: busy.has("testall"), title: "Ask the library, every indexer and every download client whether it answers"});
   if (page === "games") {
-    left.push(sync);
-    right.push(h("label", {for: "gameonly"}, "Filter"),
-      h("select", {id: "gameonly", onchange: e => { gameOnly = e.target.value; gameShown = 200; remember("games", gameOnly); renderGames(); }},
-        Object.entries(GAME_FILTERS).map(([key, text]) => h("option", {value: key, selected: key === gameOnly}, text))));
-  } else if (page === "wanted") {
-    const n = ready().length, all = new Set(state.items.map(i => i.game_id)).size;
-    left.push(sync,
-      tool("search", "Search All", () => ask("Search all " + plural(all, "game") + " by name now? That is one API call per indexer per game.", "Search",
-        () => post("/api/search-all", {}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")))),
-        {disabled: !all || st.running, title: "Search every game that misses something on your indexers now, not only the ones whose turn it is"}),
+    left.push(
+      tool("refresh", st.running ? "Busy…" : "Update All", syncNow, {disabled: st.running || !state.configured, title: "Start a round now: read the library, look at the newest posts, follow the downloads"}),
+      tool("rss", "RSS Sync", () => quickTask("rss", "Looked at the newest posts"), {disabled: st.running || busy.has("trss") || !state.configured, title: "Look at the newest posts of your indexers now"}),
+      h("span", {class: "sep"}), searchAll);
+    right.push(
+      menuTool("gamesort", "sort", "Sort", sortItems(GAME_COLUMNS.map(c => [c.key, c.text]), gameSort, gameDown,
+        key => { gameDown = key === gameSort ? !gameDown : false; gameSort = key; render(); })),
+      menuTool("gamefilter", "filter", "Filter", Object.entries(GAME_FILTERS).map(([key, text]) =>
+        [text, key === gameOnly, () => { gameOnly = key; gameShown = 200; remember("games", key); render(); }])));
+  } else if (SECTION(page) === "wanted") {
+    const n = ready().length, picked = selected.size, working = busy.has("bulk");
+    left.push(searchAll, h("span", {class: "sep"}),
+      tool("search", working ? "Busy…" : "Search Selected", searchSelected, {disabled: !picked || working, title: "Look for the ticked games on your indexers now"}),
+      tool("download", "Download Selected", downloadSelected, {disabled: !picked || working, title: "Send the best release of every ticked game to the download client"}),
+      tool("bookmark", "Ignore Selected", ignoreSelected, {disabled: !picked || working, title: "Ignore everything of the ticked games"}),
       h("span", {class: "sep"}),
       tool("download", "Download All" + (n ? " (" + n + ")" : ""), () => ask("Send " + plural(n, "release") + " to the download client? That is the best release of every game with score " + BULK + " or 10; bundles are left out.", "Download",
         () => post("/api/grab-best", {min_score: BULK}, "bulk").then(d => d.ok && toast(plural(d.sent, "release") + " added to the queue"))),
-        {disabled: !n || busy.has("bulk"), title: "The best release of every game, if its score is " + BULK + " or 10. Bundles are left for a click of their own."}));
-    right.push(h("label", {for: "sort"}, "Sort"),
-      h("select", {id: "sort", onchange: e => { sortBy = e.target.value; flipped = false; remember("sort", sortBy); remember("flipped", ""); render(); }},
-        Object.entries(SORTS).map(([key, v]) => h("option", {value: key, selected: key === sortBy}, v.text))),
-      h("button", {id: "flip", title: "Reverse the order",
-                   "aria-label": "Reverse the order, now " + ((SORTS[sortBy] || SORTS.score).down !== flipped ? "descending" : "ascending"),
-                   onclick: () => { flipped = !flipped; remember("flipped", flipped ? "1" : ""); render(); }},
-        (SORTS[sortBy] || SORTS.score).down !== flipped ? "↓" : "↑"),
-      h("input", {type: "search", placeholder: "Filter by name", value: needle, id: "filter", "aria-label": "Filter by name",
-                  oninput: e => { needle = e.target.value; renderList(); }}));
+        {disabled: !n || working, title: "The best release of every game, if its score is " + BULK + " or 10. Bundles are left for a click of their own."}));
+    right.push(menuTool("sort", "sort", "Sort", sortItems(Object.entries(SORTS).map(([key, v]) => [key, v.text]), sortBy, (SORTS[sortBy] || SORTS.score).down !== flipped,
+      key => { flipped = key === sortBy ? !flipped : false; sortBy = key; remember("sort", sortBy); remember("flipped", flipped ? "1" : ""); render(); })));
+    if (page === "wanted") right.push(menuTool("filter", "filter", "Filter", Object.entries(WANTED).map(([key, v]) =>
+      [v.text, key === only, () => { only = key; remember("wantedfilter", key); render(); }])));
   } else if (page === "queue") {
     left.push(tool("refresh", "Refresh", load));
   } else if (page === "history") {
     left.push(tool("refresh", "Refresh", loadHistory));
-    right.push(h("label", {for: "pastonly"}, "Filter"),
-      h("select", {id: "pastonly", onchange: e => { pastOnly = e.target.value; pastShown = 100; renderHistory(); }},
-        Object.entries(PAST).map(([key, text]) => h("option", {value: key, selected: key === pastOnly}, text))));
+    right.push(menuTool("pastfilter", "filter", "Filter", Object.entries(PAST).map(([key, text]) =>
+      [text, key === pastOnly, () => { pastOnly = key; pastShown = 100; renderHistory(); render(); }])));
   } else if (here.form) {
     left.push(tool("save", busy.has("save") ? "Saving…" : dirty ? "Save Changes" : "No Changes", saveForm, {disabled: !dirty || busy.has("save")}));
   } else if (here.kind || page === "status") {
@@ -1480,16 +1556,16 @@ function renderToolbar() {
     left.push(tool("box", busy.has("b") ? "Busy…" : "Backup Now", () => backupDo("create"), {disabled: busy.has("b")}));
   } else if (page === "log") {
     left.push(tool("refresh", "Refresh", loadLog));
-    right.push(h("label", {for: "loglevel"}, "Filter"),
-      h("select", {id: "loglevel", onchange: e => { logLevel = e.target.value; logShown = 100; remember("loglevel", logLevel); renderLog(); }},
-        Object.entries(LEVELS).map(([key, text]) => h("option", {value: key, selected: key === logLevel}, text))),
+    right.push(
       h("input", {type: "search", placeholder: "Search the events", value: logNeedle, id: "logfilter", "aria-label": "Search the events",
-                  oninput: e => { logNeedle = e.target.value; logShown = 100; renderLog(); }}));
+                  oninput: e => { logNeedle = e.target.value; logShown = 100; renderLog(); }}),
+      menuTool("logfilter", "filter", "Filter", Object.entries(LEVELS).map(([key, text]) =>
+        [text, key === logLevel, () => { logLevel = key; logShown = 100; remember("loglevel", key); renderLog(); render(); }])));
   } else if (page === "logfiles") {
     left.push(tool("refresh", "Refresh", loadLogFiles));
-  } else if (page === "tasks") {
-    left.push(tool("refresh", "Refresh", loadTasks));
   }
+  // A page without buttons has no toolbar, as System > Tasks in Sonarr and Radarr.
+  bar.hidden = !left.length && !right.length;
   put(bar, left, right.length ? h("div", {class: "right"}, right) : null);
 }
 function show(name) {
@@ -1526,19 +1602,27 @@ $("find").addEventListener("input", e => {
 });
 function renderNav() {
   const here = PAGES[page], issues = health().filter(([level]) => level === "error").length;
-  const counts = {activity: queued().length, wanted: new Set(state.items.filter(waiting).map(i => i.game_id)).size, system: issues};
-  const titles = {activity: "in the queue", wanted: "games awaiting your choice", system: "things that do not work"};
+  const choices = new Set(state.items.filter(waiting).map(i => i.game_id)).size;
+  // The numbers of what waits, on a group and on the page in it that holds them.
+  const counts = {activity: queued().length, queue: queued().length, want: choices, choice: choices, system: issues, status: issues};
+  const titles = {activity: "in the queue", queue: "in the queue", want: "games awaiting your choice", choice: "games awaiting your choice",
+                  system: "things that do not work", status: "things that do not work"};
+  const count = id => counts[id] ? h("span", {class: "count" + (id === "system" || id === "status" ? " alert" : ""), title: counts[id] + " " + titles[id]}, counts[id]) : null;
   put($("nav"), MENU.map(top => {
-    const open = here.group === top.id, count = counts[top.id];
+    const open = here.group === top.id;
     return h("div", {class: "group" + (open ? " on" : "")},
       h("button", {class: "parent" + (open && !top.children ? " on" : ""), "aria-current": page === top.id ? "page" : null,
                    "aria-expanded": top.children ? (open ? "true" : "false") : null, onclick: () => show(top.first || top.id)},
-        icon(top.icon), top.text,
-        count ? h("span", {class: "count" + (top.id === "system" ? " alert" : ""), title: count + " " + titles[top.id]}, count) : null),
+        icon(top.icon), top.text, open && top.children ? null : count(top.id)),
       // The pages of a group only show while one of them is open.
       open ? (top.children || []).map(child => h("button", {class: "child" + (page === child.id ? " on" : ""), "aria-current": page === child.id ? "page" : null,
-                                                           onclick: () => show(child.id)}, child.text)) : null);
+                                                           onclick: () => show(child.id)}, child.text, count(child.id))) : null);
   }));
+  const st = state.status;
+  $("sidefoot").textContent = st.running ? "Busy: " + (st.phase || "…")
+    : "Last round " + ago(st.last_run) + (st.next_run ? " · next in " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
+  put($("topright"), menu("user", {class: "topbtn", title: "Logged in as " + state.user, "aria-label": "Account"}, icon("person"),
+    [["Log out", false, logout]], "Logged in as " + state.user));
 }
 function render() {
   if (!state) return;
@@ -1547,8 +1631,6 @@ function render() {
   $("version").textContent = "v" + state.version;
   const st = state.status, here = PAGES[page];
   document.title = here.text + " - NSWHunter";
-  $("statusline").textContent = st.running ? "Busy: " + (st.phase || "…")
-    : "Last round " + ago(st.last_run) + (st.next_run ? " · next in " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
   renderNav(); renderToolbar();
   const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
   put($("notice"),
@@ -1557,7 +1639,8 @@ function render() {
     st.error ? h("div", {class: "notice"}, "The last round did not finish (" + ago(st.error.at) + "). " + st.error.text + " System > Events has the details.") : null,
     st.skipped ? h("div", {class: "notice warn"}, "The last round left out " + plural(st.skipped, "game or release", "games or releases") + " because of an error; the rest went on. System > Events says which.") : null,
     ...(state.configured && page !== "status" ? errors.map(([, s]) => h("div", {class: "notice"}, s.name && !s.text.startsWith(s.name) ? s.name + ": " + s.text : s.text)) : []));
-  if (page === "wanted") renderWanted();
+  if (SECTION(page) === "wanted") renderWanted();
+  if (viewing && !editing) renderGame();
   if (page === "queue") renderQueue();
   if (page === "blocklist") renderBlocklist();
   if (page === "status") renderStatus();
@@ -1579,7 +1662,7 @@ async function load() {
     render();
     if (page === "log") loadLog();
   } catch (e) {
-    if (e !== LOGIN) { $("app").hidden = false; $("statusline").textContent = "No connection to NSWHunter"; }
+    if (e !== LOGIN) { $("app").hidden = false; $("sidefoot").textContent = "No connection to NSWHunter"; }
   }
 }
 load();

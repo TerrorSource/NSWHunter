@@ -236,19 +236,23 @@ async def api_logfile(request):
 
 
 async def api_tasks(request):
-    return web.json_response({"ok": True, "tasks": request.app["hunter"].tasks(), "now": int(time.time())})
+    hunter = request.app["hunter"]
+    return web.json_response({"ok": True, "tasks": hunter.tasks(), "runs": hunter.state.get("task_runs", []),
+                              "now": int(time.time())})
 
 
 async def api_task(request):
     """Run one of the tasks now. A task that is part of a round starts a round."""
     try:
-        if await request.app["hunter"].run_task(str((await request.json())["name"])):
+        started = await request.app["hunter"].run_task(str((await request.json())["name"]))
+        if started:
             request.app["wake"].set()
     except clients.ServiceError as e:
         return web.json_response({"ok": False, "error": str(e)}, status=502)
     except (KeyError, ValueError, TypeError):
         return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
-    return web.json_response({"ok": True, "tasks": request.app["hunter"].tasks()})
+    hunter = request.app["hunter"]
+    return web.json_response({"ok": True, "round": started, "tasks": hunter.tasks(), "runs": hunter.state.get("task_runs", [])})
 
 
 async def api_cover(request):
