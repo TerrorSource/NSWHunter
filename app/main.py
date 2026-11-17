@@ -12,8 +12,10 @@ import aiohttp
 from aiohttp import web
 
 import auth
+import backup
 import clients
 import config
+import logs
 from hunter import Hunter, log
 from version import __version__
 
@@ -45,21 +47,9 @@ HEADERS = {
     "Cache-Control": "no-store",
 }
 # What works without a login: the page itself (it holds no data) and logging in.
-OPEN = {"/", "/api/session", "/api/login", "/api/setup"}
-
-
-async def notify(title, body):
-    """Apprise notification, if NOTIFY_URLS is set. A failed notification never stops a round."""
-    if not config.NOTIFY_URLS:
-        return
-    try:
-        import apprise
-        sender = apprise.Apprise()
-        for target in config.NOTIFY_URLS.split(","):
-            sender.add(target.strip())
-        await sender.async_notify(title=title, body=body)
-    except Exception as e:  # noqa: BLE001
-        log("Sending the notification failed:", e)
+OPEN = {"/", "/api/session", "/api/login"}
+# What works with the made-up password of the first start: choosing one of your own, nothing else.
+FIRST = {"/", "/api/session", "/api/login", "/api/logout", "/api/password"}
 
 
 def spawn(coroutine):
@@ -118,7 +108,9 @@ async def guarded(request, handler):
     if request.method == "POST" and request.content_type != "application/json":
         return refuse(415, "JSON required")
     if request.path not in OPEN and not logged_in(request):
-        return refuse(401, "Login required", login=True, setup=not config.PANEL_PASSWORD)
+        return refuse(401, "Login required", login=True)
+    if request.path not in FIRST and config.must_change_password():
+        return refuse(403, "Choose a password of your own first", change=True)
     return await handler(request)
 
 
@@ -141,25 +133,27 @@ async def health(request):
 
 
 async def api_session(request):
-    return web.json_response({"ok": True, "logged_in": logged_in(request), "setup": not config.PANEL_PASSWORD,
-                              "version": __version__})
+    return web.json_response({"ok": True, "logged_in": logged_in(request), "version": __version__,
+                              "change": logged_in(request) and config.must_change_password()})
 
 
-async def api_setup(request):
-    """The first visit: make the login. Only possible while there is none."""
-    if config.PANEL_PASSWORD:
-        return refuse(403, "There is a login already")
+async def api_password(request):
+    """Choose a name and a password of your own. This is all the made-up password of the first
+    start can do, and it ends that password."""
     try:
         body = await request.json()
         user, password = str(body["user"]).strip(), str(body["password"])
         if not password:
             raise ValueError("PANEL_PASSWORD: fill in a password")
+        if config.check_password(password):
+            raise ValueError("PANEL_PASSWORD: choose another password than the one you logged in with")
         config.update({"PANEL_USER": user, "PANEL_PASSWORD": password})
     except ValueError as e:
         return refuse(400, str(e).partition(": ")[2] or "Invalid request")
     except (KeyError, TypeError, AttributeError):
         return refuse(400, "Invalid request")
-    request.app["hunter"].event(f"Login made for {user}")
+    request.app["hunter"].event(f"Password changed for {user}")
+    auth.end_all()
     return session_cookie(request, web.json_response({"ok": True}))
 
 
@@ -195,7 +189,13 @@ async def api_state(request):
     view["version"] = __version__
     view["now"] = int(time.time())
     view["user"] = config.PANEL_USER
+    view["ui"] = {"theme": config.UI_THEME, "date": config.UI_DATE_FORMAT, "time": config.UI_TIME_FORMAT,
+                  "relative": config.UI_RELATIVE_DATES}
     return web.json_response(view)
+
+
+async def api_games(request):
+    return web.json_response({"games": request.app["hunter"].library(), "now": int(time.time())})
 
 
 async def api_log(request):
@@ -269,7 +269,7 @@ async def api_settings(request):
 
 
 async def api_settings_save(request):
-    """Save the Configuration tab, test the connections with the new values, start a round."""
+    """Save single settings of a settings page and use them from now on."""
     hunter = request.app["hunter"]
     login = (config.PANEL_USER, config.PANEL_PASSWORD)
     try:
@@ -280,9 +280,9 @@ async def api_settings_save(request):
     except (AttributeError, TypeError):
         return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
     hunter.event("Settings saved: " + (", ".join(changed) or "nothing changed"))
-    services = await hunter.test_connections()
+    logs.setup()
     request.app["wake"].set()
-    response = web.json_response({"ok": True, "services": services, **config.editable()})
+    response = web.json_response({"ok": True, **config.editable()})
     if login != (config.PANEL_USER, config.PANEL_PASSWORD):
         # A new login: every other browser has to log in again, this one stays.
         auth.end_all()
@@ -290,19 +290,112 @@ async def api_settings_save(request):
     return response
 
 
-async def api_test(request):
-    """A Test button: try one service with the values in the form. Nothing is saved."""
+def tested(handler):
+    """A Test button: the outcome is a text, good or bad, never a failed request."""
+    async def wrapped(request):
+        try:
+            text = await handler(request.app["hunter"], await request.json())
+        except (clients.ServiceError, ValueError) as e:
+            return web.json_response({"ok": False, "text": str(e)})
+        except (AttributeError, TypeError, KeyError):
+            return web.json_response({"ok": False, "text": "Invalid request"}, status=400)
+        return web.json_response({"ok": True, "text": text})
+    return wrapped
+
+
+async def test_library(hunter, body):
+    """Try the library with the values in the form. Nothing is saved."""
+    cfg = config.overlay(dict(body.get("values") or {}), list(body.get("clear") or []))
+    return await hunter.test("slm", cfg)
+
+
+async def test_provider(hunter, body):
+    """Try one indexer, download client or connection as it is in the form. Nothing is saved."""
+    kind = str(body["kind"])
+    return await hunter.test(kind, config.normalize_entry(kind, body["entry"]))
+
+
+async def api_provider(request):
+    """Add or change one indexer, download client or connection, and say whether it answers."""
+    hunter = request.app["hunter"]
     try:
         body = await request.json()
-        cfg = config.overlay(dict(body.get("values") or {}), list(body.get("clear") or []))
-        text = await request.app["hunter"].test(str(body.get("service")), cfg)
-    except clients.ServiceError as e:
-        return web.json_response({"ok": False, "text": str(e)})
+        kind = str(body["kind"])
+        entry = config.save_provider(kind, body["entry"])
     except ValueError as e:
-        return web.json_response({"ok": False, "text": str(e)})
-    except (AttributeError, TypeError):
-        return web.json_response({"ok": False, "text": "Invalid request"}, status=400)
-    return web.json_response({"ok": True, "text": text})
+        return web.json_response({"ok": False, "error": str(e)}, status=400)
+    except (AttributeError, TypeError, KeyError):
+        return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
+    hunter.event(f"Saved: {entry['name']}")
+    text, ok = "switched off", None
+    if entry["enabled"] and kind != "CONNECTIONS":  # a connection is not tested by sending a message
+        try:
+            text, ok = await hunter.test(kind, entry), True
+        except clients.ServiceError as e:
+            text, ok = str(e), False
+        hunter.provider(kind, entry, ok, text)
+    hunter.forget_services()
+    hunter.save()
+    request.app["wake"].set()
+    return web.json_response({"ok": True, "id": entry["id"], "tested": ok, "text": text, **config.editable()})
+
+
+async def api_provider_delete(request):
+    hunter = request.app["hunter"]
+    try:
+        body = await request.json()
+        config.delete_provider(str(body["kind"]), str(body["id"]))
+    except (ValueError, AttributeError, TypeError, KeyError):
+        return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
+    hunter.forget_services()
+    hunter.save()
+    return web.json_response({"ok": True, **config.editable()})
+
+
+# ---------------------------------------------------------------- backups
+
+
+async def api_backups(request):
+    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing()})
+
+
+async def api_backup(request):
+    """Make a backup now, remove one, or put one back."""
+    hunter = request.app["hunter"]
+    try:
+        body = await request.json()
+        what, name = str(body["action"]), str(body.get("name", ""))
+        if what == "create":
+            hunter.save()
+            hunter.event(f"Backup made: {backup.create('manual')}")
+        elif what == "delete":
+            backup.delete(name)
+        elif what == "restore":
+            backup.restore(name)
+            # Use what was put back at once: the settings, the log files, the state.
+            config.load_saved()
+            config.first_login()
+            logs.setup()
+            hunter.load()
+            hunter.event(f"Backup put back: {name}", "warn")
+            request.app["wake"].set()
+        else:
+            raise ValueError
+    except backup.BackupError as e:
+        return web.json_response({"ok": False, "error": str(e)}, status=400)
+    except (ValueError, AttributeError, TypeError, KeyError):
+        return web.json_response({"ok": False, "error": "Invalid request"}, status=400)
+    return web.json_response({"ok": True, "folder": backup.folder(), "backups": backup.listing()})
+
+
+async def api_backup_download(request):
+    """A backup holds keys and passwords: like everything else, only for who is logged in."""
+    try:
+        name = request.query.get("name", "")
+        return web.FileResponse(backup.path(name), headers={
+            "Content-Disposition": f'attachment; filename="{name}"', "Content-Type": "application/zip"})
+    except backup.BackupError as e:
+        return refuse(404, str(e))
 
 
 async def watcher(app):
@@ -334,7 +427,7 @@ async def listener(app):
 async def start(app):
     auth.load()
     app["session"] = aiohttp.ClientSession(headers={"User-Agent": f"NSWHunter/{__version__}"})
-    app["hunter"] = Hunter(app["session"], notify)
+    app["hunter"] = Hunter(app["session"])
     app["wake"] = asyncio.Event()
     spawn(scheduler(app))
     spawn(watcher(app))
@@ -355,15 +448,22 @@ def make_app():
         web.get("/", panel),
         web.get("/health", health),
         web.get("/api/session", api_session),
-        web.post("/api/setup", api_setup),
+        web.post("/api/password", api_password),
         web.post("/api/login", api_login),
         web.post("/api/logout", api_logout),
         web.get("/api/state", api_state),
         web.get("/api/log", api_log),
+        web.get("/api/games", api_games),
         web.post("/api/sync", api_sync),
         web.get("/api/settings", api_settings),
         web.post("/api/settings", api_settings_save),
-        web.post("/api/test", api_test),
+        web.post("/api/test", tested(test_library)),
+        web.post("/api/provider", api_provider),
+        web.post("/api/provider/delete", api_provider_delete),
+        web.post("/api/provider/test", tested(test_provider)),
+        web.get("/api/backups", api_backups),
+        web.post("/api/backup", api_backup),
+        web.get("/api/backup/download", api_backup_download),
         web.post("/api/grab", action(do_grab)),
         web.post("/api/grab-best", action(do_grab_best)),
         web.post("/api/search", action(do_search)),
@@ -378,9 +478,18 @@ def make_app():
 
 if __name__ == "__main__":
     config.load_saved()
+    logs.setup()
     log(f"NSWHunter {__version__} starting on port {config.PORT}")
-    if not config.PANEL_PASSWORD:
-        log(f"No login yet. Open the panel on port {config.PORT} to make one.")
+    made_up = config.first_login()
+    if made_up:
+        # Shown at every start until the user has chosen a password of their own. Only here,
+        # in the output of the container: not in the log files and not in the panel.
+        logs.console("=" * 62)
+        logs.console(f"  Log in to the panel on port {config.PORT} with")
+        logs.console(f"    username: {config.PANEL_USER}")
+        logs.console(f"    password: {made_up}")
+        logs.console("  You have to choose a password of your own at the first login.")
+        logs.console("=" * 62)
     elif config.problems():
-        log(f"Not set up yet. Open the panel on port {config.PORT} and fill in the Configuration tab.")
+        log(f"Not set up yet. Open the panel on port {config.PORT} and fill in the settings.")
     web.run_app(make_app(), port=config.PORT, print=None, access_log=None)

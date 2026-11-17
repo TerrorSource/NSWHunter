@@ -26,11 +26,12 @@ RUN pip install -r /app/requirements.txt
 COPY app/ /app/
 COPY CHANGELOG.md /app/CHANGELOG.md
 # Always readable for the app user, also when a file had stricter rights on the build machine.
-RUN chmod -R a+rX /app && mkdir -p /data
+RUN chmod -R a+rX /app && mkdir -p /data /backup
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 WORKDIR /app
 
-VOLUME /data
+# /backup is a volume of its own, so the backups do not sit next to what they are a backup of.
+VOLUME /data /backup
 EXPOSE 3033
 HEALTHCHECK --interval=60s --timeout=10s --start-period=20s \
   CMD python3 -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '3033'), timeout=5)" || exit 1

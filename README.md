@@ -1,12 +1,12 @@
 # NSWHunter
 
-Searches usenet for the Switch updates that your library misses and sends them to your download client.
+Searches your indexers for the Switch updates and DLC that your library misses and sends them to your download client.
 
 1. Fetches the export of [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) (`/export/library.json`) and takes all games with `updateMissing: true`.
-2. Searches for releases of those games through Prowlarr.
+2. Searches for releases of those games: through Prowlarr, or on a Newznab or Torznab indexer directly.
 3. Judges each release: is it the right game, is the version newer than yours, is it an update?
 4. Shows the candidates in a web panel. You click **Download**, or you let certain releases be sent automatically.
-5. Sends the NZB to NZBGet (category `games`), SABnzbd or the download client of Prowlarr.
+5. Sends the release to a download client: NZBGet or SABnzbd for usenet, qBittorrent, Transmission or uTorrent for torrents.
 
 Once the update is in your library, the item disappears by itself.
 
@@ -41,41 +41,61 @@ services:
       - 3033:3033
     volumes:
       - /path/to/nswhunter/data:/data
+      - /path/to/nswhunter/backup:/backup
 ```
 
-The container runs with a read-only file system and without privileges: it only writes to `/data`. The four capabilities are for the start, where `/data` is given to `PUID`:`PGID`; after that the app runs as that user without any.
+`/data` holds the settings and the state, `/backup` the backups of both. The container runs with a read-only file system and without privileges: it only writes to those two folders. The four capabilities are for the start, where the folders are given to `PUID`:`PGID`; after that the app runs as that user without any.
 
 The repo is private, and so is the image. Portainer then needs a registry to pull it: **Registries > Add registry > Custom**, URL `ghcr.io`, username `<account>` and as password a GitHub token with the `read:packages` scope. Or make the package public under GitHub > Packages > nswhunter > Package settings.
 
+## The first login
+
+At the first start NSWHunter makes the user `admin` with a password it makes up, and writes both to the log of the container:
+
+```
+==============================================================
+  Log in to the panel on port 3033 with
+    username: admin
+    password: 4mZ0-example-Qx7
+  You have to choose a password of your own at the first login.
+==============================================================
+```
+
+Open `http://<nas>:3033` and log in with them. The panel then lets you do one thing: choose a password of your own (at least 8 characters) and, if you want, another username. Until you have done that the lines are in the log at every start, with the same password; after that they are gone and the made-up password no longer works. The password is only written to the output of the container, not to the log files and not to the Log page.
+
 ## Setting up
 
-Open `http://<nas>:3033`. The first visit asks you to make a login: a username and a password of at least 8 characters. After that you land on the **Configuration** tab:
+The menu on the left has the settings, laid out as in Sonarr and Radarr:
 
-| Setting | Where to find it |
+| Page | What is there |
 |---|---|
-| Library: address and API key | Switch-library-manager-web > My account > API keys > Make a key, with the Read only role. The key starts with `slm_` and is shown once. If login is switched off there, no key is needed. |
-| Prowlarr: address and API key | Prowlarr > Settings > General > API Key |
-| Prowlarr: categories | `1000` is Console with all its subcategories. Only those are searched. Releases that the indexer filed under another console (PS4, Xbox, Wii, …) or that have another platform in the name are ruled out: the Switch has no category of its own. |
-| Download client | NZBGet (address, ControlUsername, ControlPassword), SABnzbd (address, API key) or the download client that is set up in Prowlarr |
-| Automatic download | See [Automatic download](#automatic-download) |
-| Automatic search | Every 6, 12, 24 or 48 hours, see [Searching and API limits](#searching-and-api-limits) |
-| Wait for the library | How long a sent release may take to show up in your library, see [After sending](#after-sending) |
-| Notifications (Telegram) | Bot token from @BotFather and your chat ID (from @userinfobot). First send your bot one message yourself. You get a message when something was sent automatically, a download failed, something arrived or a round broke. |
-| Choose in Telegram | See [Choosing in Telegram](#choosing-in-telegram) |
-| Panel | Username, password and host names, see [Security](#security) |
+| **Media Management** | Automatic download (see [Automatic download](#automatic-download)), how long to wait for the library (see [After sending](#after-sending)), how often to search (see [Searching and API limits](#searching-and-api-limits)), and whether missing DLC is searched |
+| **Indexers** | Where releases are searched: your Prowlarr (address and API key, from Prowlarr > Settings > General), or a Newznab (usenet) or Torznab (torrent) indexer directly. Per indexer the categories: `1000` is Console with all its subcategories |
+| **Download Clients** | NZBGet, SABnzbd, qBittorrent, Transmission, uTorrent, or the download client of Prowlarr. A usenet release goes to the first usenet client in the list that is switched on, a torrent to the first torrent client |
+| **Connect** | The library: the address of Switch-library-manager-web and an API key (My account > API keys > Make a key; Read only is enough, with the Editor role NSWHunter can also ask for a scan). And the notifications: Telegram, Discord (a webhook) and Apprise |
+| **General** | Security (username, password, host names; see [Security](#security)), Logging (log level and the size of a log file) and Backups (see [Backups](#backups)) |
+| **UI** | Light or dark, the format of dates and times, and whether "3 hours ago" or the date is shown |
 
-Each service has a **Test** button that tries the connection with what is in the form, even if it has not been saved yet. **Save and test the connections** stores the settings, tries each service and starts a round. The settings are in `/data/settings.json`, readable only by the app user. Keys and passwords never go back to the browser: an empty field means "keep what is there", and **Clear** empties one. A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
+Indexers, download clients and connections are cards. **+** adds one, a click on a card changes it; the window that opens has **Test**, **Save** and **Delete**. A card says whether its service answers. Keys and passwords never go back to the browser: an empty field means "keep what is there". A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.
 
-The same settings can also be environment variables in the compose file (`SLM_URL`, `PROWLARR_API_KEY`, …). That is then the initial value; a saved value takes precedence. The other settings (timing, indexers, notifications through Apprise) are in the compose file only, see [.env.example](.env.example).
+Releases that an indexer filed under another console (PS4, Xbox, Wii, …) or that have another platform in the name are ruled out: the Switch has no category of its own.
+
+Torrents are only searched when a torrent client is switched on. NSWHunter follows a torrent as it follows a usenet download; a torrent that is seeding counts as downloaded.
+
+An older version had one Prowlarr and one download client, set on one page or with environment variables (`PROWLARR_URL`, `NZBGET_URL`, …). At the first start of this version they become the first entries of the lists; after that only the lists count. The other settings (timing, which indexers of Prowlarr) are environment variables only, see [.env.example](.env.example).
 
 ## The panel
 
-The tiles at the top of the **Updates** tab are buttons. A click on one shows only the games that belong to it:
+- **Games** lists every game of your library: the version you have, the latest, the DLC, the size, and whether it is complete. It can be filtered, searched and sorted. A game that misses something leads to its card on the Wanted page.
+- **Wanted** has every game that misses an update or DLC, with the releases that were found.
+- **System > Status** says what every service last answered, and **System > Log** holds the last 1000 lines; the log can be limited to warnings and errors, and searched.
 
-- **games in your library**: the number is your whole library; the list holds every game that misses an update or DLC.
+The tiles at the top of the **Wanted** page are buttons. A click on one shows only the games that belong to it:
+
+- **missing something**: every game that misses an update or DLC.
 - **updates missing** and **DLC missing**; the DLC tile is only shown when missing DLC is searched.
 - **awaiting your choice**: games with a candidate release that has not been sent.
-- **added to queue**: games with a release that was sent to the download client.
+- **added to queue**: games with a release that was sent to a download client, with how far the download is.
 - **download failed**: downloads that the download client reported as failed, or that it did not know and that had not arrived in the library after the waiting time. Each can be sent once more with **Try again** or taken off the list with **Dismiss**.
 - **arrived**: what was sent and is now in your library, of the last 30 days.
 - **ignored**: only shown when you ignore something.
@@ -84,11 +104,7 @@ A card shows the best release of its game with a **Download** button, so it need
 
 **Reject** takes a release out of the list. Below the releases of a game is what you rejected, with **Restore** to take it back.
 
-If a round breaks, every page says so in a red bar, you get a message in Telegram and the health check of the container turns red. If one game cannot be handled, it is left out and the rest of the round goes on; a yellow bar says how many were left out.
-
-The **Log** tab holds the last 1000 lines. It can be limited to warnings and errors, and searched.
-
-The row with the service checks (Library, Prowlarr, Download client, Version list, …) is on the **Configuration** tab only.
+If a round breaks, every page says so in a red bar, you get a notification and the health check of the container turns red. If one game cannot be handled, it is left out and the rest of the round goes on; a yellow bar says how many were left out.
 
 ## How a release is judged
 
@@ -128,7 +144,7 @@ Within a game the releases are ordered by score, then by age (newest post first)
 
 ## Automatic download
 
-On the Configuration tab you choose from which score the best release of a game is sent automatically: off (default), or from 10, 9, 8, 7, 6 or 5.
+On the Media Management page you choose from which score the best release of a game is sent automatically: off (default), or from 10, 9, 8, 7, 6 or 5.
 
 Bundles are sent automatically only with `AUTO_BUNDLES=true`. Per round at most `MAX_GRABS_PER_RUN` releases are sent.
 
@@ -136,7 +152,7 @@ Start with off and watch for a few days whether the scores match how updates are
 
 ## After sending
 
-NSWHunter asks the download client every two minutes how a sent release is doing. That works with NZBGet and SABnzbd; if the download goes through Prowlarr, there is no status and only the time counts.
+NSWHunter asks the download client every two minutes how a sent release is doing. That works with NZBGet, SABnzbd, qBittorrent, Transmission and uTorrent; if the download goes through the download client of Prowlarr, there is no status and only the time counts. A client that does not answer is not concluded from: its downloads are left as they are.
 
 | What the download client says | What NSWHunter does |
 |---|---|
@@ -146,11 +162,11 @@ NSWHunter asks the download client every two minutes how a sent release is doing
 | Downloaded, but not in the library after the waiting time | You get a notification. No next release is sent: the folder of your download client apparently does not reach the library |
 | Does not know the release | After the waiting time it counts as not arrived: it is listed under **download failed** and the next one gets its turn |
 
-You set the waiting time on the Configuration tab (**Wait for the library**, default 60 minutes). Scanning on request only works if the API key of Switch-library-manager-web has the Editor role; with "Read only" NSWHunter waits for the library's own scan.
+You set the waiting time on the Media Management page (**Wait for the library**, default 60 minutes). Scanning on request only works if the API key of Switch-library-manager-web has the Editor role; with "Read only" NSWHunter waits for the library's own scan.
 
 ## Choosing in Telegram
 
-**Choose in Telegram** is off until you switch it on, on the Configuration tab. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
+**Choose in Telegram** is a setting of a Telegram connection (Settings > Connect) and is off until you switch it on. With it on, you get one message for every release that awaits your choice, with the buttons **Download** and **Reject**. A press does the same as the button in the panel, and the message then says what was done.
 
 - At most 10 questions per round, the highest scores first; the rest follow in the next rounds. Every release is asked about once.
 - Only the chat that is set as Chat ID can press the buttons. A press from anywhere else is ignored.
@@ -159,25 +175,29 @@ You set the waiting time on the Configuration tab (**Wait for the library**, def
 
 ## Security
 
-- **Login.** The panel has a login screen of its own; the browser shows no pop-up. A login lasts 30 days in a cookie that scripts cannot read and that other sites cannot send. **Log out** ends it. Only a hash of the password is stored, and a new password logs every other browser out.
+- **Login.** The panel has a login screen of its own; the browser shows no pop-up. The first start makes up a password that has to be changed at the first login (see [The first login](#the-first-login)). A login lasts 30 days in a cookie that scripts cannot read and that other sites cannot send. **Log out** ends it. Only a hash of the password is stored, and a new password logs every other browser out.
 - **Wrong logins.** After 5 wrong logins from one address it has to wait: 30 seconds, and twice as long after every next wrong one, up to 15 minutes.
 - **No encryption by itself.** The panel speaks HTTP. Inside your home network that is usual; to reach it from outside, put it behind a reverse proxy with HTTPS. The password then crosses the network once per login instead of with every request.
-- **Host names.** The panel answers to an IP address and to names that only exist inside a home network (`nas`, `nas.local`, `nas.lan`). Any other name is refused, so a website cannot reach the panel through your browser by pointing a name of its own at your NAS. If you use a domain name, fill it in under **Host names** on the Configuration tab or in `PANEL_HOSTS`.
+- **Host names.** The panel answers to an IP address and to names that only exist inside a home network (`nas`, `nas.local`, `nas.lan`). Any other name is refused, so a website cannot reach the panel through your browser by pointing a name of its own at your NAS. If you use a domain name, fill it in under **Host names** on the General page or in `PANEL_HOSTS`.
 - **Keys stay with their address.** A saved key or password is never sent to a changed address; you fill it in again.
 - **The page.** It runs only its own script, loads nothing from elsewhere and cannot be shown inside another page.
 - **The container.** Read-only file system, no privileges, every answer of a service limited in size.
 
-Forgot the password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: the panel asks to make a login.
+Forgot the password? Stop the container, remove `PANEL_PASSWORD` from `/data/settings.json` and start it again: NSWHunter makes up a new password and writes it to the log of the container.
+
+## Backups
+
+A backup is a zip of the settings (with their keys and passwords) and the state. NSWHunter makes one every 7 days in `/backup` and removes the automatic ones after 28 days; folder, interval and retention are on the General page. That page also lists the backups, with **Backup now**, **Download**, **Restore** and **Delete**. A backup you make yourself stays until you remove it. Restoring replaces the settings and the state at once, without a restart.
 
 ## Searching and API limits
 
-Every hour (`SYNC_INTERVAL_MINUTES`) NSWHunter fetches the library and does one search without a search term: the newest posts of all your usenet indexers, compared with everything that is missing.
+Every hour (`SYNC_INTERVAL_MINUTES`) NSWHunter fetches the library and does one search without a search term: the newest posts of all your indexers, compared with everything that is missing.
 
-In addition, every game that misses something is searched by name. You set how often on the Configuration tab under **Automatic search**: every 6, 12, 24 or 48 hours. That costs one API call per indexer per game. With 40 games and 3 indexers that is 160 calls per indexer per day at 6 hours; choose 24 or 48 hours if an indexer has a daily limit. With **Search now** in the panel you search one game at once.
+In addition, every game that misses something is searched by name. You set how often on the Media Management page under **Automatic search**: every 6, 12, 24 or 48 hours. That costs one API call per indexer per game. With 40 games and 3 indexers that is 160 calls per indexer per day at 6 hours; choose 24 or 48 hours if an indexer has a daily limit. With **Search now** in the panel you search one game at once.
 
 ## DLC
 
-With **Also search for missing DLC** on the Configuration tab the DLC that your library misses is searched as well. It is in the card of the game, below the update.
+With **Also search for missing DLC** on the Media Management page the DLC that your library misses is searched as well. It is in the card of the game, below the update.
 
 - A release with the title ID of the DLC gets score 10.
 - If the name of the DLC is in the title, the score is 8. If a game has several DLC with almost the same name ("In-Game Commentary - Dutch", "... - Spanish"), a release belongs to the DLC it names best and is ruled out for the others.
@@ -189,7 +209,7 @@ With **Also search for missing DLC** on the Configuration tab the DLC that your 
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-The tests run against fake versions of the library, Prowlarr and NZBGet (`tests/fakes.py`). `commit-git.sh` runs them by itself in the image. To run them separately:
+The tests run against fake versions of the library, Prowlarr, a Newznab and a Torznab indexer, NZBGet, Telegram and Discord (`tests/fakes.py`) and of the three torrent clients (`tests/fake_torrents.py`). `commit-git.sh` runs them by itself in the image. To run them separately:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -219,11 +239,17 @@ Without `-r` the script only pushes; `latest` is then rebuilt, without a new rel
 | File | Contents |
 |---|---|
 | `app/matcher.py` | Judges one release name for one game |
-| `app/clients.py` | Talks to the library, Prowlarr, NZBGet and SABnzbd |
+| `app/clients.py` | What every talk with a service shares, the library, NZBGet and SABnzbd |
+| `app/indexers.py` | Prowlarr and the direct Newznab and Torznab indexers |
+| `app/torrent.py` | qBittorrent, Transmission and uTorrent |
+| `app/downloads.py` | Hands a release to a download client and asks how it is doing |
+| `app/notify.py` | Telegram, Discord and Apprise |
+| `app/backup.py` | The backups |
+| `app/logs.py` | The log, in three levels |
 | `app/hunter.py` | One round: fetch, search, judge, send |
 | `app/main.py` | Web panel and scheduling |
 | `app/auth.py` | The login, its sessions and the host names the panel answers to |
-| `app/config.py` | Settings from environment variables |
+| `app/config.py` | The settings: single ones and the lists of indexers, download clients and connections |
 | `entrypoint.sh` | Starts the app as `PUID`:`PGID` |
 | `commit-git.sh` | Puts the working directory on GitHub and creates a release |
 | `.github/workflows/docker.yml` | Tests, scans and builds the image on GitHub |

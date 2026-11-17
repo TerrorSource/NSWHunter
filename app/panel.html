@@ -7,43 +7,67 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%23e4002b'/><path d='M4 8.5l2.5 2.5L12 5.5' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
   :root {
-    --bg: #f5f5f3; --card: #ffffff; --line: #e2e1dc; --text: #1d1d1b; --soft: #6b6a65;
+    --bg: #f5f5f3; --card: #ffffff; --line: #e2e1dc; --text: #1d1d1b; --soft: #6b6a65; --side: #2a2a28; --side-text: #e8e7e2;
     --accent: #e4002b; --accent-text: #ffffff;
     --good: #1a7f4b; --good-bg: #e3f4ea; --warn: #9a6200; --warn-bg: #fbf0d6;
     --info: #1f5fbf; --info-bg: #e4edfb; --bad: #b3261e; --bad-bg: #fbe6e4; --mute-bg: #ecebe7;
   }
+  /* Dark: when the system asks for it, unless the settings say light; or when the settings say dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #151514; --card: #1f1f1d; --line: #33322f; --text: #ecebe6; --soft: #9c9a93;
+    :root:not([data-theme=light]) {
+      --bg: #151514; --card: #1f1f1d; --line: #33322f; --text: #ecebe6; --soft: #9c9a93; --side: #1b1b19; --side-text: #ecebe6;
       --accent: #ff4d5e; --accent-text: #1a0508;
       --good: #6fd39b; --good-bg: #173524; --warn: #f0c36a; --warn-bg: #3a2e12;
       --info: #8ab4f8; --info-bg: #1a2a45; --bad: #f2928b; --bad-bg: #40201d; --mute-bg: #2a2a27;
     }
   }
+  :root[data-theme=dark] {
+    --bg: #151514; --card: #1f1f1d; --line: #33322f; --text: #ecebe6; --soft: #9c9a93; --side: #1b1b19; --side-text: #ecebe6;
+    --accent: #ff4d5e; --accent-text: #1a0508;
+    --good: #6fd39b; --good-bg: #173524; --warn: #f0c36a; --warn-bg: #3a2e12;
+    --info: #8ab4f8; --info-bg: #1a2a45; --bad: #f2928b; --bad-bg: #40201d; --mute-bg: #2a2a27;
+  }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  /* The frame: the menu on the left, the page next to it. */
+  .shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }
+  aside { background: var(--side); color: var(--side-text); padding: 14px 0; }
+  .brand { display: flex; align-items: baseline; gap: 6px; padding: 2px 18px 14px; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  .brand small { font-size: 12px; font-weight: 400; opacity: .6; }
+  #menu { all: unset; display: none; cursor: pointer; margin-left: auto; padding: 2px 8px; font-size: 20px; }
+  nav button { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 9px 18px;
+               border-left: 3px solid transparent; font-size: 15px; }
+  nav button:hover { background: rgba(255,255,255,.06); }
+  nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  nav button.on { border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
+  nav button.child { padding: 7px 18px 7px 34px; font-size: 14px; }
+  nav .head { padding: 14px 18px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .55; }
+  nav .dot { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 99px; text-align: center;
+             font-size: 11px; font-weight: 700; background: var(--accent); color: var(--accent-text); }
+  .content { padding: 18px 22px 60px; max-width: 1180px; width: 100%; }
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
   h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
-  h1 small { font-size: 12px; font-weight: 400; color: var(--soft); margin-left: 6px; }
+  h2 { font-size: 17px; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h2:first-child { margin-top: 0; }
   .grow { flex: 1; }
   .line { color: var(--soft); font-size: 13px; }
-  button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer;
+  button, a.btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer;
            border: 1px solid var(--line); background: var(--card); color: var(--text); }
-  button:hover { border-color: var(--soft); }
+  a.btn { text-decoration: none; display: inline-block; }
+  button:hover, a.btn:hover { border-color: var(--soft); }
   button:disabled { opacity: .5; cursor: default; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
   button.quiet { border-color: transparent; background: none; color: var(--soft); padding: 6px 8px; }
   button.quiet:hover { color: var(--text); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
   .chip, .badge { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px;
                   background: var(--mute-bg); color: var(--soft); white-space: nowrap; }
-  .chip.ok, .badge.sure { background: var(--good-bg); color: var(--good); }
-  .chip.bad, .badge.error { background: var(--bad-bg); color: var(--bad); }
-  .badge.likely, .badge.sent { background: var(--info-bg); color: var(--info); }
-  .badge.uncertain, .badge.review { background: var(--warn-bg); color: var(--warn); }
+  .badge.ok { background: var(--good-bg); color: var(--good); }
+  .badge.error { background: var(--bad-bg); color: var(--bad); }
+  .badge.sent { background: var(--info-bg); color: var(--info); }
+  .badge.review { background: var(--warn-bg); color: var(--warn); }
   .notice { background: var(--bad-bg); color: var(--bad); border-radius: 9px; padding: 10px 14px; margin-bottom: 14px; overflow-wrap: anywhere; }
   .notice.warn { background: var(--warn-bg); color: var(--warn); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); gap: 10px; margin-bottom: 16px; }
@@ -56,7 +80,6 @@
   .stat.on span { color: var(--text); }
   .stat.alert b { color: var(--bad); }
   .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; align-items: center; }
-  .tabs button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
   .tabs input, .tabs select { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
                 background: var(--card); color: var(--text); }
   .tabs input { min-width: 160px; }
@@ -79,9 +102,7 @@
   .toggle .arrow { color: var(--soft); width: 14px; flex: none; transition: transform .12s; margin-top: 2px; }
   .toggle[aria-expanded=true] .arrow { transform: rotate(90deg); }
   .toggle:hover .title { text-decoration: underline; }
-  .cands { border-top: 1px solid var(--line); }
-  .cand { display: grid; grid-template-columns: 64px 1fr auto; gap: 4px 12px; padding: 9px 14px; align-items: start; }
-  .cand + .cand { border-top: 1px solid var(--line); }
+  .cand { display: grid; grid-template-columns: 64px 1fr auto; gap: 4px 12px; padding: 9px 14px; align-items: start; border-top: 1px solid var(--line); }
   .cand.first { background: color-mix(in srgb, var(--good-bg) 35%, transparent); }
   .cand .name { overflow-wrap: anywhere; }
   .cand.fell { grid-template-columns: 96px 1fr auto; opacity: .85; }
@@ -94,9 +115,65 @@
   .rest { border-top: 1px solid var(--line); padding: 9px 14px; color: var(--soft); font-size: 13px; }
   .more { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; font-weight: 400; }
   .confirm { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .empty { color: var(--soft); text-align: center; padding: 40px 0; }
+  .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
+  .log div { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 12px; }
+  .log div:last-child { border-bottom: none; }
+  .log div div { display: block; border: none; padding: 0; }
+  .log time { color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 9px 16px; border-radius: 9px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 30; }
+  #toast.show { opacity: 1; }
+  /* A table: the games, the services, the backups. */
+  .table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 14px; }
+  .scroll { overflow-x: auto; }
+  .table th, .table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .table tr:last-child td { border-bottom: none; }
+  .table th { color: var(--soft); font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .table th button { all: unset; cursor: pointer; }
+  .table th button:hover, .table td button.linkish:hover { text-decoration: underline; }
+  .table td.num, .table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .table td button.linkish { all: unset; cursor: pointer; font-weight: 600; }
+  .table td .acts { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
+  /* The cards of the indexers, the download clients and the connections. */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 8px; }
+  .pcard { all: unset; box-sizing: border-box; cursor: pointer; background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px 16px; min-height: 104px; display: flex; flex-direction: column; gap: 6px; }
+  .pcard:hover { border-color: var(--soft); }
+  .pcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pcard .name { font-size: 18px; overflow-wrap: anywhere; }
+  .pcard .says { color: var(--soft); font-size: 13px; overflow-wrap: anywhere; }
+  .pcard .says.bad { color: var(--bad); }
+  .pcard.add { align-items: center; justify-content: center; font-size: 40px; color: var(--soft); border-style: dashed; }
+  /* The window over the page in which one of them is edited. */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-start; justify-content: center;
+           padding: 6vh 12px 12px; overflow-y: auto; z-index: 20; }
+  .dialog { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; width: 100%; max-width: 640px; padding: 18px 20px; }
+  .dialog h2 { margin-top: 0; }
+  .dialog .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  .types { display: grid; gap: 8px; }
+  .types button { text-align: left; padding: 12px 14px; font-size: 15px; }
+  .types small { display: block; color: var(--soft); font-size: 13px; }
+  fieldset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin: 0 0 12px; padding: 14px 16px 6px; }
+  legend { font-weight: 600; padding: 0 6px; }
+  .field { display: grid; grid-template-columns: 190px 1fr; gap: 4px 14px; align-items: center; margin-bottom: 12px; }
+  .field label { color: var(--soft); font-size: 14px; }
+  .field .help { grid-column: 2; color: var(--soft); font-size: 13px; }
+  .field .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .field input[type=text], .field input[type=url], .field input[type=password], .field input[type=number], .field select {
+    font: inherit; width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); }
+  .dialog .field input, .dialog .field select { background: var(--card); }
+  .field .row input { flex: 1; min-width: 140px; }
+  .field input:focus, .field select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .testresult { font-size: 14px; overflow-wrap: anywhere; } .testresult.ok { color: var(--good); } .testresult.bad { color: var(--bad); }
+  .savebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 4px 0 18px; }
   .authcard { max-width: 380px; margin: 8vh auto 0; background: var(--card); border: 1px solid var(--line);
               border-radius: 12px; padding: 24px; display: grid; gap: 8px; }
-  .authcard h2 { font-size: 17px; margin: 6px 0 0; }
+  .authcard h2 { font-size: 17px; margin: 6px 0 0; border: none; padding: 0; }
   .authcard p { margin: 0 0 6px; }
   .authcard label { color: var(--soft); font-size: 14px; margin-top: 6px; display: block; }
   .authcard input { font: inherit; width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line);
@@ -104,83 +181,75 @@
   .authcard input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .authcard button { margin-top: 10px; padding: 9px 12px; font-size: 15px; }
   .authcard .testresult:empty { display: none; }
-  .sent-row { border-top: 1px solid var(--line); padding: 9px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .empty { color: var(--soft); text-align: center; padding: 40px 0; }
-  .log { font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
-  .log div { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 12px; }
-  .log div:last-child { border-bottom: none; }
-  .log time { color: var(--soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .log .error { color: var(--bad); } .log .warn { color: var(--warn); } .log .grab { color: var(--good); }
-  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
-           padding: 9px 16px; border-radius: 9px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
-  #toast.show { opacity: 1; }
-  .views { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
-  .views button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none;
-                  font-size: 15px; padding: 8px 14px; color: var(--soft); }
-  .views button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-  fieldset { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin: 0 0 12px; padding: 14px 16px 6px; }
-  legend { font-weight: 600; padding: 0 6px; }
-  .field { display: grid; grid-template-columns: 190px 1fr; gap: 4px 14px; align-items: center; margin-bottom: 12px; }
-  .field label { color: var(--soft); font-size: 14px; }
-  .field .help { grid-column: 2; color: var(--soft); font-size: 13px; }
-  .field .row { display: flex; gap: 6px; align-items: center; }
-  .field input[type=text], .field input[type=url], .field input[type=password], .field select {
-    font: inherit; width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--text); }
-  .field input:focus, .field select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
-  .testresult { font-size: 14px; } .testresult.ok { color: var(--good); } .testresult.bad { color: var(--bad); }
-  .savebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
-  .results { margin-top: 12px; display: grid; gap: 6px; }
-  .results div { padding: 8px 12px; border-radius: 8px; background: var(--good-bg); color: var(--good); font-size: 14px; }
-  .results div.bad { background: var(--bad-bg); color: var(--bad); }
-  @media (max-width: 640px) { #shown { flex-basis: 100%; } .cand { grid-template-columns: 1fr; } .field { grid-template-columns: 1fr; } .field .help { grid-column: 1; } }
+  @media (max-width: 760px) {
+    /* On a phone the menu folds away above the page. */
+    .shell { grid-template-columns: 1fr; }
+    aside { padding: 10px 0 6px; }
+    .brand { padding-bottom: 6px; }
+    #menu { display: block; }
+    aside:not(.open) nav { display: none; }
+    .content { padding: 14px 16px 60px; }
+    #shown { flex-basis: 100%; }
+    .cand, .cand.fell { grid-template-columns: 1fr; }
+    .field { grid-template-columns: 1fr; } .field .help { grid-column: 1; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <div id="app" hidden>
+<div id="app" class="shell" hidden>
+  <aside id="side">
+    <div class="brand">NSWHunter <small id="version"></small>
+      <button id="menu" aria-label="Menu" aria-expanded="false">☰</button></div>
+    <nav id="nav" aria-label="Pages"></nav>
+  </aside>
+  <div class="content">
     <header>
-      <h1>NSWHunter <small id="version"></small></h1>
+      <h1 id="pagetitle"></h1>
       <span class="line grow" id="statusline">Loading…</span>
       <button class="primary" id="sync">Sync now</button>
       <button class="quiet" id="logout" title="Log out of the panel in this browser">Log out</button>
     </header>
-    <nav class="views" id="views"></nav>
     <div id="notice"></div>
-    <section id="view-updates">
+    <section id="page-games" hidden>
+      <div class="tabs" id="gametools"></div>
+      <div class="scroll" id="gamelist"></div>
+      <div class="empty" id="gamemore"></div>
+    </section>
+    <section id="page-wanted" hidden>
       <div class="stats" id="stats"></div>
       <div class="tabs" id="tools"></div>
       <div id="list"></div>
     </section>
-    <section id="view-log" hidden>
+    <section id="page-settings" hidden>
+      <form id="config" autocomplete="off"></form>
+      <div id="extra"></div>
+    </section>
+    <section id="page-status" hidden><div id="status"></div></section>
+    <section id="page-log" hidden>
       <div class="tabs" id="logtools"></div>
       <div class="log" id="log"></div>
       <div class="empty" id="logmore"></div>
     </section>
-    <section id="view-config" hidden>
-      <div class="chips" id="chips"></div>
-      <form id="config" autocomplete="off"></form>
-    </section>
   </div>
-  <section id="auth" hidden>
-    <form id="authform" class="authcard">
-      <h1>NSWHunter</h1>
-      <h2 id="authtitle">Log in</h2>
-      <p class="line" id="authtext"></p>
-      <label for="auth-user">Username</label>
-      <input id="auth-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
-      <label for="auth-password">Password</label>
-      <input id="auth-password" type="password" autocomplete="current-password" required>
-      <div id="auth-repeat-row" hidden>
-        <label for="auth-repeat">Password again</label>
-        <input id="auth-repeat" type="password" autocomplete="new-password">
-      </div>
-      <div class="testresult bad" id="autherror" role="alert"></div>
-      <button class="primary" type="submit" id="authgo">Log in</button>
-    </form>
-  </section>
-</main>
+</div>
+<section id="auth" hidden>
+  <form id="authform" class="authcard">
+    <h1>NSWHunter</h1>
+    <h2 id="authtitle">Log in</h2>
+    <p class="line" id="authtext"></p>
+    <label for="auth-user">Username</label>
+    <input id="auth-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="auth-password" id="auth-password-label">Password</label>
+    <input id="auth-password" type="password" autocomplete="current-password" required>
+    <div id="auth-repeat-row" hidden>
+      <label for="auth-repeat">New password again</label>
+      <input id="auth-repeat" type="password" autocomplete="new-password">
+    </div>
+    <div class="testresult bad" id="autherror" role="alert"></div>
+    <button class="primary" type="submit" id="authgo">Log in</button>
+  </form>
+</section>
+<div id="modal" hidden></div>
 <div id="toast"></div>
 <script>
 // Release names come from indexers: everything is put on the page as text, never as HTML.
@@ -206,11 +275,32 @@ function remembered(key, fallback) {
 function remember(key, value) {
   try { localStorage.setItem("nswhunter-" + key, value); } catch (e) { /* private window */ }
 }
+
+// The pages of the menu on the left. kind: a page of the settings that is a list of cards.
+const PAGES = [
+  {id: "games", text: "Games"},
+  {id: "wanted", text: "Wanted"},
+  {head: "Settings"},
+  {id: "media", text: "Media Management", sub: true, settings: true},
+  {id: "indexers", text: "Indexers", sub: true, settings: true, kind: "INDEXERS"},
+  {id: "clients", text: "Download Clients", sub: true, settings: true, kind: "DOWNLOAD_CLIENTS"},
+  {id: "connect", text: "Connect", sub: true, settings: true, kind: "CONNECTIONS"},
+  {id: "general", text: "General", sub: true, settings: true},
+  {id: "ui", text: "UI", sub: true, settings: true},
+  {head: "System"},
+  {id: "status", text: "Status", sub: true},
+  {id: "log", text: "Log", sub: true},
+];
+const pageOf = id => PAGES.find(p => p.id === id);
+
 let state = null, needle = "", busy = new Set(), expanded = new Set(), fallen = new Set(), thrown = new Set();
-let view = "updates", settings = null, clearing = new Set(), opened = false, tests = {}, confirming = false;
+let page = pageOf(location.hash.slice(1)) ? location.hash.slice(1) : "wanted";
+let settings = null, clearing = new Set(), opened = false, tests = {}, confirming = false, editing = null, backups = null;
 let only = remembered("only", "choice"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
-let auth = null;  // "login" or "setup" while the login screen is up
+let auth = null;  // "login" or "change" while the login screen is up
 let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logShown = 100;
+let library = null, gameNeedle = "", gameOnly = remembered("games", "all"), gameSort = "name", gameDown = false, gameShown = 200;
+let ui = {theme: "auto", date: "browser", time: "browser", relative: true};
 const BULK = 9;  // "Download all" takes the best release of a game from this score on
 
 // Every call to the server. Without a login the server says so, and the login screen comes up.
@@ -219,41 +309,44 @@ async function request(path, body) {
   const options = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
   const r = await fetch(path, options);
   const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
-  if (r.status === 401 && data.login) { needLogin(data.setup); throw LOGIN; }
+  if (r.status === 401 && data.login) { needLogin("login"); throw LOGIN; }
+  if (r.status === 403 && data.change) { needLogin("change"); throw LOGIN; }
   return {status: r.status, ok: r.ok, data};
 }
 
 // ---------------------------------------------------------------- logging in
-function needLogin(setup) {
-  const mode = setup ? "setup" : "login";
+function needLogin(mode) {
   if (auth === mode) return;
   auth = mode;
-  $("app").hidden = true; $("auth").hidden = false;
-  $("authtitle").textContent = setup ? "Make your login" : "Log in";
-  $("authtext").textContent = setup
-    ? "The panel holds the keys of your services, so it needs a login. Choose a username and a password of at least 8 characters."
+  const change = mode === "change";
+  $("app").hidden = true; $("auth").hidden = false; closeModal();
+  $("authtitle").textContent = change ? "Choose your own password" : "Log in";
+  $("authtext").textContent = change
+    ? "You logged in with the password NSWHunter made up. Choose a password of your own of at least 8 characters before you go on; you can change the username too."
     : "";
-  $("auth-repeat-row").hidden = !setup;
-  $("auth-password").setAttribute("autocomplete", setup ? "new-password" : "current-password");
-  $("authgo").textContent = setup ? "Make login" : "Log in";
+  $("auth-password-label").textContent = change ? "New password" : "Password";
+  $("auth-repeat-row").hidden = !change;
+  $("auth-password").setAttribute("autocomplete", change ? "new-password" : "current-password");
+  $("authgo").textContent = change ? "Save and go on" : "Log in";
   $("autherror").textContent = "";
   $("auth-password").value = ""; $("auth-repeat").value = "";
-  $("auth-user").focus();
+  (change && $("auth-user").value ? $("auth-password") : $("auth-user")).focus();
 }
 $("authform").addEventListener("submit", async e => {
   e.preventDefault();
-  const user = $("auth-user").value.trim(), password = $("auth-password").value;
+  const user = $("auth-user").value.trim(), password = $("auth-password").value, change = auth === "change";
   const say = text => { $("autherror").textContent = text; };
-  if (auth === "setup" && password.length < 8) return say("Use at least 8 characters for the password.");
-  if (auth === "setup" && password !== $("auth-repeat").value) return say("The two passwords are not the same.");
+  if (change && password.length < 8) return say("Use at least 8 characters for the password.");
+  if (change && password !== $("auth-repeat").value) return say("The two passwords are not the same.");
   $("authgo").disabled = true; say("");
   try {
-    const r = await fetch(auth === "setup" ? "/api/setup" : "/api/login", {
+    const r = await fetch(change ? "/api/password" : "/api/login", {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({user, password})});
     const data = await r.json().catch(() => ({ok: false, error: "HTTP " + r.status}));
+    if (r.status === 401 && data.login) { auth = null; needLogin("login"); return; }
     if (!data.ok) { say(data.error || "Failed"); $("auth-password").select(); return; }
     auth = null; opened = false;
-    $("auth").hidden = true; $("app").hidden = false;
+    $("auth").hidden = true;
     $("auth-password").value = ""; $("auth-repeat").value = "";
     await load();
   } catch (err) {
@@ -265,16 +358,16 @@ $("authform").addEventListener("submit", async e => {
 $("logout").addEventListener("click", async () => {
   try { await request("/api/logout", {}); } catch (e) { /* the screen below comes up either way */ }
   state = null;
-  needLogin(false);
+  needLogin("login");
 });
 
+// ---------------------------------------------------------------- small things
 // The score is the chance that a download is the right one, from 1 to 10.
 function score(value, title) {
   const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
   return h("span", {class: "score " + level, title: title || "The chance that this download is the right one"}, String(value || "?"), h("small", {}, "/10"));
 }
 const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unknown: ""};
-const SERVICES = {slm: "Library", prowlarr: "Prowlarr", downloader: "Download client", titledb: "Version list", telegram: "Telegram", config: "Settings"};
 // How a sent release is doing, as the download client tells it.
 const SENT = {sent: "added to queue", downloading: "downloading", done: "downloaded, waiting for the library",
               stuck: "downloaded, but not seen in your library"};
@@ -282,27 +375,50 @@ function sentText(grab) {
   const percent = grab.state === "downloading" && grab.percent !== null && grab.percent !== undefined ? " " + grab.percent + "%" : "";
   return (SENT[grab.state] || SENT.sent) + percent;
 }
-function autoText(min) { return min ? "from score " + min : "off: everything awaits your choice"; }
 function plural(n, one, many) { return n + " " + (n === 1 ? one : many || one + "s"); }
-
 function toast(text) {
   const t = $("toast"); t.textContent = text; t.classList.add("show");
   clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 4000);
 }
+// Dates and times as the UI settings say.
+const two = n => String(n).padStart(2, "0");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dateText(d) {
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  if (ui.date === "iso") return y + "-" + two(m + 1) + "-" + two(day);
+  if (ui.date === "dmy") return two(day) + "-" + two(m + 1) + "-" + y;
+  if (ui.date === "mdy") return two(m + 1) + "/" + two(day) + "/" + y;
+  if (ui.date === "long") return day + " " + MONTHS[m] + " " + y;
+  return d.toLocaleDateString(undefined, {dateStyle: "short"});
+}
+function timeText(d) {
+  if (ui.time === "24") return two(d.getHours()) + ":" + two(d.getMinutes());
+  if (ui.time === "12") return (d.getHours() % 12 || 12) + ":" + two(d.getMinutes()) + (d.getHours() < 12 ? " am" : " pm");
+  return d.toLocaleTimeString(undefined, {timeStyle: "short"});
+}
+function moment(ts) { const d = new Date(ts * 1000); return dateText(d) + " " + timeText(d); }
+// "3 hours ago", or the date and time if the settings ask for those.
 function ago(ts) {
   if (!ts) return "never";
+  if (!ui.relative) return moment(ts);
   const s = Math.max(0, state.now - ts);
   if (s < 90) return "just now";
   if (s < 5400) return Math.round(s / 60) + " min ago";
   if (s < 129600) return plural(Math.round(s / 3600), "hour") + " ago";
   return plural(Math.round(s / 86400), "day") + " ago";
 }
-function moment(ts) { return new Date(ts * 1000).toLocaleString(undefined, {dateStyle: "short", timeStyle: "short"}); }
 function size(bytes) {
   if (!bytes) return "";
   return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + " GB" : Math.round(bytes / 1048576) + " MB";
 }
-function day(iso) { return iso ? iso.slice(0, 10) : ""; }
+function day(iso) { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? dateText(d) : ""; }
+// Nintendo numbers updates in steps of 65536: v720896 is update 11.
+function upd(version) {
+  if (!version) return "no update";
+  return version % 65536 === 0 ? "update " + version / 65536 : "v" + version;
+}
+
+// ---------------------------------------------------------------- Wanted
 // One card per game: its missing update and all its missing DLC together.
 function games() {
   const byGame = new Map();
@@ -317,7 +433,6 @@ function games() {
     return (typeof x === "string" ? x.localeCompare(y, undefined, {sensitivity: "base"}) : x - y) * way || byName(a, b);
   });
 }
-
 // What the overview can be sorted on. `down`: the natural order is highest first.
 const releases = g => g.items.filter(i => !i.ignored).flatMap(i => i.candidates);
 const SORTS = {
@@ -331,14 +446,13 @@ const SORTS = {
   missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
   searched: {text: "Last searched", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
 };
-
 // The tiles at the top. A click on one shows only the games that belong to it.
 // has: does a game belong to it; number: what the tile counts, if not those games.
 const live = g => g.items.filter(i => !i.ignored);
 const failed = g => g.items.flatMap(i => i.failed || []);
 const waiting = i => i.status === "review";
 const TILES = {
-  all: {text: "games in your library", has: () => true, number: () => state.library.games,
+  all: {text: "missing something", has: () => true,
         none: "Your library misses no updates. Or the first round is still running."},
   updates: {text: "updates missing", has: g => g.items.some(i => i.type === "update"),
             none: "No game misses an update."},
@@ -347,7 +461,7 @@ const TILES = {
   choice: {text: "awaiting your choice", has: g => g.items.some(waiting),
            none: "Nothing awaits your choice. Releases that are found show up here."},
   queue: {text: "added to queue", has: g => live(g).some(i => i.grab),
-          none: "Nothing is in the queue of the download client."},
+          none: "Nothing is in the queue of a download client."},
   failed: {text: "download failed", has: g => failed(g).length > 0,
            none: "No download failed."},
   // Not games but releases: what was sent and is now in the library.
@@ -381,12 +495,6 @@ async function post(path, body, key) {
 function grab(item, release) {
   return post("/api/grab", {key: item.key, guid: release.guid}, release.guid).then(d => d.ok && toast("Added to the queue of the download client"));
 }
-
-// Nintendo numbers updates in steps of 65536: v720896 is update 11.
-function upd(version) {
-  if (!version) return "no update";
-  return version % 65536 === 0 ? "update " + version / 65536 : "v" + version;
-}
 function versions(item) {
   if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
   const local = upd(item.local_version) + (item.local_display ? " (v" + item.local_display + ")" : "");
@@ -396,17 +504,22 @@ function link(release) {
   const safe = /^https?:\/\//.test(release.infoUrl || "");
   return safe ? h("a", {href: release.infoUrl, target: "_blank", rel: "noopener noreferrer"}, release.title) : release.title;
 }
+// Where a release is from and how: "usenet" is the usual and is not said.
+function whence(r) {
+  const torrent = r.protocol === "torrent";
+  return [torrent ? "torrent" + (r.seeders !== null && r.seeders !== undefined ? ", " + plural(r.seeders, "seeder") : "") : "",
+          size(r.size), r.indexer, day(r.published)];
+}
 // A list that opens on a click: "▸ 3 releases ruled out".
 function fold(open, text, toggle) {
   return h("div", {class: "rest"},
     h("button", {class: "quiet", "aria-expanded": open ? "true" : "false", onclick: toggle}, (open ? "▾ " : "▸ ") + text));
 }
-
 function candidate(item, c, first) {
   const version = [c.display_version ? "v" + c.display_version : null,
     c.internal_version != null ? upd(c.internal_version) + " (v" + c.internal_version + ")" : null,
     c.estimated_version ? (c.deduced ? "" : "probably ") + upd(c.estimated_version) : null].filter(Boolean).join(" · ");
-  const meta = [version, KIND[c.kind], size(c.size), c.indexer, day(c.published)].filter(Boolean).join(" · ");
+  const meta = [version, KIND[c.kind], ...whence(c)].filter(Boolean).join(" · ");
   const sent = (item.sent || []).includes(c.guid);
   return h("div", {class: "cand" + (first ? " first" : "")},
     h("div", {}, score(c.score),
@@ -428,11 +541,10 @@ function aside(release, badge, why, button) {
     h("div", {}, h("span", {class: "badge"}, badge)),
     h("div", {},
       h("div", {class: "name"}, link(release)),
-      h("div", {class: "sub"}, [size(release.size), release.indexer, day(release.published)].filter(Boolean).join(" · ")),
+      h("div", {class: "sub"}, whence(release).filter(Boolean).join(" · ")),
       why ? h("div", {class: "sub"}, why) : null),
     h("div", {class: "acts"}, button));
 }
-
 // One missing thing of a game (the update, or one DLC) with its releases.
 function part(item) {
   const what = item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id)
@@ -450,7 +562,8 @@ function part(item) {
     rows.push(h("div", {class: "sent-row"},
       h("span", {class: "badge " + (item.grab.state === "stuck" ? "review" : "sent")},
         (item.grab.auto ? "automatically " : "") + sentText(item.grab)),
-      h("span", {class: "grow"}, item.grab.title, h("span", {class: "sub"}, " · " + ago(item.grab.at))),
+      h("span", {class: "grow"}, item.grab.title,
+        h("span", {class: "sub"}, (item.grab.client_name ? " · " + item.grab.client_name : "") + " · " + ago(item.grab.at))),
       h("button", {class: "quiet", title: "Forget that this was sent, so it awaits your choice again",
                    onclick: () => post("/api/unsend", {key: item.key}, "u" + item.key)}, "Not sent")));
   }
@@ -494,13 +607,12 @@ function part(item) {
   }
   return rows;
 }
-
 function gameCard(game) {
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc");
   const review = live(game).filter(i => i.status === "review"), sent = live(game).filter(i => i.grab);
   const count = review.reduce((n, i) => n + i.candidates.length, 0);
-  // The best release of the game: the one a click on Download on the card sends.
-  // Of equal scores the update goes before DLC.
+  // The best release of the game: the one a click on Download on the card sends. Of equal
+  // scores the update goes before DLC.
   const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
   const top = review.map(i => ({item: i, release: i.candidates[0]})).sort((a, b) => rank(b) - rank(a))[0];
   const something = i => i.candidates.length || i.grab || (i.rejected || []).length || (i.failed || []).length
@@ -510,8 +622,8 @@ function gameCard(game) {
   const can = withSomething.length > 0 || game.items.length > 1, shown = can && expanded.has(game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
   const searching = busy.has("s" + game.id), allIgnored = game.items.every(i => i.ignored);
-  const label = allIgnored ? ["ignored", "ignored"] : sent.length ? ["sent", "in queue"]
-    : game.items.some(i => i.status === "none") ? ["none", "nothing found"] : ["new", "not searched yet"];
+  const label = allIgnored ? ["", "ignored"] : sent.length ? ["sent", "in queue"]
+    : game.items.some(i => i.status === "none") ? ["", "nothing found"] : ["", "not searched yet"];
   // Named on the card, so it need not be opened: what is in the queue, what failed, or the best release.
   const more = only === "queue" ? sent.map(i => sentText(i.grab) + ": " + i.grab.title)
     : only === "failed" ? failed(game).map(f => "failed " + ago(f.failed_at) + ": " + f.title)
@@ -553,31 +665,7 @@ function gameCard(game) {
   }
   return card;
 }
-
-function render() {
-  if (!state) return;
-  $("version").textContent = "v" + state.version;
-  const st = state.status;
-  $("statusline").textContent = st.running ? "Busy: " + (st.phase || "…")
-    : "Last round " + ago(st.last_run) + (st.next_run ? " · next in " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
-  $("sync").disabled = st.running || !state.configured;
-  put($("views"), ...[["updates", "Updates"], ["log", "Log"], ["config", "Configuration"]].map(([name, text]) =>
-    h("button", {class: view === name ? "on" : "", onclick: () => show(name)}, text)));
-
-  // The checks of the services: on the Configuration tab only.
-  put($("chips"), ...Object.entries(state.services).filter(([n]) => n !== "config").map(([name, s]) =>
-    h("span", {class: "chip " + (s.ok ? "ok" : "bad"), title: s.text}, (s.ok ? "✓ " : "✕ ") + (SERVICES[name] || name))),
-    h("span", {class: "chip"}, "Automatic download " + autoText(state.settings.auto)),
-    h("span", {class: "chip"}, "DLC " + (state.settings.dlc ? "on" : "off")),
-    h("span", {class: "chip"}, "Searches every " + state.settings.search_hours + " hours"));
-  const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
-  put($("notice"),
-    !state.configured && view !== "config" ? h("div", {class: "notice"}, "NSWHunter is not set up yet. Fill in the Configuration tab.") : null,
-    // A round that broke is said on every page, not only in the log.
-    st.error ? h("div", {class: "notice"}, "The last round did not finish (" + ago(st.error.at) + "). " + st.error.text + " The Log tab has the details.") : null,
-    st.skipped ? h("div", {class: "notice warn"}, "The last round left out " + plural(st.skipped, "game or release", "games or releases") + " because of an error; the rest went on. The Log tab says which.") : null,
-    ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.text)) : []));
-
+function renderWanted() {
   const all = games(), keys = tiles(all);
   if (!keys.includes(only)) only = "choice";
   put($("stats"), ...keys.map(key => {
@@ -587,7 +675,6 @@ function render() {
                         onclick: () => { only = key; confirming = false; remember("only", key); render(); }},
       h("b", {}, number), h("span", {}, tile.text));
   }));
-
   const n = ready().length;
   put($("tools"),
     h("span", {class: "line grow", id: "shown"}),
@@ -613,7 +700,6 @@ function render() {
                 oninput: e => { needle = e.target.value; renderList(); }}));
   renderList();
 }
-
 function renderList() {
   const tile = TILES[only] || TILES.choice, word = needle.trim().toLowerCase();
   if (only === "arrived") {
@@ -628,13 +714,104 @@ function renderList() {
   }
   const mine = games().filter(tile.has);
   const items = mine.filter(g => !word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word));
-  // The library tile counts every game; the list holds the ones that miss something.
   const what = only === "all" ? " that miss an update" + (state.settings.dlc ? " or DLC" : "") : " · " + tile.text;
   $("shown").textContent = (word ? items.length + " of " : "") + plural(mine.length, "game") + what;
   put($("list"), ...(items.length ? items.map(gameCard) : [h("div", {class: "empty"}, word && mine.length ? "No game with that name in this list." : tile.none)]));
 }
 
-// ---------------------------------------------------------------- Log
+// ---------------------------------------------------------------- Games
+// Every game of the library, whether it misses something or not.
+const GAME_FILTERS = {all: "All games", missing: "Missing something", update: "Update missing", dlc: "DLC missing", complete: "Complete"};
+const lacks = g => g.update_missing || (state.settings.dlc && g.dlc_missing > 0);
+const GAME_HAS = {all: () => true, missing: lacks, update: g => g.update_missing, dlc: g => g.dlc_missing > 0, complete: g => !lacks(g)};
+const GAME_COLUMNS = [
+  {key: "name", text: "Game", of: g => g.name.toLowerCase()},
+  {key: "id", text: "Title ID", of: g => g.id},
+  {key: "local", text: "You have", of: g => g.local},
+  {key: "latest", text: "Latest", of: g => g.latest},
+  {key: "dlc", text: "DLC", of: g => g.dlc_missing},
+  {key: "size", text: "Size", of: g => g.size, num: true},
+];
+async function loadGames() {
+  try {
+    const {data} = await request("/api/games");
+    library = data.games || [];
+    renderGames();
+  } catch (e) {
+    if (e !== LOGIN) toast("Could not load the games");
+  }
+}
+// The tools are built once, so typing in the search box is not interrupted by a refresh.
+function renderGameTools() {
+  put($("gametools"),
+    h("span", {class: "line grow", id: "gamecount"}),
+    h("label", {for: "gameonly"}, "Show"),
+    h("select", {id: "gameonly", onchange: e => { gameOnly = e.target.value; gameShown = 200; remember("games", gameOnly); renderGames(); }},
+      Object.entries(GAME_FILTERS).map(([key, text]) => h("option", {value: key, selected: key === gameOnly}, text))),
+    h("input", {type: "search", placeholder: "Search by name or title ID", value: gameNeedle, id: "gamefilter",
+                oninput: e => { gameNeedle = e.target.value; gameShown = 200; renderGames(); }}));
+}
+function renderGames() {
+  if (!library || !state) return;
+  const word = gameNeedle.trim().toLowerCase(), column = GAME_COLUMNS.find(c => c.key === gameSort) || GAME_COLUMNS[0];
+  const rows = library.filter(g => (GAME_HAS[gameOnly] || GAME_HAS.all)(g) && (!word || g.name.toLowerCase().includes(word) || g.id.toLowerCase().includes(word)))
+    .sort((a, b) => { const x = column.of(a), y = column.of(b); return (x < y ? -1 : x > y ? 1 : 0) * (gameDown ? -1 : 1) || a.name.localeCompare(b.name); });
+  $("gamecount").textContent = rows.length === library.length ? plural(library.length, "game") : rows.length + " of " + plural(library.length, "game");
+  const wanted = new Set(state.items.map(i => i.game_id));
+  const head = h("tr", {}, GAME_COLUMNS.map(c => h("th", {class: c.num ? "num" : "", "aria-sort": gameSort === c.key ? (gameDown ? "descending" : "ascending") : null},
+    h("button", {onclick: () => { gameDown = gameSort === c.key ? !gameDown : false; gameSort = c.key; renderGames(); }},
+      c.text + (gameSort === c.key ? (gameDown ? " ↓" : " ↑") : "")))), h("th", {}, "Status"));
+  const body = rows.slice(0, gameShown).map(g => h("tr", {},
+    // A game that misses something leads to its card on the Wanted page.
+    h("td", {}, wanted.has(g.id)
+      ? h("button", {class: "linkish", title: "Show what was found for this game", onclick: () => { needle = g.name; only = "all"; expanded.add(g.id); show("wanted"); }}, g.name)
+      : g.name),
+    h("td", {class: "mono"}, g.id),
+    h("td", {}, upd(g.local) + (g.version ? " (v" + g.version + ")" : "")),
+    h("td", {}, g.latest ? upd(g.latest) : "–"),
+    h("td", {}, g.dlc_owned + g.dlc_missing ? g.dlc_owned + " of " + (g.dlc_owned + g.dlc_missing) : "–"),
+    h("td", {class: "num"}, size(g.size) || "–"),
+    h("td", {},
+      g.update_missing ? h("span", {class: "badge review"}, "update missing") : null,
+      g.updates_ignored ? h("span", {class: "badge", title: "Ignored in Switch-library-manager-web"}, "updates ignored") : null,
+      g.dlc_missing ? " " : null,
+      g.dlc_missing ? h("span", {class: "badge " + (state.settings.dlc ? "review" : ""), title: state.settings.dlc ? null : "Missing DLC is not searched (Settings > Media Management)"}, g.dlc_missing + " DLC missing") : null,
+      !g.update_missing && !g.dlc_missing ? h("span", {class: "badge ok"}, "complete") : null)));
+  put($("gamelist"), rows.length ? h("table", {class: "table"}, h("thead", {}, head), h("tbody", {}, body))
+    : h("div", {class: "empty"}, library.length ? "No game matches." : "The library has not been read yet."));
+  put($("gamemore"), rows.length > gameShown
+    ? h("button", {onclick: () => { gameShown += 400; renderGames(); }}, "Show " + Math.min(400, rows.length - gameShown) + " more") : null);
+}
+
+// ---------------------------------------------------------------- System: Status
+function renderStatus() {
+  const st = state.status, s = state.services;
+  const row = (name, service) => h("tr", {},
+    h("td", {}, name),
+    h("td", {}, service ? h("span", {class: "badge " + (service.ok ? "ok" : "error")}, service.ok ? "✓ works" : "✕ problem") : h("span", {class: "badge"}, "not asked yet")),
+    h("td", {}, service ? service.text : ""),
+    h("td", {class: "num"}, service ? ago(service.at) : ""));
+  const listed = kind => (state.providers[kind] || []).map(e =>
+    e.enabled ? row(e.name, s[kind + ":" + e.id]) : h("tr", {}, h("td", {}, e.name), h("td", {}, h("span", {class: "badge"}, "switched off")), h("td", {}), h("td", {})));
+  put($("status"),
+    h("h2", {}, "About"),
+    h("table", {class: "table"}, h("tbody", {},
+      h("tr", {}, h("td", {}, "Version"), h("td", {}, state.version)),
+      h("tr", {}, h("td", {}, "Last round"), h("td", {}, st.running ? "busy: " + (st.phase || "…") : ago(st.last_run))),
+      h("tr", {}, h("td", {}, "Rounds"), h("td", {}, "every " + Math.round(state.settings.interval) + " minutes; every game is searched by name every " + state.settings.search_hours + " hours")),
+      h("tr", {}, h("td", {}, "Automatic download"), h("td", {}, state.settings.auto ? "from score " + state.settings.auto : "off: everything awaits your choice")),
+      h("tr", {}, h("td", {}, "Library"), h("td", {}, plural(state.library.games, "game") + ", " + plural(state.library.updates, "update") + " missing"
+        + (state.settings.dlc ? ", " + state.library.dlc + " DLC missing" : ""))))),
+    h("h2", {}, "Health"),
+    h("div", {class: "scroll"}, h("table", {class: "table"},
+      h("thead", {}, h("tr", {}, h("th", {}, "Service"), h("th", {}, "State"), h("th", {}, "What it said"), h("th", {class: "num"}, "When"))),
+      h("tbody", {},
+        row("Library (Switch-library-manager-web)", s.slm), row("Version list", s.titledb),
+        listed("INDEXERS"), listed("DOWNLOAD_CLIENTS"), listed("CONNECTIONS"),
+        s.backup ? row("Backups", s.backup) : null))));
+}
+
+// ---------------------------------------------------------------- System: Log
 const LEVELS = {all: "Everything", warn: "Warnings and errors", error: "Errors only"};
 async function loadLog() {
   try {
@@ -645,7 +822,6 @@ async function loadLog() {
     if (e !== LOGIN) toast("Could not load the log");
   }
 }
-// The tools are built once, so typing in the search box is not interrupted by a refresh.
 function renderLogTools() {
   put($("logtools"),
     h("span", {class: "line grow", id: "logcount"}),
@@ -668,170 +844,401 @@ function renderLog() {
     ? h("button", {onclick: () => { logShown += 200; renderLog(); }}, "Show " + Math.min(200, rows.length - logShown) + " more") : null);
 }
 
-// ---------------------------------------------------------------- Configuration
-const GROUPS = [
-  {title: "Library (Switch-library-manager-web)", test: "slm", fields: [
-    {name: "SLM_URL", label: "Address", placeholder: "http://192.168.1.10:3000"},
-    {name: "SLM_API_KEY", label: "API key", secret: true,
-     help: "Make it in Switch-library-manager-web under My account > API keys > Make a key. Read only is enough; with the Editor role NSWHunter can also ask for a scan right after a download. The key starts with slm_ and is shown only once. If login is switched off there, leave this field empty."}]},
-  {title: "Prowlarr", test: "prowlarr", fields: [
-    {name: "PROWLARR_URL", label: "Address", placeholder: "http://192.168.1.10:9696"},
-    {name: "PROWLARR_API_KEY", label: "API key", secret: true, help: "In Prowlarr under Settings > General > API Key."},
-    {name: "PROWLARR_CATEGORIES", label: "Categories", placeholder: "1000",
-     help: "Only these categories are searched. 1000 is Console with all its subcategories; separate several numbers with a comma, for example 1090 for Console/Other only."}]},
-  {title: "Download client", test: "downloader", fields: [
-    {name: "DOWNLOAD_CLIENT", label: "Client", options: [["nzbget", "NZBGet"], ["sabnzbd", "SABnzbd"], ["prowlarr", "The download client of Prowlarr"]]},
-    {name: "DOWNLOAD_CATEGORY", label: "Category", placeholder: "games", unless: "prowlarr",
-     help: "The category the download gets in your client."},
-    {name: "NZBGET_URL", label: "NZBGet address", placeholder: "http://192.168.1.10:6789", only: "nzbget"},
-    {name: "NZBGET_USER", label: "Username", only: "nzbget", help: "ControlUsername in NZBGet under Settings > Security."},
-    {name: "NZBGET_PASSWORD", label: "Password", secret: true, only: "nzbget", help: "ControlPassword in NZBGet."},
-    {name: "SABNZBD_URL", label: "SABnzbd address", placeholder: "http://192.168.1.10:8080", only: "sabnzbd"},
-    {name: "SABNZBD_API_KEY", label: "API key", secret: true, only: "sabnzbd", help: "In SABnzbd under Config > General > API Key."}]},
-  {title: "Behaviour", fields: [
-    {name: "AUTO_DOWNLOAD", label: "Automatic download", options: [
-      ["off", "Off: I choose myself"], ["10", "Score 10 only"], ["9", "From score 9"], ["8", "From score 8"],
-      ["7", "From score 7"], ["6", "From score 6"], ["5", "From score 5"]],
-     help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
-    {name: "SEARCH_INTERVAL_HOURS", label: "Automatic search", options: [
-      ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
-     help: "How often every game that misses something is searched by name. That costs one API call per indexer per game; choose 24 or 48 hours if an indexer has a daily limit."},
-    {name: "INCLUDE_DLC", label: "Also search for missing DLC", checkbox: true},
-    {name: "GRAB_WAIT_MINUTES", label: "Wait for the library", options: [
-      ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
-     help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."}]},
-  {title: "Notifications (Telegram)", test: "telegram", testText: "Send test message", fields: [
-    {name: "TELEGRAM_BOT_TOKEN", label: "Bot token", secret: true,
-     help: "Create a bot with @BotFather in Telegram; it gives you the token. Then send your bot one message yourself, or it is not allowed to message you."},
-    {name: "TELEGRAM_CHAT_ID", label: "Chat ID", placeholder: "123456789",
-     help: "@userinfobot tells you your own ID. For a group it is a number with a minus in front. You get a message when something was sent automatically, a download failed, something arrived or a round broke."},
-    {name: "TELEGRAM_ASK", label: "Choose in Telegram", checkbox: true,
-     help: "For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round, the highest scores first. Only the chat above can press them. Switch this on only for a bot that NSWHunter has to itself: it then reads what the bot receives, and another program that reads the same bot would miss its messages. Switched off, you get one message that says how many await your choice."}]},
-  {title: "Panel", fields: [
-    {name: "PANEL_USER", label: "Username"},
-    {name: "PANEL_PASSWORD", label: "Password", secret: true, required: true,
-     help: "At least 8 characters; only a hash of it is kept. After a change every other browser has to log in again."},
-    {name: "PANEL_HOSTS", label: "Host names", placeholder: "nswhunter.example.com",
-     help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
-];
-
-function fieldRow(f, client) {
-  const id = "f-" + f.name, hidden = (f.only && f.only !== client) || (f.unless && f.unless === client);
-  let control;
+// ---------------------------------------------------------------- Settings: the pages with a form
+const FORMS = {
+  media: [
+    {title: "Downloading", fields: [
+      {name: "AUTO_DOWNLOAD", label: "Automatic download", options: [
+        ["off", "Off: I choose myself"], ["10", "Score 10 only"], ["9", "From score 9"], ["8", "From score 8"],
+        ["7", "From score 7"], ["6", "From score 6"], ["5", "From score 5"]],
+       help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
+      {name: "GRAB_WAIT_MINUTES", label: "Wait for the library", options: [
+        ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
+       help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."}]},
+    {title: "Searching", fields: [
+      {name: "SEARCH_INTERVAL_HOURS", label: "Automatic search", options: [
+        ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
+       help: "How often every game that misses something is searched by name. That costs one API call per indexer per game; choose 24 or 48 hours if an indexer has a daily limit."},
+      {name: "INCLUDE_DLC", label: "Also search for missing DLC", checkbox: true}]}],
+  general: [
+    {title: "Security", fields: [
+      {name: "PANEL_USER", label: "Username"},
+      {name: "PANEL_PASSWORD", label: "New password", secret: true, required: true,
+       help: "At least 8 characters; only a hash of it is kept. After a change every other browser has to log in again."},
+      {name: "PASSWORD_AGAIN", label: "New password again", secret: true, required: true, local: true},
+      {name: "PANEL_HOSTS", label: "Host names", placeholder: "nswhunter.example.com",
+       help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
+    {title: "Logging", fields: [
+      {name: "LOG_LEVEL", label: "Log level", options: [["info", "Info"], ["debug", "Debug"], ["trace", "Trace"]],
+       help: "Info: what happens. Debug: also every search and every talk with a service. Trace: also every release that was judged, with the verdict. Debug and trace go to the output of the container and to the log files in /data/logs, not to the Log page."},
+      {name: "LOG_SIZE_MB", label: "Log size limit", options: [["1", "1 MB"], ["2", "2 MB"], ["5", "5 MB"], ["10", "10 MB"], ["25", "25 MB"]],
+       help: "The size of one log file. Five older files are kept next to it."}]},
+    {title: "Backups", fields: [
+      {name: "BACKUP_FOLDER", label: "Folder", placeholder: "/backup",
+       help: "Where the backups are kept. Make it a volume of the container, or the backups are gone with the container. A relative folder is under /data."},
+      {name: "BACKUP_INTERVAL_DAYS", label: "Interval", number: true, unit: "days", help: "Days between two automatic backups."},
+      {name: "BACKUP_RETENTION_DAYS", label: "Retention", number: true, unit: "days",
+       help: "Automatic backups older than this are removed. A backup you make yourself stays until you remove it."}]}],
+  ui: [
+    {title: "Appearance", fields: [
+      {name: "UI_THEME", label: "Theme", options: [["auto", "As the system: light or dark"], ["dark", "Dark"], ["light", "Light"]]}]},
+    {title: "Dates", fields: [
+      {name: "UI_DATE_FORMAT", label: "Date format", options: [["browser", "As the browser does"], ["iso", "2026-03-25"], ["dmy", "25-03-2026"],
+        ["mdy", "03/25/2026"], ["long", "25 Mar 2026"]]},
+      {name: "UI_TIME_FORMAT", label: "Time format", options: [["browser", "As the browser does"], ["24", "17:30"], ["12", "5:30 pm"]]},
+      {name: "UI_RELATIVE_DATES", label: "Show relative dates", checkbox: true, help: "\"3 hours ago\" instead of the date and time."}]}],
+};
+function control(f, values, secrets, where) {
+  const id = where + "-" + f.name;
   if (f.options) {
-    control = h("select", {id, name: f.name, onchange: f.name === "DOWNLOAD_CLIENT" ? e => renderConfig(e.target.value) : null},
-      f.options.map(([value, text]) => h("option", {value, selected: String(settings.values[f.name]) === value}, text)));
-  } else if (f.checkbox) {
-    control = h("input", {id, name: f.name, type: "checkbox", checked: settings.values[f.name] === true});
-  } else if (f.secret) {
-    const set = settings.secrets[f.name], wipe = clearing.has(f.name);
-    control = h("div", {class: "row"},
+    return h("select", {id, name: f.name}, f.options.map(([value, text]) => h("option", {value, selected: String(values[f.name]) === value}, text)));
+  }
+  if (f.checkbox) return h("input", {id, name: f.name, type: "checkbox", checked: values[f.name] === true});
+  if (f.secret) {
+    const set = secrets[f.name], wipe = clearing.has(where + f.name);
+    return h("div", {class: "row"},
       h("input", {id, name: f.name, type: "password", autocomplete: "new-password", disabled: wipe,
-                  placeholder: wipe ? "will be cleared on save" : set ? "set; leave empty to keep it" : "not set"}),
+                  placeholder: wipe ? "will be cleared on save" : f.local ? "" : set ? "set; leave empty to keep it" : "not set"}),
       // A key can be emptied; the password of the panel can only be replaced.
-      set && !f.required ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(f.name) : clearing.add(f.name); renderConfig(); }},
+      set && !f.required ? h("button", {type: "button", class: "quiet", onclick: () => { wipe ? clearing.delete(where + f.name) : clearing.add(where + f.name); rerender(); }},
         wipe ? "Keep it" : "Clear") : null);
-  } else {
-    control = h("input", {id, name: f.name, type: "text", value: settings.values[f.name] || "", placeholder: f.placeholder || "", spellcheck: "false"});
   }
-  return h("div", {class: "field", hidden},
-    h("label", {for: id}, f.label), control, f.help ? h("div", {class: "help"}, f.help) : null);
+  if (f.number) return h("div", {class: "row"}, h("input", {id, name: f.name, type: "number", min: "1", value: values[f.name], inputmode: "numeric"}), h("span", {class: "line"}, f.unit || ""));
+  const value = Array.isArray(values[f.name]) ? values[f.name].join(",") : values[f.name];
+  return h("input", {id, name: f.name, type: "text", value: value === undefined || value === null ? "" : value, placeholder: f.placeholder || "", spellcheck: "false"});
 }
-
-// A Test button tries one service with what is in the form now, saved or not.
-function testRow(service, text) {
-  const t = tests[service];
-  return h("div", {class: "field"}, h("span", {}),
-    h("div", {class: "row"},
-      h("button", {type: "button", disabled: t && t.busy, onclick: () => runTest(service)}, t && t.busy ? "Busy…" : (text || "Test")),
-      t && !t.busy ? h("span", {class: "testresult " + (t.ok ? "ok" : "bad")}, (t.ok ? "✓ " : "✕ ") + t.text) : null));
+function fieldRow(f, values, secrets, where) {
+  return h("div", {class: "field"},
+    h("label", {for: where + "-" + f.name}, f.label), control(f, values, secrets, where), f.help ? h("div", {class: "help"}, f.help) : null);
 }
-async function runTest(service) {
-  const values = typed();
-  tests[service] = {busy: true}; renderConfig();
-  try {
-    const {data} = await request("/api/test", {service, values, clear: [...clearing]});
-    tests[service] = {ok: data.ok === true, text: data.text || "Failed"};
-  } catch (e) {
-    tests[service] = {ok: false, text: e === LOGIN ? "Log in first" : "No connection to NSWHunter"};
-  }
-  if (!auth) renderConfig();
-}
-
-// Typed but not yet saved values survive a rebuild of the form (switching client, "Clear").
-function typed() {
+// What is in a form now, typed or not: {name: value}.
+function typed(form) {
   const values = {};
-  for (const el of $("config").elements) {
+  for (const el of form.elements) {
     if (!el.name) continue;
     values[el.name] = el.type === "checkbox" ? el.checked : el.value;
   }
   return values;
 }
-
-function renderConfig(client) {
-  const keep = typed();
-  for (const [name, value] of Object.entries(keep)) if (name in settings.values) settings.values[name] = value;
-  if (client) settings.values.DOWNLOAD_CLIENT = client;
-  put($("config"),
-    ...GROUPS.map(g => h("fieldset", {}, h("legend", {}, g.title),
-      g.fields.map(f => fieldRow(f, settings.values.DOWNLOAD_CLIENT)),
-      g.test ? testRow(g.test, g.testText) : null)),
-    h("div", {class: "savebar"},
-      h("button", {class: "primary", type: "submit", id: "save"}, "Save and test the connections"),
-      h("span", {class: "line"}, "Saved settings are kept in /data/settings.json and take precedence over the values in your compose file. A key or password is only sent to the address it was saved for: change an address, and you fill in its key again.")),
-    h("div", {class: "results", id: "results"}));
+// Build a form again without losing what was typed in it (a Clear or a Test button does this).
+// form: a function that gives the form, because building may put a new one in its place.
+let rerender = () => {};
+function keepTyped(form, build) {
+  const keep = typed(form());
+  build(keep);
   for (const [name, value] of Object.entries(keep)) {
-    const el = $("config").elements[name];
+    const el = form().elements[name];
     if (el && el.type === "password" && !el.disabled) el.value = value;
   }
 }
+function renderForm() {
+  const groups = FORMS[page];
+  const build = keep => {
+    for (const [name, value] of Object.entries(keep || {})) if (name in settings.values) settings.values[name] = value;
+    put($("config"),
+      ...groups.map(g => h("fieldset", {}, h("legend", {}, g.title), g.fields.map(f => fieldRow(f, settings.values, settings.secrets, "f")))),
+      h("div", {class: "savebar"}, h("button", {class: "primary", type: "submit", id: "save"}, "Save changes")));
+  };
+  rerender = () => keepTyped(() => $("config"), build);
+  build();
+  put($("extra"), page === "general" ? h("div", {id: "backups"}) : null);
+  if (page === "general") { renderBackups(); loadBackups(); }
+}
+$("config").addEventListener("submit", async e => {
+  e.preventDefault();
+  const values = typed($("config"));
+  if ("PASSWORD_AGAIN" in values) {
+    if ((values.PANEL_PASSWORD || values.PASSWORD_AGAIN) && values.PANEL_PASSWORD !== values.PASSWORD_AGAIN) return toast("The two passwords are not the same.");
+    delete values.PASSWORD_AGAIN;
+  }
+  $("save").disabled = true;
+  try {
+    const {data} = await request("/api/settings", {values, clear: [...clearing].filter(n => n.startsWith("f")).map(n => n.slice(1))});
+    if (!data.ok) { toast(data.error || "Saving failed"); return; }
+    settings = data; clearing.clear();
+    toast("Settings saved");
+    await load();
+    renderForm();
+  } catch (err) {
+    if (err !== LOGIN) toast("No connection to NSWHunter");
+  } finally {
+    if ($("save")) $("save").disabled = false;
+  }
+});
 
-async function openConfig() {
+// The backups, under the settings for them on the General page.
+async function loadBackups() {
+  try {
+    const {data} = await request("/api/backups");
+    backups = data;
+    if (page === "general") renderBackups();
+  } catch (e) { /* the list stays as it was */ }
+}
+async function backupDo(action, name) {
+  busy.add("b" + (name || "")); renderBackups();
+  try {
+    const {data} = await request("/api/backup", {action, name});
+    if (!data.ok) toast(data.error || "Failed");
+    else {
+      backups = data;
+      toast(action === "create" ? "Backup made" : action === "delete" ? "Backup removed" : "Backup put back");
+      if (action === "restore") { settings = (await request("/api/settings")).data; await load(); renderForm(); }
+    }
+  } catch (e) {
+    if (e !== LOGIN) toast("No connection to NSWHunter");
+  }
+  busy.delete("b" + (name || "")); confirming = false;
+  if (page === "general" && !auth) renderBackups();
+}
+function renderBackups() {
+  const box = $("backups");
+  if (!box) return;
+  const list = backups ? backups.backups : [];
+  put(box,
+    h("div", {class: "savebar"},
+      h("button", {disabled: busy.has("b"), onclick: () => backupDo("create")}, busy.has("b") ? "Making a backup…" : "Backup now"),
+      h("span", {class: "line"}, backups ? "In " + backups.folder + ". A backup holds the settings with their keys and passwords, and the state." : "")),
+    list.length ? h("div", {class: "scroll"}, h("table", {class: "table"},
+      h("thead", {}, h("tr", {}, h("th", {}, "Backup"), h("th", {}, "Kind"), h("th", {class: "num"}, "Size"), h("th", {class: "num"}, "Made"), h("th", {}))),
+      h("tbody", {}, list.map(b => h("tr", {},
+        h("td", {class: "mono"}, b.name), h("td", {}, b.kind),
+        h("td", {class: "num"}, b.size >= 1048576 ? size(b.size) : Math.max(1, Math.round(b.size / 1024)) + " kB"),
+        h("td", {class: "num"}, ago(b.at)),
+        h("td", {}, confirming === b.name
+          ? h("div", {class: "acts"}, h("span", {class: "line"}, "Replace the settings and the state by this backup?"),
+              h("button", {class: "primary", disabled: busy.has("b" + b.name), onclick: () => backupDo("restore", b.name)}, "Yes, restore"),
+              h("button", {onclick: () => { confirming = false; renderBackups(); }}, "Cancel"))
+          : h("div", {class: "acts"},
+              h("a", {class: "btn", href: "/api/backup/download?name=" + encodeURIComponent(b.name), download: b.name}, "Download"),
+              h("button", {onclick: () => { confirming = b.name; renderBackups(); }}, "Restore"),
+              h("button", {class: "quiet", disabled: busy.has("b" + b.name), onclick: () => backupDo("delete", b.name)}, "Delete"))))))))
+      : h("div", {class: "line"}, backups ? "No backups yet." : ""));
+}
+
+// ---------------------------------------------------------------- Settings: the pages with cards
+// How the fields of an indexer, a download client or a connection are called and explained.
+const LABELS = {url: "Address", api_key: "API key", categories: "Categories", priority: "Priority", username: "Username",
+                password: "Password", category: "Category", bot_token: "Bot token", chat_id: "Chat ID", ask: "Choose in Telegram",
+                webhook: "Webhook URL", urls: "Apprise URLs"};
+const HELP = {
+  "prowlarr.url": "For example http://192.168.1.10:9696", "prowlarr.api_key": "In Prowlarr under Settings > General > API Key.",
+  "newznab.url": "The address of the indexer, with or without /api at the end.", "torznab.url": "The address of the indexer, with or without /api at the end.",
+  "categories": "Only these categories are searched. 1000 is Console with all its subcategories; separate several numbers with a comma, for example 1090 for Console/Other only.",
+  "priority": "From 1 to 50. Of two releases that are equally good, the one from the indexer with the lowest number goes first. Prowlarr has its own priority per indexer.",
+  "nzbget.url": "For example http://192.168.1.10:6789", "nzbget.username": "ControlUsername in NZBGet under Settings > Security.", "nzbget.password": "ControlPassword in NZBGet.",
+  "sabnzbd.url": "For example http://192.168.1.10:8080", "sabnzbd.api_key": "In SABnzbd under Config > General > API Key.",
+  "qbittorrent.url": "The address of the Web UI, for example http://192.168.1.10:8080",
+  "transmission.url": "For example http://192.168.1.10:9091", "utorrent.url": "The address of the Web UI, for example http://192.168.1.10:8080",
+  "category": "The category (or label) the download gets in the client.",
+  "telegram.bot_token": "Create a bot with @BotFather in Telegram; it gives you the token. Then send your bot one message yourself, or it is not allowed to message you.",
+  "telegram.chat_id": "@userinfobot tells you your own ID. For a group it is a number with a minus in front.",
+  "telegram.ask": "For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round. Only this chat can press them. Switch this on only for a bot that NSWHunter has to itself: it then reads what the bot receives, and another program that reads the same bot would miss its messages.",
+  "discord.webhook": "In Discord: Server Settings > Integrations > Webhooks > New Webhook > Copy Webhook URL.",
+  "apprise.urls": "One or more Apprise URLs, separated by commas, for example ntfy://ntfy.sh/my-topic. See the Apprise documentation for the services it knows.",
+};
+const TYPE_HELP = {
+  prowlarr: "Searches every indexer you have in Prowlarr.", newznab: "A usenet indexer, asked directly.", torznab: "A torrent indexer, asked directly. Needs a torrent client.",
+  nzbget: "Usenet", sabnzbd: "Usenet", qbittorrent: "Torrents", transmission: "Torrents", utorrent: "Torrents",
+  "DOWNLOAD_CLIENTS.prowlarr": "Lets Prowlarr hand a release to the download client set up in Prowlarr itself. NSWHunter then cannot follow the download.",
+  telegram: "Messages, and if you want buttons to choose a release there.", discord: "Messages in a channel, through a webhook.", apprise: "Messages through any service Apprise knows.",
+};
+const INTRO = {
+  INDEXERS: "Where releases are searched. Add your Prowlarr, or an indexer directly.",
+  DOWNLOAD_CLIENTS: "Where a chosen release goes. A usenet release goes to the first usenet client in the list that is switched on, a torrent to the first torrent client. Without a torrent client, torrents are not searched.",
+  CONNECTIONS: "The library NSWHunter reads, and where it tells you what happens: when something was sent automatically, a download failed, something arrived or a round broke.",
+};
+function says(kind, entry) {
+  const service = state && state.services[kind + ":" + entry.id];
+  if (!entry.enabled) return h("div", {class: "says"}, "switched off");
+  return service ? h("div", {class: "says" + (service.ok ? "" : " bad")}, (service.ok ? "✓ " : "✕ ") + service.text) : h("div", {class: "says"}, "not asked yet");
+}
+function renderCards() {
+  const kind = pageOf(page).kind, schema = settings.schema[kind];
+  const library = state && state.services.slm;
+  put($("config"));
+  put($("extra"),
+    h("p", {class: "line"}, INTRO[kind]),
+    // The library is one of a kind: it is always there and cannot be removed.
+    kind === "CONNECTIONS" ? [h("h2", {}, "Library"), h("div", {class: "cards"},
+      h("button", {class: "pcard", onclick: () => openEditor({library: true})},
+        h("div", {class: "name"}, "Switch-library-manager-web"),
+        h("div", {}, h("span", {class: "badge " + (settings.values.SLM_URL ? "ok" : "")}, settings.values.SLM_URL ? "Set up" : "Not set up")),
+        settings.values.SLM_URL && library ? h("div", {class: "says" + (library.ok ? "" : " bad")}, (library.ok ? "✓ " : "✕ ") + library.text) : null)),
+      h("h2", {}, "Notifications")] : null,
+    h("div", {class: "cards"},
+      settings.providers[kind].map(entry => h("button", {class: "pcard", onclick: () => openEditor({kind, entry: {...entry}})},
+        h("div", {class: "name"}, entry.name),
+        h("div", {}, h("span", {class: "badge " + (entry.enabled ? "ok" : "")}, entry.enabled ? "Enabled" : "Disabled"),
+          " ", h("span", {class: "badge"}, schema[entry.type].label)),
+        says(kind, entry))),
+      h("button", {class: "pcard add", "aria-label": "Add", title: "Add", onclick: () => openEditor({kind, choose: true})}, "+")));
+}
+// The window in which one entry is added or changed.
+function openEditor(what) { editing = {...what, test: null, busy: false}; clearing.clear(); renderEditor(); }
+function closeModal() { editing = null; $("modal").hidden = true; put($("modal")); }
+function entryFromForm() {
+  const form = $("editor"), values = typed(form), entry = {...editing.entry, ...values};
+  entry.clear = [...clearing].filter(n => n.startsWith("e")).map(n => n.slice(1));
+  delete entry.secrets;
+  return entry;
+}
+function renderEditor() {
+  if (!editing) return;
+  const modal = $("modal");
+  modal.hidden = false;
+  if (editing.choose) {
+    const schema = settings.schema[editing.kind];
+    put(modal, h("div", {class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Add"},
+      h("h2", {}, "Add"),
+      h("div", {class: "types"}, Object.entries(schema).map(([type, spec]) =>
+        h("button", {onclick: () => openEditor({kind: editing.kind, entry: {type, name: spec.label.replace(/ \(.*/, ""), enabled: true, secrets: {}}})},
+          spec.label, h("small", {}, TYPE_HELP[editing.kind + "." + type] || TYPE_HELP[type] || "")))),
+      h("div", {class: "bar"}, h("span", {class: "grow"}), h("button", {onclick: closeModal}, "Cancel"))));
+    modal.querySelector("button").focus();
+    return;
+  }
+  const result = editing.test ? h("span", {class: "testresult " + (editing.test.ok ? "ok" : "bad")}, (editing.test.ok ? "✓ " : "✕ ") + editing.test.text) : null;
+  const build = keep => {
+    let title, fields, values, secrets, isNew = false, canDelete = false;
+    if (editing.library) {
+      title = "Switch-library-manager-web";
+      values = {...settings.values, ...(keep || {})}; secrets = settings.secrets;
+      fields = [{name: "SLM_URL", label: "Address", placeholder: "http://192.168.1.10:3000"},
+        {name: "SLM_API_KEY", label: "API key", secret: true,
+         help: "Make it in Switch-library-manager-web under My account > API keys > Make a key. Read only is enough; with the Editor role NSWHunter can also ask for a scan right after a download. The key starts with slm_ and is shown only once. If login is switched off there, leave this field empty."}];
+    } else {
+      const spec = settings.schema[editing.kind][editing.entry.type];
+      editing.entry = {...editing.entry, ...(keep || {})};
+      isNew = !editing.entry.id; canDelete = !isNew;
+      title = (isNew ? "Add " : "") + spec.label;
+      values = editing.entry; secrets = editing.entry.secrets || {};
+      fields = [{name: "name", label: "Name"}, {name: "enabled", label: "Enabled", checkbox: true},
+        ...Object.entries(spec.fields).map(([name, type]) => ({
+          name, label: LABELS[name] || name, secret: type === "secret", checkbox: type === "bool", number: type === "priority",
+          help: HELP[editing.entry.type + "." + name] || HELP[name] || ""}))];
+      if (values.priority === undefined) values.priority = 25;
+      if (values.categories === undefined && "categories" in spec.fields) values.categories = "1000";
+      if (values.category === undefined && "category" in spec.fields) values.category = "games";
+      if (!Object.keys(spec.fields).length) fields.push({name: "_", label: "", local: true, note: TYPE_HELP[editing.kind + "." + editing.entry.type] || ""});
+    }
+    put(modal, h("div", {class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title},
+      h("h2", {}, title),
+      h("form", {id: "editor", autocomplete: "off", onsubmit: e => { e.preventDefault(); saveEditor(); }},
+        fields.map(f => f.note !== undefined ? h("p", {class: "line"}, f.note) : fieldRow(f, values, secrets, "e")),
+        h("div", {class: "bar"},
+          canDelete ? (confirming === "delete"
+            ? [h("span", {class: "line"}, "Remove it?"), h("button", {type: "button", class: "danger", onclick: deleteEditor}, "Yes, remove"),
+               h("button", {type: "button", onclick: () => { confirming = false; rerender(); }}, "No")]
+            : h("button", {type: "button", class: "danger", onclick: () => { confirming = "delete"; rerender(); }}, "Delete")) : null,
+          h("span", {class: "grow"}),
+          h("button", {type: "button", disabled: editing.busy, onclick: testEditor}, editing.busy === "test" ? "Testing…" : editing.kind === "CONNECTIONS" ? "Send test message" : "Test"),
+          h("button", {type: "button", onclick: closeModal}, "Cancel"),
+          h("button", {class: "primary", type: "submit", disabled: editing.busy}, "Save")),
+        h("div", {class: "bar"}, result))));
+  };
+  rerender = () => { if (editing) keepTyped(() => $("editor"), build); };
+  if ($("editor")) rerender(); else { build(); const first = modal.querySelector("input"); if (first) first.focus(); }
+}
+async function testEditor() {
+  const body = editing.library ? {values: typed($("editor")), clear: [...clearing].filter(n => n.startsWith("e")).map(n => n.slice(1))}
+    : {kind: editing.kind, entry: entryFromForm()};
+  editing.busy = "test"; editing.test = null; renderEditor();
+  try {
+    const {data} = await request(editing.library ? "/api/test" : "/api/provider/test", body);
+    if (editing) editing.test = {ok: data.ok === true, text: data.text || "Failed"};
+  } catch (e) {
+    if (editing) editing.test = {ok: false, text: e === LOGIN ? "Log in first" : "No connection to NSWHunter"};
+  }
+  if (editing) { editing.busy = false; renderEditor(); }
+}
+async function saveEditor() {
+  const body = editing.library ? {values: typed($("editor")), clear: [...clearing].filter(n => n.startsWith("e")).map(n => n.slice(1))}
+    : {kind: editing.kind, entry: entryFromForm()};
+  editing.busy = "save"; renderEditor();
+  try {
+    const {data} = await request(editing.library ? "/api/settings" : "/api/provider", body);
+    if (!data.ok) { editing.busy = false; editing.test = {ok: false, text: data.error || "Saving failed"}; renderEditor(); return; }
+    settings = data;
+    toast(data.tested === false ? "Saved, but it does not answer: " + data.text : "Saved");
+    closeModal(); confirming = false;
+    await load();
+  } catch (e) {
+    if (editing) { editing.busy = false; editing.test = {ok: false, text: e === LOGIN ? "Log in first" : "No connection to NSWHunter"}; renderEditor(); }
+  }
+}
+async function deleteEditor() {
+  try {
+    const {data} = await request("/api/provider/delete", {kind: editing.kind, id: editing.entry.id});
+    if (!data.ok) return toast(data.error || "Failed");
+    settings = data; confirming = false;
+    closeModal(); toast("Removed");
+    await load();
+  } catch (e) {
+    if (e !== LOGIN) toast("No connection to NSWHunter");
+  }
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && editing) closeModal(); });
+$("modal").addEventListener("mousedown", e => { if (e.target === $("modal")) closeModal(); });
+
+// ---------------------------------------------------------------- the frame
+async function openSettings() {
   try {
     const {data, ok} = await request("/api/settings");
     if (!ok) throw new Error();
-    settings = data;
-    clearing.clear(); tests = {};
-    put($("config"));
-    renderConfig();
+    settings = data; clearing.clear();
+    renderSettings();
   } catch (e) {
     if (e !== LOGIN) toast("Could not load the settings");
   }
 }
-
+function renderSettings() {
+  if (!settings || !pageOf(page).settings) return;
+  if (pageOf(page).kind) renderCards(); else renderForm();
+}
 function show(name) {
-  view = name;
-  $("view-updates").hidden = name !== "updates";
-  $("view-log").hidden = name !== "log";
-  $("view-config").hidden = name !== "config";
-  if (name === "config") openConfig();
+  page = name; confirming = false;
+  try { history.replaceState(null, "", "#" + name); } catch (e) { /* the address stays as it is */ }
+  const here = pageOf(name);
+  $("side").classList.remove("open"); $("menu").setAttribute("aria-expanded", "false");
+  for (const id of ["games", "wanted", "settings", "status", "log"]) $("page-" + id).hidden = id !== (here.settings ? "settings" : name);
+  if (here.settings) { put($("config")); put($("extra")); openSettings(); }
   if (name === "log") { renderLogTools(); renderLog(); loadLog(); }
+  if (name === "games") { renderGameTools(); renderGames(); loadGames(); }
   render();
 }
-
-$("config").addEventListener("submit", async e => {
-  e.preventDefault();
-  const values = typed();
-  $("save").disabled = true; $("save").textContent = "Saving and testing…";
-  try {
-    const {data} = await request("/api/settings", {values, clear: [...clearing]});
-    if (!data.ok) { toast(data.error || "Saving failed"); return; }
-    settings = {values: data.values, secrets: data.secrets};
-    clearing.clear();
-    put($("config"));
-    renderConfig();
-    const order = ["config", "slm", "prowlarr", "downloader"];
-    put($("results"), ...order.filter(n => data.services[n]).map(n =>
-      h("div", {class: data.services[n].ok ? "" : "bad"}, (data.services[n].ok ? "✓ " : "✕ ") + SERVICES[n] + ": " + data.services[n].text)));
-    toast("Settings saved");
-    load();
-  } catch (err) {
-    if (err !== LOGIN) toast("No connection to NSWHunter");
-  } finally {
-    if ($("save")) { $("save").disabled = false; $("save").textContent = "Save and test the connections"; }
-  }
+$("menu").addEventListener("click", () => {
+  const open = $("side").classList.toggle("open");
+  $("menu").setAttribute("aria-expanded", open ? "true" : "false");
 });
-
+function render() {
+  if (!state) return;
+  ui = state.ui || ui;
+  if (ui.theme === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", ui.theme);
+  $("version").textContent = "v" + state.version;
+  const st = state.status, here = pageOf(page);
+  $("pagetitle").textContent = (here.settings ? "Settings: " : "") + here.text;
+  $("statusline").textContent = st.running ? "Busy: " + (st.phase || "…")
+    : "Last round " + ago(st.last_run) + (st.next_run ? " · next in " + Math.max(0, Math.round((st.next_run - state.now) / 60)) + " min" : "");
+  $("sync").disabled = st.running || !state.configured;
+  const errors = Object.entries(state.services).filter(([name, s]) => !s.ok && name !== "config");
+  const choices = new Set(state.items.filter(waiting).map(i => i.game_id)).size;  // games, as on the tile
+  put($("nav"), PAGES.map(p => p.head ? h("div", {class: "head"}, p.head)
+    : h("button", {class: (p.sub ? "child" : "") + (page === p.id ? " on" : ""), "aria-current": page === p.id ? "page" : null, onclick: () => show(p.id)},
+        p.text,
+        p.id === "wanted" && choices ? h("span", {class: "dot", title: plural(choices, "game") + " awaiting your choice"}, choices) : null,
+        p.id === "status" && (errors.length || st.error) ? h("span", {class: "dot", title: "Something does not work"}, "!") : null)));
+  put($("notice"),
+    !state.configured ? h("div", {class: "notice warn"}, "NSWHunter is not set up yet. " + state.missing.join(". ") + ".") : null,
+    // A round that broke is said on every page, not only in the log.
+    st.error ? h("div", {class: "notice"}, "The last round did not finish (" + ago(st.error.at) + "). " + st.error.text + " The Log page has the details.") : null,
+    st.skipped ? h("div", {class: "notice warn"}, "The last round left out " + plural(st.skipped, "game or release", "games or releases") + " because of an error; the rest went on. The Log page says which.") : null,
+    ...(state.configured ? errors.map(([, s]) => h("div", {class: "notice"}, s.name && !s.text.startsWith(s.name) ? s.name + ": " + s.text : s.text)) : []));
+  if (page === "wanted") renderWanted();
+  if (page === "status") renderStatus();
+  if (page === "games") renderGames();
+  // The cards of a settings page show what the services last said.
+  if (here.kind && settings && !editing) renderCards();
+}
 async function load() {
   if (auth) return;  // the login screen is up: nothing to fetch until it is passed
   try {
@@ -840,10 +1247,10 @@ async function load() {
     state = data;
     $("app").hidden = false;
     // First visit without settings: go straight to where they are filled in.
-    if (!opened) { opened = true; if (!state.configured) { show("config"); return; } show(view); return; }
+    if (!opened) { opened = true; show(!state.configured && page === "wanted" ? "connect" : page); return; }
     // Keep typing in the filter box and keep the sort list open: only rebuild around them.
     if (["filter", "sort"].includes(document.activeElement && document.activeElement.id)) renderList(); else render();
-    if (view === "log") loadLog();
+    if (page === "log") loadLog();
   } catch (e) {
     if (e !== LOGIN) { $("app").hidden = false; $("statusline").textContent = "No connection to NSWHunter"; }
   }

@@ -24,3 +24,4 @@ services:
       - 3033:3033
     volumes:
       - /path/to/nswhunter/data:/data
+      - /path/to/nswhunter/backup:/backup

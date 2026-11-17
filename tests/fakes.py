@@ -1,4 +1,5 @@
-"""Stand-ins for switch-library-manager-web, Prowlarr and NZBGet, in one small web app.
+"""Stand-ins for switch-library-manager-web, Prowlarr, a Newznab and a Torznab indexer, NZBGet,
+Telegram and a Discord webhook, in one small web app.
 
 Used by the tests, and runnable by itself to try the panel without the real services:
     python tests/fakes.py            (listens on port 9000)
@@ -71,6 +72,40 @@ RELEASES = [
 ]
 
 
+# What the fake Newznab indexer has: (title, date as an RSS feed writes it, size, categories).
+NEWZNAB = [
+    ("Hades.Update.v131072.NSW-NABGRP", "Tue, 02 Mar 2021 10:00:00 +0000", 151000000, [1000, 1090]),
+    ("Hades.Update.v131072.PS4-NABGRP", "Tue, 02 Mar 2021 11:00:00 +0000", 151000000, [1000, 1180]),
+    ("Hollow Knight Update v131072 NSW-NABGRP", "Mon, 01 Feb 2021 09:30:00 +0100", 90000000, [1090]),
+]
+# ... and the fake Torznab indexer: (title, date, size, seeders, "file" or "magnet").
+TORZNAB = [
+    ("Hades Update v131072 NSW-TORGRP", "Wed, 03 Mar 2021 10:00:00 +0000", 150000000, 12, "file"),
+    ("Hollow Knight Update v131072 NSW-TORGRP", "Tue, 02 Feb 2021 10:00:00 +0000", 90000000, 0, "magnet"),
+]
+MAGNET = "magnet:?xt=urn:btih:c12fe1c06bba254a9dc9f519b335aa7c1367a88a&dn=Hollow+Knight"
+RSS = ('<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" '
+       'xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/" '
+       'xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel><title>Fake</title>{}</channel></rss>')
+
+
+def bencode(value):
+    """Enough of bencode to make a small torrent file."""
+    if isinstance(value, int):
+        return b"i%de" % value
+    if isinstance(value, bytes):
+        return b"%d:%s" % (len(value), value)
+    if isinstance(value, str):
+        return bencode(value.encode())
+    if isinstance(value, list):
+        return b"l" + b"".join(bencode(v) for v in value) + b"e"
+    return b"d" + b"".join(bencode(k) + bencode(v) for k, v in sorted(value.items())) + b"e"
+
+
+TORRENT = bencode({"announce": "http://tracker.invalid/announce",
+                   "info": {"name": "Hades Update", "length": 150000000, "piece length": 262144, "pieces": b"x" * 20}})
+
+
 def make_fakes():
     app = web.Application()
     app["library"] = [dict(t) for t in LIBRARY]
@@ -85,6 +120,8 @@ def make_fakes():
     app["answers"] = []  # the small confirmations after a press
     app["edits"] = []  # messages that were rewritten after a press
     app["progress"] = {}  # NZBGet: id -> (MB in total, MB left) of what is in the queue
+    app["discord"] = []  # what was posted to the Discord webhook
+    app["fetched"] = []  # download links of the direct indexers that were followed
     app["indexer_ids"] = []
 
     async def export(request):
@@ -124,7 +161,11 @@ def make_fakes():
                     "downloadUrl": f"http://elsewhere.invalid/1/download?apikey=secret&link={n}",
                     "infoUrl": f"https://indexer.example/details/{n}", "grabs": n,
                 })
-        found.append({"guid": "torrent", "title": "Hades Update v131072", "protocol": "torrent"})
+        # Prowlarr has a torrent indexer too. Asked for usenet only (-1) the real one leaves it
+        # out; this one does not, so the tests see that NSWHunter does not take it either.
+        found.append({"guid": "torrent", "title": "Hades Update v131072", "protocol": "torrent", "seeders": 5,
+                      "indexer": "Tracker", "indexerId": 3, "size": 150000000, "publishDate": "2021-03-05T10:00:00Z",
+                      "downloadUrl": f"{request.scheme}://{request.host}/tor/get/file"})
         return web.json_response(found)
 
     async def indexers(request):
@@ -201,7 +242,57 @@ def make_fakes():
             "0100eeee0000e000": {"589824": "2025-02-03", "655360": "2026-08-19", "720896": "2026-10-21"},
         })
 
+    def feed(request, items):
+        """Like a Newznab indexer: the capabilities for everyone, a search only with the key."""
+        if request.query.get("t") == "caps":
+            return web.Response(text='<caps><server title="FakeNab" version="1.0"/></caps>', content_type="application/xml")
+        if request.query.get("apikey") != "nab_test":
+            return web.Response(text='<error code="100" description="Incorrect user credentials"/>', content_type="application/xml")
+        words = request.query.get("q", "").lower().split()
+        found = [i for i in items if all(w in i[0].lower().replace(".", " ") for w in words)]
+        return web.Response(text=RSS.format("".join(i[-1] for i in found)), content_type="application/rss+xml")
+
+    async def newznab(request):
+        base = f"{request.scheme}://{request.host}"
+        items = [(title, f"""<item><title>{title}</title><guid isPermaLink="true">{base}/nab/details/{n}</guid>
+            <link>{base}/nab/get/{n}</link><comments>{base}/nab/details/{n}#comments</comments><pubDate>{date}</pubDate>
+            <enclosure url="{base}/nab/get/{n}" length="{size}" type="application/x-nzb"/>
+            {"".join(f'<newznab:attr name="category" value="{c}"/>' for c in categories)}
+            <newznab:attr name="size" value="{size}"/><newznab:attr name="grabs" value="{n + 3}"/></item>""")
+                 for n, (title, date, size, categories) in enumerate(NEWZNAB)]
+        return feed(request, items)
+
+    async def torznab(request):
+        base = f"{request.scheme}://{request.host}"
+        items = [(title, f"""<item><title>{title}</title><guid>tor-{n}</guid><pubDate>{date}</pubDate>
+            <enclosure url="/tor/get/{how}" length="{size}" type="application/x-bittorrent"/>
+            <torznab:attr name="category" value="1090"/><torznab:attr name="seeders" value="{seeders}"/>
+            <torznab:attr name="peers" value="{seeders + 2}"/></item>""")
+                 for n, (title, date, size, seeders, how) in enumerate(TORZNAB)]
+        return feed(request, items)
+
+    async def nab_get(request):
+        app["fetched"].append(request.path)
+        return web.Response(body=NZB, content_type="application/x-nzb")
+
+    async def tor_get(request):
+        app["fetched"].append(request.path)
+        if request.match_info["how"] == "magnet":
+            raise web.HTTPFound(MAGNET)  # as many indexers do: the link leads on to a magnet link
+        return web.Response(body=TORRENT, content_type="application/x-bittorrent")
+
+    async def discord(request):
+        if request.match_info["token"] != "good":
+            return web.json_response({"message": "Unknown Webhook"}, status=404)
+        app["discord"].append((await request.json())["content"])
+        return web.Response(status=204)
+
     app.add_routes([
+        web.get("/nab/api", newznab),
+        web.get("/tor/api", torznab),
+        web.get("/nab/get/{n}", nab_get),
+        web.get("/tor/get/{how}", tor_get),
+        web.post("/discord/{token}", discord),
         web.get("/export/library.json", export),
         web.get("/api/v1/system/status", keyed(status)),
         web.get("/api/v1/search", search),

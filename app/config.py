@@ -1,6 +1,10 @@
-"""Settings. The ones in EDITABLE can be changed on the Configuration tab of the panel and are
-then kept in /data/settings.json; a saved value wins from the environment variable of the same
-name. Everything else comes from environment variables only (see .env.example)."""
+"""Settings.
+
+There are single settings (EDITABLE) and three lists of providers (PROVIDERS): the indexers,
+the download clients and the connections. Both are changed in the panel and kept in
+/data/settings.json. For a single setting an environment variable of the same name gives the
+first value; a saved value wins. Everything else comes from environment variables only (see
+.env.example)."""
 import hashlib
 import hmac
 import json
@@ -22,11 +26,20 @@ def number(name, default):
 
 def flag(name, default=False):
     value = env(name).lower()
-    return default if not value else value in ("1", "true", "yes", "on", "ja")
+    return default if not value else value in ("1", "true", "yes", "on")
 
 
 def url(name, default=""):
     return env(name, default).rstrip("/")
+
+
+def choice(name, allowed, default):
+    """An environment variable that must be one of `allowed` (numbers or lower-case words)."""
+    value = env(name, str(default)).lower()
+    for option in allowed:
+        if str(option) == value:
+            return option
+    return default
 
 
 TZ = env("TZ", "Etc/UTC")
@@ -36,25 +49,17 @@ STATE_FILE = os.path.join(DATA_DIR, "state.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
+# The password the first start made up, kept until the user has chosen one of their own.
+INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial-password")
+INITIAL_PASSWORD = None  # that password, while it is the one that works (set by first_login)
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 
 # Switch-library-manager-web: the library and what is missing.
 SLM_URL = url("SLM_URL")
 SLM_API_KEY = env("SLM_API_KEY")
 
-# Prowlarr: searching the indexers.
-PROWLARR_URL = url("PROWLARR_URL")
-PROWLARR_API_KEY = env("PROWLARR_API_KEY")
-PROWLARR_CATEGORIES = [c for c in env("PROWLARR_CATEGORIES", "1000").replace(" ", "").split(",") if c]
+# Only these indexers of a Prowlarr (ids from Prowlarr, comma separated). Empty = all of them.
 PROWLARR_INDEXER_IDS = [i for i in env("PROWLARR_INDEXER_IDS").replace(" ", "").split(",") if i]
-
-# Where a chosen release goes: nzbget, sabnzbd, or prowlarr (= Prowlarr's own download client).
-DOWNLOAD_CLIENT = env("DOWNLOAD_CLIENT", "nzbget").lower()
-DOWNLOAD_CATEGORY = env("DOWNLOAD_CATEGORY", "games")
-NZBGET_URL = url("NZBGET_URL")
-NZBGET_USER = env("NZBGET_USER")
-NZBGET_PASSWORD = env("NZBGET_PASSWORD")
-SABNZBD_URL = url("SABNZBD_URL")
-SABNZBD_API_KEY = env("SABNZBD_API_KEY")
 
 # off: everything waits for your click. A number: the best release of a game goes out by
 # itself when its score (1-10, the chance that the download is right) is at least that.
@@ -72,28 +77,17 @@ SYNC_INTERVAL_MINUTES = max(5, number("SYNC_INTERVAL_MINUTES", 60))
 # Every game that misses something is searched by name once per this many hours. That costs
 # one API call per indexer per game: with many games and a strict indexer, choose 24 or 48.
 INTERVALS = (6, 12, 24, 48)
-try:
-    SEARCH_INTERVAL_HOURS = int(env("SEARCH_INTERVAL_HOURS", "24"))
-except ValueError:
-    SEARCH_INTERVAL_HOURS = 24
-if SEARCH_INTERVAL_HOURS not in INTERVALS:
-    SEARCH_INTERVAL_HOURS = 24
+SEARCH_INTERVAL_HOURS = choice("SEARCH_INTERVAL_HOURS", INTERVALS, 24)
 # At most this many searches by name per round; 0 = no limit.
 BACKLOG_PER_RUN = int(number("BACKLOG_PER_RUN", 0))
 SEARCH_DELAY_SECONDS = number("SEARCH_DELAY_SECONDS", 3)
 SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
-# A sent release that has not arrived in the library after this long counts as failed.
 # How long a sent release may take to show up in the library. Longer than that it counts as
 # failed and the next release gets its turn. While the download client is still downloading,
 # the clock does not run.
 WAITS = (30, 60, 120, 360, 1440)
-try:
-    GRAB_WAIT_MINUTES = int(env("GRAB_WAIT_MINUTES", "60"))
-except ValueError:
-    GRAB_WAIT_MINUTES = 60
-if GRAB_WAIT_MINUTES not in WAITS:
-    GRAB_WAIT_MINUTES = 60
-# How often the download client is asked how the sent releases are doing.
+GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 60)
+# How often the download clients are asked how the sent releases are doing.
 WATCH_SECONDS = max(5, number("WATCH_SECONDS", 120))
 
 # Every update of every game with its date, used to tell which update a release is. Several
@@ -103,6 +97,8 @@ TITLEDB_VERSIONS_URL = env(
     "TITLEDB_VERSIONS_URL",
     "https://github.com/DeLFuS77/switch-library-manager-web/releases/download/data/versions.json,"
     "https://raw.githubusercontent.com/blawar/titledb/master/versions.json")
+TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
+
 
 def hash_password(password):
     """A password as it is kept: scrypt with its own salt, never the password itself."""
@@ -123,43 +119,53 @@ def check_password(password):
     return hmac.compare_digest(given.hex(), digest)
 
 
+# The login of the panel. Without a password the first start makes one up (see first_login).
 PANEL_USER = env("PANEL_USER", "admin")
-# Without a password the panel asks to make a login before it shows anything.
 PANEL_PASSWORD = hash_password(env("PANEL_PASSWORD"))
 MIN_PASSWORD = 8
 # Extra host names the panel answers to, comma separated: the name of a reverse proxy, for
 # example. An IP address and a name inside the home network always work (see auth.py).
 PANEL_HOSTS = env("PANEL_HOSTS").lower().replace(" ", "")
-# Notifications: Telegram from the Configuration tab, and Apprise URLs for anything else.
-TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
-# Ask per release in Telegram, with buttons to download or reject it there. Off unless it is
-# switched on: NSWHunter then reads what the bot receives, and a bot that another program
-# also reads cannot serve both.
-TELEGRAM_ASK = flag("TELEGRAM_ASK")
-TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
-NOTIFY_URLS = env("NOTIFY_URLS")
+
+# info: what happens. debug: also every search and every call to a service. trace: also every
+# release that was judged, with the verdict.
+LOG_LEVELS = ("info", "debug", "trace")
+LOG_LEVEL = choice("LOG_LEVEL", LOG_LEVELS, "info")
+LOG_SIZES = (1, 2, 5, 10, 25)  # MB per log file; five older files are kept
+LOG_SIZE_MB = choice("LOG_SIZE_MB", LOG_SIZES, 1)
+
+# Backups of the settings and the state. A relative folder is under DATA_DIR.
+BACKUP_FOLDER = env("BACKUP_FOLDER", "/backup")
+BACKUP_INTERVAL_DAYS = int(min(90, max(1, number("BACKUP_INTERVAL_DAYS", 7))))
+BACKUP_RETENTION_DAYS = int(min(365, max(1, number("BACKUP_RETENTION_DAYS", 28))))
+
+# How the panel shows things; kept here so every browser shows the same.
+THEMES = ("auto", "dark", "light")
+UI_THEME = choice("UI_THEME", THEMES, "auto")
+DATE_FORMATS = ("browser", "iso", "dmy", "mdy", "long")
+UI_DATE_FORMAT = choice("UI_DATE_FORMAT", DATE_FORMATS, "browser")
+TIME_FORMATS = ("browser", "24", "12")
+UI_TIME_FORMAT = choice("UI_TIME_FORMAT", TIME_FORMATS, "browser")
+UI_RELATIVE_DATES = flag("UI_RELATIVE_DATES", True)
 
 
-# ---------------------------------------------------------------- the Configuration tab
+# ---------------------------------------------------------------- single settings
 
-CLIENTS = ("nzbget", "sabnzbd", "prowlarr")
-# name -> kind: "url", "text", "secret", "bool", or the tuple of allowed values.
+# name -> kind: "url", "text", "secret", "bool", "path", a range of whole numbers, or the tuple
+# of allowed values.
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
-    "PROWLARR_URL": "url", "PROWLARR_API_KEY": "secret", "PROWLARR_CATEGORIES": "numbers",
-    "DOWNLOAD_CLIENT": CLIENTS, "DOWNLOAD_CATEGORY": "text",
-    "NZBGET_URL": "url", "NZBGET_USER": "text", "NZBGET_PASSWORD": "secret",
-    "SABNZBD_URL": "url", "SABNZBD_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS,
-    "TELEGRAM_BOT_TOKEN": "secret", "TELEGRAM_CHAT_ID": "text", "TELEGRAM_ASK": "bool",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
+    "LOG_LEVEL": LOG_LEVELS, "LOG_SIZE_MB": LOG_SIZES,
+    "BACKUP_FOLDER": "path", "BACKUP_INTERVAL_DAYS": range(1, 91), "BACKUP_RETENTION_DAYS": range(1, 366),
+    "UI_THEME": THEMES, "UI_DATE_FORMAT": DATE_FORMATS, "UI_TIME_FORMAT": TIME_FORMATS,
+    "UI_RELATIVE_DATES": "bool",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
 # A key or password belongs to the address it was saved for: it is never sent to another one.
-BOUND = {"SLM_URL": "SLM_API_KEY", "PROWLARR_URL": "PROWLARR_API_KEY",
-         "NZBGET_URL": "NZBGET_PASSWORD", "SABNZBD_URL": "SABNZBD_API_KEY"}
+BOUND = {"SLM_URL": "SLM_API_KEY"}
 
 
 def origin(address):
@@ -187,39 +193,66 @@ def check_bound(new, clear):
                              "A saved key or password is only sent to the address it was saved for.")
 
 
+def clean_text(name, value):
+    value = str(value if value is not None else "").strip()
+    if len(value) > 500 or any(ord(c) < 32 for c in value):
+        raise ValueError(f"{name}: invalid value")
+    return value
+
+
+def clean_url(name, value):
+    value = clean_text(name, value).rstrip("/")
+    if value and not value.lower().startswith(("http://", "https://")):
+        raise ValueError(f"{name}: start the address with http:// or https://")
+    return value
+
+
+def clean_numbers(name, value):
+    parts = value if isinstance(value, list) else str(value or "").replace(" ", "").split(",")
+    parts = [str(p) for p in parts if str(p)]
+    if not parts or not all(p.isdigit() and len(p) <= 6 for p in parts):
+        raise ValueError(f"{name}: fill in numbers, separated by commas (1000 = Console)")
+    return parts
+
+
+def clean_bool(value):
+    return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def clean_chat(name, value):
+    value = clean_text(name, value)
+    if value and not (value.lstrip("-").isdigit() or value.startswith("@")):
+        raise ValueError(f"{name}: a chat ID is a number (with a minus in front for a group) or @channelname")
+    return value
+
+
 def normalize(name, value):
     """A value from the form or the settings file in the shape the app uses. ValueError with a
     message for the user if it cannot be right."""
     kind = EDITABLE[name]
     if kind == "bool":
-        return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on", "ja")
-    if isinstance(kind, tuple) and isinstance(kind[0], int):
+        return clean_bool(value)
+    if isinstance(kind, range) or (isinstance(kind, tuple) and isinstance(kind[0], int)):
         try:
             number_value = int(str(value).strip())
         except ValueError:
             number_value = None
         if number_value not in kind:
-            raise ValueError(f"{name}: choose from {', '.join(map(str, kind))}")
+            allowed = f"a number from {kind[0]} to {kind[-1]}" if isinstance(kind, range) else ", ".join(map(str, kind))
+            raise ValueError(f"{name}: choose {allowed}")
         return number_value
-    if kind == "numbers":
-        parts = value if isinstance(value, list) else str(value or "").replace(" ", "").split(",")
-        parts = [str(p) for p in parts if str(p)]
-        if not parts or not all(p.isdigit() and len(p) <= 6 for p in parts):
-            raise ValueError(f"{name}: fill in numbers, separated by commas (1000 = Console)")
-        return parts
-    value = str(value if value is not None else "").strip()
+    if kind == "url":
+        return clean_url(name, value)
+    value = clean_text(name, value)
     if name == "AUTO_DOWNLOAD":
         value = LEGACY_LEVELS.get(value.lower(), value)
-    if len(value) > 500 or any(ord(c) < 32 for c in value):
-        raise ValueError(f"{name}: invalid value")
-    if kind == "url":
-        value = value.rstrip("/")
-        if value and not value.lower().startswith(("http://", "https://")):
-            raise ValueError(f"{name}: start the address with http:// or https://")
-    elif isinstance(kind, tuple):
+    if isinstance(kind, tuple):
         value = value.lower()
         if value not in kind:
             raise ValueError(f"{name}: choose from {', '.join(kind)}")
+    elif kind == "path":
+        if not value or ".." in value.split("/") or "\\" in value:
+            raise ValueError(f"{name}: fill in a folder, like /backup")
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
@@ -230,9 +263,169 @@ def normalize(name, value):
         value = value.lower().replace(" ", "")
         if any(not h or not all(c.isalnum() or c in ".-" for c in h) for h in value.split(",") if value):
             raise ValueError("PANEL_HOSTS: fill in host names separated by commas, without http:// and without a port")
-    elif name == "TELEGRAM_CHAT_ID" and value and not (value.lstrip("-").isdigit() or value.startswith("@")):
-        raise ValueError("TELEGRAM_CHAT_ID: a chat ID is a number (with a minus in front for a group) or @channelname")
     return value
+
+
+# ---------------------------------------------------------------- providers
+
+# The lists of things that can be added in the panel. Per type: the name shown, and its fields
+# with their kind ("url", "text", "secret", "bool", "numbers", "chat" or "priority").
+INDEXER_FIELDS = {"url": "url", "api_key": "secret", "categories": "numbers", "priority": "priority"}
+TORRENT_FIELDS = {"url": "url", "username": "text", "password": "secret", "category": "text"}
+PROVIDERS = {
+    "INDEXERS": {
+        # Prowlarr searches its own indexers and has a priority for each of them.
+        "prowlarr": {"label": "Prowlarr", "fields": {"url": "url", "api_key": "secret", "categories": "numbers"}},
+        "newznab": {"label": "Newznab (usenet indexer)", "protocol": "usenet", "fields": INDEXER_FIELDS},
+        "torznab": {"label": "Torznab (torrent indexer)", "protocol": "torrent", "fields": INDEXER_FIELDS},
+    },
+    "DOWNLOAD_CLIENTS": {
+        "nzbget": {"label": "NZBGet", "protocol": "usenet", "fields": {
+            "url": "url", "username": "text", "password": "secret", "category": "text"}},
+        "sabnzbd": {"label": "SABnzbd", "protocol": "usenet", "fields": {
+            "url": "url", "api_key": "secret", "category": "text"}},
+        "qbittorrent": {"label": "qBittorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
+        "transmission": {"label": "Transmission", "protocol": "torrent", "fields": TORRENT_FIELDS},
+        "utorrent": {"label": "uTorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
+        # Lets Prowlarr hand a usenet release it found to the download client set up in Prowlarr.
+        "prowlarr": {"label": "The download client of Prowlarr", "protocol": "prowlarr", "fields": {}},
+    },
+    "CONNECTIONS": {
+        "telegram": {"label": "Telegram", "fields": {"bot_token": "secret", "chat_id": "chat", "ask": "bool"}},
+        "discord": {"label": "Discord", "fields": {"webhook": "secret"}},
+        "apprise": {"label": "Apprise", "fields": {"urls": "secret"}},
+    },
+}
+KINDS = tuple(PROVIDERS)
+DEFAULTS = {"categories": ["1000"], "priority": 25, "category": "games", "ask": False}
+INDEXERS, DOWNLOAD_CLIENTS, CONNECTIONS = [], [], []
+
+
+def providers(kind, enabled=False):
+    return [e for e in globals()[kind] if e.get("enabled") or not enabled]
+
+
+def indexers():
+    return providers("INDEXERS", enabled=True)
+
+
+def download_clients():
+    return providers("DOWNLOAD_CLIENTS", enabled=True)
+
+
+def connections():
+    return providers("CONNECTIONS", enabled=True)
+
+
+def protocol_of(client):
+    return PROVIDERS["DOWNLOAD_CLIENTS"][client["type"]]["protocol"]
+
+
+def client_for(protocol, source_type=""):
+    """The download client a release of this protocol goes to: the first one in the list that
+    takes it. The download client of Prowlarr only takes what a Prowlarr found."""
+    for client in download_clients():
+        kind = protocol_of(client)
+        if kind == protocol or (kind == "prowlarr" and protocol == "usenet" and source_type == "prowlarr"):
+            return client
+    return None
+
+
+def wants_torrents():
+    """Is there a client that takes torrents? Without one, torrents are not searched at all."""
+    return any(protocol_of(c) == "torrent" for c in download_clients())
+
+
+def normalize_entry(kind, entry, keep_id=True):
+    """One indexer, download client or connection from the form or the settings file, in the
+    shape the app uses. An empty secret keeps the saved one, unless the address changed: a
+    saved key is only sent to the address it was saved for."""
+    if kind not in PROVIDERS or not isinstance(entry, dict):
+        raise ValueError("Invalid request")
+    type_ = str(entry.get("type", "")).lower()
+    if type_ not in PROVIDERS[kind]:
+        raise ValueError(f"Unknown type: {type_ or '(none)'}")
+    spec = PROVIDERS[kind][type_]
+    old = next((e for e in globals()[kind] if e["id"] == entry.get("id")), None) if keep_id else None
+    if old and old["type"] != type_:
+        raise ValueError("The type of an entry cannot be changed; add a new one")
+    name = clean_text("Name", entry.get("name") or spec["label"])[:60] or spec["label"]
+    clean = {"id": old["id"] if old else secrets.token_hex(4), "type": type_, "name": name,
+             "enabled": clean_bool(entry.get("enabled", True))}
+    kept = []
+    for field, field_kind in spec["fields"].items():
+        value = entry.get(field, DEFAULTS.get(field, ""))
+        label = f"{name}: {field.replace('_', ' ')}"
+        if field_kind == "secret":
+            value = str(value or "").strip()
+            if len(value) > 2000 or any(ord(c) < 32 for c in value):
+                raise ValueError(f"{label}: invalid value")
+            if not value and old and field not in (entry.get("clear") or []):
+                value = old.get(field, "")
+                if value:
+                    kept.append(field)
+        elif field_kind == "url":
+            value = clean_url(label, value)
+            if not value:
+                raise ValueError(f"{label}: fill in the address")
+        elif field_kind == "numbers":
+            value = clean_numbers(label, value)
+        elif field_kind == "bool":
+            value = clean_bool(value)
+        elif field_kind == "chat":
+            value = clean_chat(label, value)
+        elif field_kind == "priority":
+            try:
+                value = int(str(value).strip())
+            except ValueError:
+                value = 0
+            if not 1 <= value <= 50:
+                raise ValueError(f"{label}: a number from 1 to 50; the lowest goes first")
+        else:
+            value = clean_text(label, value)
+        clean[field] = value
+    if kept and old and "url" in spec["fields"] and origin(clean["url"]) != origin(old.get("url")):
+        raise ValueError(f"{name}: fill in the {kept[0].replace('_', ' ')} again, because the address changed. "
+                         "A saved key or password is only sent to the address it was saved for.")
+    if type_ == "discord" and clean["webhook"] and not clean["webhook"].lower().startswith("https://"):
+        raise ValueError(f"{name}: a Discord webhook starts with https://")
+    return clean
+
+
+def save_provider(kind, entry):
+    """Add an entry, or replace the one with the same id. Returns the saved entry."""
+    clean = normalize_entry(kind, entry)
+    entries = [e for e in globals()[kind]]
+    if any(e["id"] == clean["id"] for e in entries):
+        entries = [clean if e["id"] == clean["id"] else e for e in entries]
+    else:
+        entries.append(clean)
+    globals()[kind] = entries
+    write({**saved(), kind: entries})
+    return clean
+
+
+def delete_provider(kind, entry_id):
+    if kind not in PROVIDERS:
+        raise ValueError("Invalid request")
+    globals()[kind] = [e for e in globals()[kind] if e["id"] != entry_id]
+    write({**saved(), kind: globals()[kind]})
+
+
+def shown_providers():
+    """The lists as the panel gets them: of a secret only whether one is set."""
+    result = {}
+    for kind in KINDS:
+        result[kind] = []
+        for entry in globals()[kind]:
+            fields = PROVIDERS[kind][entry["type"]]["fields"]
+            shown = {k: v for k, v in entry.items() if fields.get(k) != "secret"}
+            shown["secrets"] = {k: bool(entry.get(k)) for k, f in fields.items() if f == "secret"}
+            result[kind].append(shown)
+    return result
+
+
+# ---------------------------------------------------------------- the settings file
 
 
 def saved():
@@ -241,7 +434,7 @@ def saved():
             data = json.load(f)
     except (FileNotFoundError, ValueError):
         return {}
-    return {k: v for k, v in data.items() if k in EDITABLE} if isinstance(data, dict) else {}
+    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS} if isinstance(data, dict) else {}
 
 
 def write(data):
@@ -253,21 +446,102 @@ def write(data):
     os.replace(tmp, SETTINGS_FILE)
 
 
+def legacy():
+    """The indexer, download client and connections of a version that had one of each: from
+    its settings file, else from its environment variables. Returns {kind: [entries]}."""
+    try:
+        with open(SETTINGS_FILE) as f:
+            old = json.load(f)
+    except (FileNotFoundError, ValueError):
+        old = {}
+    old = old if isinstance(old, dict) else {}
+
+    def was(name, default=""):
+        return old[name] if name in old else env(name, default)
+
+    lists = {kind: [] for kind in KINDS}
+    if was("PROWLARR_URL"):
+        lists["INDEXERS"].append({"type": "prowlarr", "url": was("PROWLARR_URL"), "api_key": was("PROWLARR_API_KEY"),
+                                  "categories": was("PROWLARR_CATEGORIES", "1000")})
+    chosen, category = str(was("DOWNLOAD_CLIENT", "nzbget")).lower(), was("DOWNLOAD_CATEGORY", "games")
+    if was("NZBGET_URL"):
+        lists["DOWNLOAD_CLIENTS"].append({
+            "type": "nzbget", "url": was("NZBGET_URL"), "username": was("NZBGET_USER"),
+            "password": was("NZBGET_PASSWORD"), "category": category, "enabled": chosen == "nzbget"})
+    if was("SABNZBD_URL"):
+        lists["DOWNLOAD_CLIENTS"].append({
+            "type": "sabnzbd", "url": was("SABNZBD_URL"), "api_key": was("SABNZBD_API_KEY"),
+            "category": category, "enabled": chosen == "sabnzbd"})
+    if chosen == "prowlarr":
+        lists["DOWNLOAD_CLIENTS"].append({"type": "prowlarr"})
+    if was("TELEGRAM_BOT_TOKEN") or was("TELEGRAM_CHAT_ID"):
+        lists["CONNECTIONS"].append({
+            "type": "telegram", "bot_token": was("TELEGRAM_BOT_TOKEN"), "chat_id": was("TELEGRAM_CHAT_ID"),
+            "ask": clean_bool(was("TELEGRAM_ASK", "false"))})
+    if env("NOTIFY_URLS"):
+        lists["CONNECTIONS"].append({"type": "apprise", "urls": env("NOTIFY_URLS")})
+    return lists
+
+
 def load_saved():
     """Put the saved settings on top of the environment. Called once at start."""
     data = saved()
     kept = dict(data)
     for name, value in data.items():
+        if name in KINDS:
+            continue
         try:
             globals()[name] = kept[name] = normalize(name, value)
         except ValueError:
             continue
+    old = legacy() if any(kind not in data for kind in KINDS) else {}
+    for kind in KINDS:
+        entries = []
+        globals()[kind] = []
+        for entry in data[kind] if isinstance(data.get(kind), list) else old.get(kind, []):
+            try:
+                clean = normalize_entry(kind, entry, keep_id=False)
+            except ValueError:
+                continue  # a broken entry is left out, the rest still works
+            if isinstance(entry.get("id"), str) and entry["id"]:
+                clean["id"] = entry["id"]
+            entries.append(clean)
+        globals()[kind] = kept[kind] = entries
     if kept != data:
-        write(kept)  # a password saved by an older version: keep only its hash from now on
+        # A password saved by an older version becomes a hash; one indexer and one download
+        # client of an older version become the first entries of the lists.
+        write(kept)
+
+
+def first_login():
+    """Without a password the panel would be open: make one up for the user "admin" and keep
+    it readable until the user has chosen one of their own. Returns the made-up password while
+    it still has to be changed, else None. Called once at start."""
+    global PANEL_PASSWORD, INITIAL_PASSWORD
+    if not PANEL_PASSWORD:
+        password = secrets.token_urlsafe(12)
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with os.fdopen(os.open(INITIAL_PASSWORD_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(password)
+        PANEL_PASSWORD = hash_password(password)
+        write({**saved(), "PANEL_USER": PANEL_USER, "PANEL_PASSWORD": PANEL_PASSWORD})
+    try:
+        with open(INITIAL_PASSWORD_FILE) as f:
+            password = f.read().strip()
+    except FileNotFoundError:
+        password = ""
+    # Only while it is the password that works: a login made another way leaves it behind.
+    INITIAL_PASSWORD = password if password and check_password(password) else None
+    return INITIAL_PASSWORD
+
+
+def must_change_password():
+    """Is the made-up password still in use? Then the panel only lets the user choose one."""
+    return INITIAL_PASSWORD is not None
 
 
 def update(values, clear=()):
-    """Save settings from the Configuration tab and use them from now on.
+    """Save single settings from the panel and use them from now on.
 
     An empty secret means "keep what is there": the panel never gets a secret back, so it
     cannot send it again. A name in `clear` empties that secret. Returns what really changed."""
@@ -288,12 +562,17 @@ def update(values, clear=()):
     write({**saved(), **new})
     changed = sorted(name for name, value in new.items() if globals()[name] != value)
     globals().update(new)
+    if "PANEL_PASSWORD" in new:
+        # The user has a password of their own now: the made-up one is gone for good.
+        globals()["INITIAL_PASSWORD"] = None
+        if os.path.exists(INITIAL_PASSWORD_FILE):
+            os.remove(INITIAL_PASSWORD_FILE)
     return changed
 
 
 def overlay(values, clear=()):
-    """The settings as they would be after saving this form, without saving or using them:
-    for the Test buttons. Same rules as update(): an empty secret keeps the saved one."""
+    """The single settings as they would be after saving this form, without saving or using
+    them: for the Test buttons. Same rules as update(): an empty secret keeps the saved one."""
     import types
     result = types.SimpleNamespace(**{name: globals()[name] for name in EDITABLE})
     new = {}
@@ -313,11 +592,13 @@ def overlay(values, clear=()):
 
 
 def editable():
-    """What the Configuration tab shows: values, and for secrets only whether one is set."""
+    """What the settings pages show: values, and for secrets only whether one is set."""
     return {
-        "values": {n: ",".join(globals()[n]) if EDITABLE[n] == "numbers" else globals()[n]
-                   for n in EDITABLE if n not in SECRETS},
+        "values": {n: globals()[n] for n in EDITABLE if n not in SECRETS},
         "secrets": {n: bool(globals()[n]) for n in SECRETS},
+        "providers": shown_providers(),
+        "schema": {kind: {t: {"label": spec["label"], "fields": spec["fields"], "protocol": spec.get("protocol", "")}
+                          for t, spec in types.items()} for kind, types in PROVIDERS.items()},
     }
 
 
@@ -330,13 +611,9 @@ def problems():
     """What is missing before anything can run."""
     missing = []
     if not SLM_URL:
-        missing.append("SLM_URL is missing")
-    if not PROWLARR_URL or not PROWLARR_API_KEY:
-        missing.append("PROWLARR_URL or PROWLARR_API_KEY is missing")
-    if DOWNLOAD_CLIENT == "nzbget" and not NZBGET_URL:
-        missing.append("NZBGET_URL is missing")
-    elif DOWNLOAD_CLIENT == "sabnzbd" and not (SABNZBD_URL and SABNZBD_API_KEY):
-        missing.append("SABNZBD_URL or SABNZBD_API_KEY is missing")
-    elif DOWNLOAD_CLIENT not in ("nzbget", "sabnzbd", "prowlarr"):
-        missing.append("DOWNLOAD_CLIENT must be nzbget, sabnzbd or prowlarr")
+        missing.append("The library has no address yet (Settings > Connect)")
+    if not indexers():
+        missing.append("There is no indexer yet (Settings > Indexers)")
+    if not download_clients():
+        missing.append("There is no download client yet (Settings > Download Clients)")
     return missing

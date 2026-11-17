@@ -6,16 +6,21 @@ import os
 import secrets
 import time
 
+import backup
 import clients
 import config
+import downloads
+import indexers
+import logs
 import matcher
+import notify
 
 MAX_CANDIDATES = 15
 MAX_REJECTED = 25
 MAX_FAILED = 10  # failed downloads kept per item, for the panel
 # What the panel needs of a release that fell off; the judgement is made again when it counts.
 RELEASE_FIELDS = ("guid", "title", "size", "indexer", "indexerId", "published", "downloadUrl",
-                  "infoUrl", "grabs", "priority")
+                  "infoUrl", "grabs", "priority", "source", "protocol", "seeders")
 # A release that belongs under another item of the same game did not fall off: it is there.
 ELSEWHERE = ("is another DLC", "names no DLC", "names one DLC", "has the title ID of one DLC",
              "not DLC", "DLC only", "title ID of another part")
@@ -27,8 +32,7 @@ ASK_DELAY = 1.1  # seconds between two messages: Telegram allows about one per s
 DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
 
 
-def log(*args):
-    print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), *args, flush=True)
+log = logs.info
 
 
 def published_date(release):
@@ -36,10 +40,6 @@ def published_date(release):
         return datetime.date.fromisoformat(release.get("published", "")[:10])
     except ValueError:
         return None
-
-
-async def no_notify(title, body):
-    pass
 
 
 def best_first(candidate):
@@ -62,14 +62,14 @@ def published_ordinal(release):
 
 
 class Hunter:
-    def __init__(self, session, notify=None):
+    def __init__(self, session):
         self.session = session
-        self.notify = notify or no_notify
         self.lock = asyncio.Lock()  # one round or search at a time
         self.tell_later, self.dropped, self.finished = [], False, False  # of follow_grabs
         self.games = {}  # game id -> matcher.Game, only games that miss something
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
-        self.priorities = {}  # Prowlarr indexer id -> priority
+        # (id of a Prowlarr in the settings, id that Prowlarr has for an indexer) -> priority
+        self.priorities = {}
         self.status = {"running": False, "phase": None, "last_run": None, "next_run": None,
                        "error": None,  # {"text", "at"} of the last round, if it broke
                        "skipped": 0}  # games and releases the last round had to leave out
@@ -85,6 +85,7 @@ class Hunter:
             "services": {},  # name -> {"ok": bool, "text": str}
             "versions_fetched": 0,
             "arrived": [],  # what was sent and is now in the library, newest first
+            "games": [],  # every game of the library, for the Games page
             "telegram_offset": 0,  # the next update to ask Telegram for
         }
         self.load()
@@ -119,8 +120,12 @@ class Hunter:
         os.replace(tmp, config.STATE_FILE)
 
     def log(self):
-        """The whole log, for the Log tab."""
+        """The whole log, for the Log page."""
         return self.state["events"]
+
+    def library(self):
+        """Every game of the library, for the Games page."""
+        return self.state.get("games", [])
 
     def event(self, text, level="info"):
         log(text)
@@ -129,6 +134,27 @@ class Hunter:
 
     def service(self, name, ok, text):
         self.state["services"][name] = {"ok": ok, "text": text, "at": int(time.time())}
+
+    def provider(self, kind, entry, ok, text):
+        """What an indexer, download client or connection last said."""
+        self.state["services"][f"{kind}:{entry['id']}"] = {
+            "ok": ok, "text": text, "at": int(time.time()), "name": entry["name"], "kind": kind}
+        logs.debug(f"{entry['name']}:", "ok" if ok else "FAILED", "-", text)
+
+    def working(self, kind):
+        """Does at least one enabled entry of this kind answer?"""
+        services = self.state["services"]
+        return any(services.get(f"{kind}:{e['id']}", {}).get("ok") for e in config.providers(kind, enabled=True))
+
+    def forget_services(self):
+        """Drop what was said by entries that are gone or switched off."""
+        live = {f"{kind}:{e['id']}" for kind in config.KINDS for e in config.providers(kind, enabled=True)}
+        for name in [n for n in self.state["services"] if n not in live and n not in ("slm", "titledb", "config", "backup")]:
+            del self.state["services"][name]
+
+    def legacy_source(self):
+        """A release kept by a version that knew one Prowlarr only: it came from that one."""
+        return next((i["id"] for i in config.providers("INDEXERS") if i["type"] == "prowlarr"), "")
 
     def skip(self, what, error, count=True):
         """Leave out one game or release that cannot be handled, so the rest goes on. Written
@@ -179,10 +205,10 @@ class Hunter:
         except clients.ServiceError as e:
             self.service("slm", False, str(e))
             return False
-        games, wanted, broken = {}, {}, set()
+        games, wanted, broken, listed = {}, {}, set(), []
         for title in titles:
             try:
-                self.read_title(title, games, wanted)
+                self.read_title(title, games, wanted, listed)
             except Exception as e:  # noqa: BLE001
                 game_id = str(title.get("id", "")).upper() if isinstance(title, dict) else ""
                 broken.add(game_id)  # what is known about it is kept as it is
@@ -210,6 +236,8 @@ class Hunter:
                 item["grab"] = None
             item.update(facts)
         self.games = games
+        self.state["games"] = sorted(listed, key=lambda g: g["name"].lower())
+        logs.debug(f"Library: {len(listed)} games, {len(wanted)} things to look for")
         self.state["library"] = {
             "fetched": int(time.time()), "games": len(titles),
             "updates": sum(1 for i in items.values() if i["type"] == "update"),
@@ -222,8 +250,9 @@ class Hunter:
             await self.tell(text)
         return True
 
-    def read_title(self, title, games, wanted):
-        """One game of the export: what it misses, as items to look for."""
+    def read_title(self, title, games, wanted, listed):
+        """One game of the export: a line for the Games page, and what it misses as items to
+        look for."""
         game_id = str(title.get("id", "")).upper()
         # 04...: a Switch 2 title. Left alone on purpose: only the first Switch.
         if len(game_id) != 16 or game_id.startswith("04"):
@@ -235,6 +264,13 @@ class Hunter:
         all_dlc = [{"id": str(d.get("id", "")).upper(), "name": d.get("name") or "",
                     "status": d.get("status")} for d in title.get("dlc") or [] if isinstance(d, dict)]
         missing_dlc = [d for d in all_dlc if d["status"] == "missing"] if config.INCLUDE_DLC else []
+        listed.append({
+            "id": game_id, "name": name or game_id, "version": title.get("version") or "",
+            "local": int(title.get("localUpdate") or 0), "latest": int(title.get("latestUpdate") or 0),
+            "update_missing": update, "updates_ignored": bool(title.get("updatesIgnored")),
+            "dlc_missing": sum(1 for d in all_dlc if d["status"] == "missing"),
+            "dlc_owned": sum(1 for d in all_dlc if d["status"] == "owned"),
+            "size": sum(int(f.get("size") or 0) for f in title.get("files") or [] if isinstance(f, dict))})
         if not update and not missing_dlc:
             return
         game = matcher.Game(
@@ -356,10 +392,14 @@ class Hunter:
 
     def place(self, item, release):
         # The priority as Prowlarr has it now; else the one the release was found with.
-        release = {**release, "priority": self.priorities.get(release.get("indexerId"), priority_of(release))}
+        source = release.get("source") or self.legacy_source()
+        release = {**release, "source": source, "protocol": release.get("protocol") or "usenet",
+                   "priority": self.priorities.get((source, release.get("indexerId")), priority_of(release))}
         same = matcher.same_release(release["title"])
         rejected = item.setdefault("rejected", [])
         result = self.judge(item, release)
+        logs.trace(f"{self.label(item)} <- {release['title']}:", f"ruled out, {result.reason}" if isinstance(
+            result, matcher.Rejection) else f"score {result.get('score')}, {'; '.join(result.get('reasons') or [])}")
         if isinstance(result, matcher.Rejection):
             # Shown in the panel, so a wrong rejection can be seen and overruled. Not what is of
             # another game, and not what simply belongs under another item of this game.
@@ -451,14 +491,21 @@ class Hunter:
 
     async def feed(self):
         """The newest posts of every indexer, in one call, held against every missing item."""
-        try:
-            releases = await clients.prowlarr_search(self.session, "")
-        except clients.ServiceError as e:
-            self.service("prowlarr", False, str(e))
-            return
+        releases, errors = await indexers.search_all(self.session, "")
+        self.heard(errors)
+        logs.debug(f"New posts: {len(releases)} releases from {len(config.indexers()) - len(errors)} indexer(s)")
         found = self.process(releases, list(self.games))
         if found:
             self.event(f"New posts: found {found} candidate release(s)")
+
+    def heard(self, errors):
+        """After a search: which indexers did not answer, and which answer again."""
+        for indexer in config.indexers():
+            name = f"INDEXERS:{indexer['id']}"
+            if indexer["id"] in errors:
+                self.provider("INDEXERS", indexer, False, errors[indexer["id"]])
+            elif not self.state["services"].get(name, {}).get("ok"):
+                self.provider("INDEXERS", indexer, True, "answers")
 
     async def search_game(self, game_id):
         game = self.games.get(game_id)
@@ -470,8 +517,13 @@ class Hunter:
             queries.append(update_id)
         releases = []
         for query in queries:
-            releases += await clients.prowlarr_search(self.session, query)
+            found, errors = await indexers.search_all(self.session, query)
+            self.heard(errors)
+            if errors and len(errors) == len(config.indexers()):
+                raise clients.ServiceError(next(iter(errors.values())))  # nobody answered: no use going on
+            releases += found
         found = self.process(releases, [game_id])
+        logs.debug(f"Searched {queries}: {len(releases)} releases, {found} new candidate(s) for {game.name or game_id}")
         self.state["searched"][game_id] = int(time.time())
         for item in self.items_of(game_id):
             item["last_search"] = int(time.time())
@@ -497,9 +549,8 @@ class Hunter:
             self.status["phase"] = f"searching {n + 1}/{len(queue)}: {self.games[game_id].name or game_id}"
             try:
                 await self.search_game(game_id)
-            except clients.ServiceError as e:
-                self.service("prowlarr", False, str(e))
-                return
+            except clients.ServiceError:
+                return  # no indexer answers; heard() has said which
             except Exception as e:  # noqa: BLE001
                 self.skip(self.games[game_id].name or game_id, e)
                 self.state["searched"][game_id] = int(time.time())  # again after the interval, not every round
@@ -526,7 +577,7 @@ class Hunter:
         return text
 
     async def follow_grabs(self):
-        """Ask the download client how the sent releases are doing.
+        """Ask the download clients how the sent releases are doing.
 
         Failed: the next release gets its turn at once. Downloaded: the library is asked to
         scan and is read again; if the update is still not there after the waiting time, the
@@ -536,11 +587,11 @@ class Hunter:
         pending = [i for i in self.state["items"].values() if i.get("grab")]
         if not pending:
             return
-        try:
-            states = await clients.download_states(self.session)
-        except clients.ServiceError as e:
-            self.service("downloader", False, str(e))
-            states = {}
+        known, errors = await downloads.states(self.session)
+        for client in config.providers("DOWNLOAD_CLIENTS"):
+            if client["id"] in errors:
+                self.provider("DOWNLOAD_CLIENTS", client, False, errors[client["id"]])
+        states = (known, errors)
         now, wait = time.time(), config.GRAB_WAIT_MINUTES * 60
         waited = f"{config.GRAB_WAIT_MINUTES} minutes" if wait < 7200 else f"{config.GRAB_WAIT_MINUTES // 60} hours"
         self.tell_later, self.dropped, self.finished = [], False, False
@@ -559,13 +610,22 @@ class Hunter:
             await self.sync_library()
         for text in tell:
             await self.tell(text)
-        if dropped and self.state["services"].get("downloader", {}).get("ok", True):
+        if dropped:
             await self.auto_grab()
 
     def follow(self, item, states, now, wait, waited):
         """One sent release: what the download client says about it, and what follows."""
         grab = item["grab"]
-        known = states.get(grab.get("client_id")) if grab.get("client_id") else None
+        answers, errors = states
+        if grab.get("client"):
+            if grab["client"] in errors:
+                return  # its client did not answer: nothing is concluded from that
+            known = answers.get(grab["client"], {}).get(grab.get("client_id"))
+        else:
+            # Sent by a version that had one download client: whichever client knows the id.
+            known = next((a[grab.get("client_id")] for a in answers.values() if grab.get("client_id") in a), None)
+            if known is None and errors:
+                return
         state = (known or {}).get("state")
         grab["percent"] = (known or {}).get("percent")
         if state == "failed":
@@ -603,16 +663,13 @@ class Hunter:
             self.save()
 
     async def tell(self, text):
-        """A notification: Telegram if it is set up, and whatever else is configured."""
-        if config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID:
+        """A notification through every connection that is switched on."""
+        for connection in config.connections():
             try:
-                await clients.telegram(self.session, "NSWHunter\n" + text)
-                self.service("telegram", True, "last message sent")
+                await notify.send(self.session, connection, text)
+                self.provider("CONNECTIONS", connection, True, "last message sent")
             except clients.ServiceError as e:
-                self.service("telegram", False, str(e))
-        else:
-            self.state["services"].pop("telegram", None)
-        await self.notify("NSWHunter", text)
+                self.provider("CONNECTIONS", connection, False, str(e))
 
     def automatic(self, item):
         """The candidate that may go out without a click, or None."""
@@ -633,17 +690,22 @@ class Hunter:
         candidate = next((c for c in listed if c["guid"] == guid), None)
         if candidate is None:
             raise clients.ServiceError("This release is no longer in the list")
+        candidate = {**candidate, "source": candidate.get("source") or self.legacy_source()}
         try:
-            client_id = await clients.send(self.session, candidate)
+            client, client_id = await downloads.send(self.session, candidate)
         except clients.ServiceError:
-            if config.DOWNLOAD_CLIENT != "prowlarr":
+            source = indexers.by_id(candidate["source"])
+            chosen = config.client_for(candidate.get("protocol") or "usenet", source["type"] if source else "")
+            if not chosen or chosen["type"] != "prowlarr":
                 raise
             # Prowlarr only grabs what it found in the last half hour: search again, try once more.
             await self.search_game(item["game_id"])
-            client_id = await clients.send(self.session, candidate)
+            client, client_id = await downloads.send(self.session, candidate)
+        logs.debug(f"Handed to {client['name']}: {candidate['title']} (id {client_id})")
         item["grab"] = {"guid": guid, "title": candidate["title"], "at": int(time.time()), "auto": auto,
                         "local_version": item.get("local_version", 0),
-                        "dlc_missing": item.get("dlc_missing", 0), "client_id": client_id, "state": "sent"}
+                        "dlc_missing": item.get("dlc_missing", 0), "state": "sent",
+                        "client": client["id"], "client_name": client["name"], "client_id": client_id}
         item["ask"] = None  # a question about it in Telegram is answered by this
         item.setdefault("sent", [])
         if guid not in item["sent"]:
@@ -670,7 +732,6 @@ class Hunter:
                 await self.grab(item["key"], candidate["guid"], auto=True)
                 sent += 1
             except clients.ServiceError as e:
-                self.service("downloader", False, str(e))
                 self.event(f"Sending failed: {candidate['title']}: {e}", "error")
                 break
             except Exception as e:  # noqa: BLE001
@@ -739,13 +800,19 @@ class Hunter:
 
     # ------------------------------------------------------------ choosing in Telegram
 
+    def asker(self):
+        """The Telegram connection that puts the choices to the user, or None."""
+        return next((c for c in config.connections() if c["type"] == "telegram" and c.get("ask")
+                     and c.get("bot_token") and c.get("chat_id")), None)
+
     def asking(self):
-        return bool(config.TELEGRAM_ASK and config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID)
+        return self.asker() is not None
 
     async def ask(self):
         """One message per item that awaits a choice, with buttons to download or reject its
         best release from Telegram. Every release is asked about once; at most MAX_ASKS
         messages per round, the highest scores first, the rest in the next rounds."""
+        connection = self.asker()
         waiting = [i for i in self.state["items"].values()
                    if self.awaits(i) and i.get("asked") != i["candidates"][0]["guid"]]
         waiting.sort(key=lambda i: -i["candidates"][0].get("score", 0))
@@ -755,25 +822,26 @@ class Hunter:
             best = item["candidates"][0]
             facts = [f"{best['size'] / 2**20:.0f} MB" if best.get("size") else "", best.get("indexer") or "",
                      (best.get("published") or "")[:10]]
-            text = "\n".join(["NSWHunter", self.label(item), f"{best.get('score', 0)}/10 · {best['title']}",
+            text = "\n".join([self.label(item), f"{best.get('score', 0)}/10 · {best['title']}",
                               " · ".join(f for f in facts if f), "; ".join(best.get("reasons") or [])])
             token = secrets.token_hex(6)
             try:
-                message_id = await clients.telegram(self.session, text, buttons=[
+                message_id = await notify.send(self.session, connection, text, buttons=[
                     ("Download", "d:" + token), ("Reject", "r:" + token)])
-                self.service("telegram", True, "last message sent")
+                self.provider("CONNECTIONS", connection, True, "last message sent")
             except clients.ServiceError as e:
-                self.service("telegram", False, str(e))
+                self.provider("CONNECTIONS", connection, False, str(e))
                 return
             item["asked"] = best["guid"]
-            item["ask"] = {"token": token, "guid": best["guid"], "message_id": message_id, "text": text}
+            item["ask"] = {"token": token, "guid": best["guid"], "message_id": message_id,
+                           "text": "NSWHunter\n" + text}
 
     async def telegram_answers(self, wait=50):
         """Wait for a press on a button under one of the questions in Telegram and act on it.
         False if no question is open: then Telegram is not asked anything."""
         if not self.asking() or not any(i.get("ask") for i in self.state["items"].values()):
             return False
-        updates = await clients.telegram_call(self.session, "getUpdates", {
+        updates = await notify.telegram_call(self.session, self.asker(), "getUpdates", {
             "offset": self.state.get("telegram_offset", 0), "timeout": wait,
             "allowed_updates": ["callback_query"]}, wait=wait)
         for update in updates if isinstance(updates, list) else []:
@@ -789,9 +857,11 @@ class Hunter:
     async def pressed(self, query):
         """A press on Download or Reject under a question. Only the chat that is set up may
         decide: a press from anywhere else is not even answered."""
+        connection = self.asker()
         chat = (query.get("message") or {}).get("chat") or {}
-        mine = str(config.TELEGRAM_CHAT_ID)
-        if str(chat.get("id")) != mine and "@" + str(chat.get("username") or "").lower() != mine.lower():
+        mine = str(connection["chat_id"]) if connection else ""
+        if not connection or (str(chat.get("id")) != mine
+                              and "@" + str(chat.get("username") or "").lower() != mine.lower()):
             return
         action, _, token = str(query.get("data") or "").partition(":")
         item = next((i for i in self.state["items"].values()
@@ -799,7 +869,7 @@ class Hunter:
 
         async def answer(text):
             try:
-                await clients.telegram_call(self.session, "answerCallbackQuery", {
+                await notify.telegram_call(self.session, connection, "answerCallbackQuery", {
                     "callback_query_id": query.get("id"), "text": text[:190]})
             except clients.ServiceError:
                 pass  # the choice was made; only the small confirmation is lost
@@ -826,7 +896,7 @@ class Hunter:
         await answer(outcome)
         try:
             # Without buttons in the call the buttons disappear: the question is settled.
-            await clients.telegram_call(self.session, "editMessageText", {
+            await notify.telegram_call(self.session, connection, "editMessageText", {
                 "chat_id": chat.get("id"), "message_id": ask["message_id"], "text": ask["text"] + "\n\n" + outcome})
         except clients.ServiceError:
             pass
@@ -834,16 +904,21 @@ class Hunter:
     # ------------------------------------------------------------ one round
 
     async def check_services(self):
-        for name, test in (("prowlarr", clients.prowlarr_status), ("downloader", clients.downloader_status)):
+        """Ask every indexer and download client whether it answers."""
+        self.forget_services()
+        for indexer in config.indexers():
             try:
-                self.service(name, True, str(await test(self.session)))
+                self.provider("INDEXERS", indexer, True, str(await indexers.status(self.session, indexer)))
+                if indexer["type"] == "prowlarr":
+                    for prowlarr_id, priority in (await indexers.priorities(self.session, indexer)).items():
+                        self.priorities[(indexer["id"], prowlarr_id)] = priority
             except clients.ServiceError as e:
-                self.service(name, False, str(e))
-        if self.state["services"]["prowlarr"]["ok"]:
+                self.provider("INDEXERS", indexer, False, str(e))  # sorting keeps the priorities it had
+        for client in config.download_clients():
             try:
-                self.priorities = await clients.prowlarr_priorities(self.session)
-            except clients.ServiceError:
-                pass  # sorting then falls back to equal priorities
+                self.provider("DOWNLOAD_CLIENTS", client, True, str(await downloads.status(self.session, client)))
+            except clients.ServiceError as e:
+                self.provider("DOWNLOAD_CLIENTS", client, False, str(e))
 
     async def test_connections(self):
         """Try every service with the current settings, right after they were saved."""
@@ -857,18 +932,21 @@ class Hunter:
                 self.service("slm", True, f"{len(await clients.library(self.session))} games")
             except clients.ServiceError as e:
                 self.service("slm", False, str(e))
-        if config.PROWLARR_URL:
-            try:
-                self.service("prowlarr", True, str(await clients.prowlarr_status(self.session)))
-            except clients.ServiceError as e:
-                self.service("prowlarr", False, str(e))
-        if not problems or config.DOWNLOAD_CLIENT == "prowlarr":
-            try:
-                self.service("downloader", True, str(await clients.downloader_status(self.session)))
-            except clients.ServiceError as e:
-                self.service("downloader", False, str(e))
+        await self.check_services()
         self.save()
         return self.state["services"]
+
+    def backups(self):
+        """The scheduled backup, when it is time, and the end of the old ones."""
+        try:
+            if backup.due():
+                self.event(f"Backup made: {backup.create('scheduled')}")
+            backup.prune()
+            self.state["services"].pop("backup", None)
+        except (backup.BackupError, OSError) as e:
+            if self.state["services"].get("backup", {}).get("text") != str(e):
+                self.event(f"Backup failed: {e}", "error")
+            self.service("backup", False, str(e))
 
     async def round(self):
         """One round. A round that breaks is not only written to the log: the panel, the
@@ -901,13 +979,13 @@ class Hunter:
                 await self.check_services()
                 self.status["phase"] = "reading the library"
                 await self.refresh_versions()
-                if await self.sync_library() and self.state["services"]["prowlarr"]["ok"]:
+                if await self.sync_library() and self.working("INDEXERS"):
                     self.status["phase"] = "checking new posts"
                     await self.feed()
                     await self.backlog()
                 self.status["phase"] = "following the downloads"
                 await self.follow_grabs()
-                if self.state["services"]["downloader"]["ok"]:
+                if self.working("DOWNLOAD_CLIENTS"):
                     self.status["phase"] = "sending"
                     await self.auto_grab()
                 now_waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
@@ -915,6 +993,7 @@ class Hunter:
                     await self.ask()
                 elif now_waiting > waiting:
                     await self.tell(f"{now_waiting} updates or DLC await your choice")
+                self.backups()
             finally:
                 self.status.update(running=False, phase=None, last_run=int(time.time()))
                 self.save()
@@ -928,16 +1007,18 @@ class Hunter:
         self.save()
         return found
 
-    async def test(self, service, cfg):
-        """One Test button of the Configuration tab, with the values that are in the form."""
-        if service == "slm":
-            return f"{len(await clients.library(self.session, cfg))} games in the library"
-        if service == "prowlarr":
-            return await clients.prowlarr_status(self.session, cfg)
-        if service == "downloader":
-            return await clients.downloader_status(self.session, cfg)
-        if service == "telegram":
-            await clients.telegram(self.session, "NSWHunter\nThis is a test message.", cfg)
+    async def test(self, kind, entry):
+        """A Test button of the settings, with the values that are in the form. kind "slm": the
+        library, with `entry` the settings as they would be; else one indexer, download client
+        or connection."""
+        if kind == "slm":
+            return f"{len(await clients.library(self.session, entry))} games in the library"
+        if kind == "INDEXERS":
+            return await indexers.status(self.session, entry)
+        if kind == "DOWNLOAD_CLIENTS":
+            return await downloads.status(self.session, entry)
+        if kind == "CONNECTIONS":
+            await notify.send(self.session, entry, "This is a test message.")
             return "Test message sent"
         raise clients.ServiceError("Unknown service")
 
@@ -988,13 +1069,15 @@ class Hunter:
             "status": self.status,
             "library": self.state["library"],
             "services": self.state["services"],
+            "providers": {kind: [{"id": e["id"], "name": e["name"], "type": e["type"], "enabled": e["enabled"]}
+                                 for e in config.providers(kind)] for kind in config.KINDS},
             "items": items,
             "arrived": [a for a in self.state.get("arrived", []) if a["at"] > time.time() - ARRIVED_DAYS * 86400],
             "settings": {
                 "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
-                "client": config.DOWNLOAD_CLIENT, "category": config.DOWNLOAD_CATEGORY,
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
                 "wait_minutes": config.GRAB_WAIT_MINUTES, "asking": self.asking(),
             },
             "configured": not config.problems(),
+            "missing": config.problems(),
         }

@@ -2,6 +2,36 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.0.0] - 2026-11-17
+
+Version 3 because the panel has a new layout and the settings a new shape. Your settings are taken over at the first start: the one Prowlarr, the download client and Telegram become the first entries of the new lists. Take the new [docker-compose.yml](docker-compose.yml) over in your stack: it has a second volume, `/backup`.
+
+### Added
+
+- **A layout like Sonarr and Radarr:** a menu on the left with Games, Wanted, Settings (Media Management, Indexers, Download Clients, Connect, General, UI) and System (Status, Log).
+- **Games:** every game of your library with the version you have, the latest, the DLC and the size. It can be filtered, searched and sorted; a game that misses something leads to its card on the Wanted page.
+- **Wanted** is what the Updates tab was.
+- **Indexers:** next to Prowlarr, a Newznab (usenet) or Torznab (torrent) indexer can be added and is then asked directly. Several indexers are asked at once; one that does not answer does not cost the releases of the others.
+- **Download clients:** qBittorrent, Transmission and uTorrent, next to NZBGet, SABnzbd and the download client of Prowlarr. Several can be added; a usenet release goes to the first usenet client that is switched on, a torrent to the first torrent client.
+- **Torrents.** With a torrent client switched on, torrents are searched too, shown with their seeders, sent as a torrent file or a magnet link, and followed like a usenet download. Without a torrent client nothing changes.
+- **Connect:** the library (Switch-library-manager-web) and the notifications: Telegram, Discord (a webhook) and Apprise. Several can be added; each gets every message.
+- **General > Logging:** the log level (info, debug, trace) and the size of a log file. The log is now also written to `/data/logs`.
+- **General > Backups:** a backup of the settings and the state every 7 days in `/backup`, removed after 28 days; both can be set. The page lists the backups, with Backup now, Download, Restore and Delete.
+- **UI:** light or dark, the format of dates and times, and relative dates on or off. Kept on the server, so every browser shows the same.
+- **System > Status:** what every service last answered. Indexers, download clients and connections are cards that say so too, and every one has a Test button.
+
+### Changed
+
+- **The first login.** The first start makes the user `admin` with a password it makes up and writes both to the log of the container, at every start until you have changed it. With that password the panel only lets you choose a password of your own (and another username if you want). The screen that asked to make a login is gone. A login you already have stays as it is.
+- A download client that does not answer is no longer concluded from: its downloads are left as they are instead of counting as not arrived after the waiting time.
+- The value `ja` for yes in an environment variable is no longer read; use `true`.
+- The first tile on the Wanted page counts the games that miss something. The number of games in the library is on the Games page.
+
+### Removed
+
+- The environment variables for the one Prowlarr, download client and Telegram are only read at the very first start, to make the first entries. After that the lists in the panel count.
+- `NOTIFY_URLS`: Apprise is a connection on the Connect page now. A value that is set becomes that connection at the first start.
+
 ## [2.0.0] - 2026-11-17
 
 Version 2 because the panel now always has a login, and the login of the browser (the pop-up) is gone. After the update the panel asks you to log in, or to make a login if you had no password. Take the new [docker-compose.yml](docker-compose.yml) over in your stack to get the hardened container.

@@ -6,44 +6,60 @@ import time
 import aiohttp
 import pytest
 from aiohttp import web
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.test_utils import TestServer
 
 import auth
 import clients
 import config
+import indexers
 import main
-from test_config import api, clean_settings  # noqa: F401  (the fixture puts the settings back)
-
-LOGIN = {"user": "hunter", "password": "correct horse"}
+from test_config import LOGIN, api, clean_settings  # noqa: F401  (the fixture puts the settings back)
 
 
-def test_first_visit_asks_to_make_a_login_and_shows_nothing_before():
+def test_first_login_with_the_made_up_password_can_only_choose_a_new_one():
     async def test(client):
+        config.PANEL_USER, config.PANEL_PASSWORD = "admin", ""
+        made_up = config.first_login()
         r = await client.get("/api/state")
-        assert r.status == 401 and await r.json() == {"ok": False, "error": "Login required", "login": True, "setup": True}
-        assert (await client.get("/api/settings")).status == 401
-        assert (await client.post("/api/sync", json={})).status == 401
+        assert r.status == 401 and await r.json() == {"ok": False, "error": "Login required", "login": True}
         # The page itself holds no data and is needed to show the login screen.
         page = await client.get("/")
-        assert page.status == 200 and "authform" in await page.text()
+        assert page.status == 200 and "authform" in await page.text() and made_up not in await page.text()
+        assert (await client.post("/api/login", json={"user": "admin", "password": made_up})).status == 200
+        assert (await (await client.get("/api/session")).json())["change"] is True
+        # Logged in, and still nothing works but choosing a password.
+        for path in ("/api/state", "/api/settings", "/api/log", "/api/games", "/api/backups"):
+            r = await client.get(path)
+            assert r.status == 403 and (await r.json())["change"] is True
+        assert (await client.post("/api/sync", json={})).status == 403
         for wrong, why in (({"user": "hunter", "password": "short"}, "at least 8"),
                            ({"user": "", "password": "correct horse"}, "name"),
-                           ({"user": "hunter", "password": ""}, "password")):
-            r = await client.post("/api/setup", json=wrong)
+                           ({"user": "hunter", "password": ""}, "password"),
+                           ({"user": "hunter", "password": made_up}, "another password")):
+            r = await client.post("/api/password", json=wrong)
             assert r.status == 400 and why in (await r.json())["error"]
-        assert (await client.post("/api/setup", json=LOGIN)).status == 200
-        assert (await client.get("/api/state")).status == 200
-        # A login can be made once.
-        assert (await client.post("/api/setup", json={"user": "eve", "password": "another one"})).status == 403
-        assert config.PANEL_USER == "hunter" and config.check_password("correct horse")
+        assert config.must_change_password()
+        assert (await client.post("/api/password", json=LOGIN)).status == 200
+        assert (await client.get("/api/state")).status == 200 and not config.must_change_password()
+        # The name was changed too, and the made-up password is worth nothing now.
+        assert config.PANEL_USER == "hunter" and not os.path.exists(config.INITIAL_PASSWORD_FILE)
+        await client.post("/api/logout", json={})
+        assert (await client.post("/api/login", json={"user": "admin", "password": made_up})).status == 401
+        assert (await client.post("/api/login", json=LOGIN)).status == 200
+    api(test, login=False)
+
+
+def test_choosing_a_password_needs_a_login():
+    async def test(client):
+        r = await client.post("/api/password", json={"user": "eve", "password": "taken over now"})
+        assert r.status == 401 and config.PANEL_USER == "hunter"
     api(test, login=False)
 
 
 def test_login_and_logout():
     async def test(client):
         await client.post("/api/logout", json={})
-        r = await client.get("/api/state")
-        assert r.status == 401 and (await r.json())["setup"] is False
+        assert (await client.get("/api/state")).status == 401
         for wrong in ({"user": "hunter", "password": "wrong horse"}, {"user": "eve", "password": "correct horse"}):
             r = await client.post("/api/login", json=wrong)
             assert r.status == 401 and (await r.json())["error"] == "Wrong username or password"
@@ -155,11 +171,12 @@ def test_an_answer_that_is_too_big_is_refused():
         app.add_routes([web.get("/api/v1/system/status", endless)])
         server = TestServer(app)
         await server.start_server()
-        cfg = config.overlay({"PROWLARR_URL": str(server.make_url("")).rstrip("/"), "PROWLARR_API_KEY": "x"})
+        prowlarr = {"id": "px", "type": "prowlarr", "name": "Prowlarr", "url": str(server.make_url("")).rstrip("/"),
+                    "api_key": "x", "categories": ["1000"]}
         try:
             async with aiohttp.ClientSession() as session:
                 with pytest.raises(clients.ServiceError, match="Prowlarr: the answer is bigger than 2 MB"):
-                    await clients.prowlarr_status(session, cfg)
+                    await indexers.status(session, prowlarr)
         finally:
             await server.close()
     asyncio.run(test())

@@ -1,6 +1,7 @@
 """A whole round against stand-ins for the library, Prowlarr and NZBGet."""
 import asyncio
 import os
+import shutil
 import time
 
 import aiohttp
@@ -17,6 +18,25 @@ ALAN, ALAN_DLC, HADES, SCARLET, HOLLOW, NARUTO = (
 EA_DUTCH, EA_SPANISH = "0100FFFF0000F001", "0100FFFF0000F002"
 
 
+def providers(base, **settings):
+    """The indexer, the download client and the connection the tests work with, as entries of
+    the settings. Settings in the old flat style choose between them."""
+    token, chat = settings.get("TELEGRAM_BOT_TOKEN", ""), settings.get("TELEGRAM_CHAT_ID", "")
+    nzbget = {"id": "nz", "type": "nzbget", "name": "NZBGet", "enabled": True, "url": base,
+              "username": "nzbget", "password": "tegen", "category": "games"}
+    own = {"id": "pc", "type": "prowlarr", "name": "The download client of Prowlarr", "enabled": True}
+    return {
+        "INDEXERS": [{"id": "px", "type": "prowlarr", "name": "Prowlarr", "enabled": True, "url": base,
+                      "api_key": settings.get("PROWLARR_API_KEY", "prowlarr_test"), "categories": ["1000"]}],
+        "DOWNLOAD_CLIENTS": [own if settings.get("DOWNLOAD_CLIENT") == "prowlarr" else nzbget],
+        "CONNECTIONS": [{"id": "tg", "type": "telegram", "name": "Telegram", "enabled": True, "bot_token": token,
+                         "chat_id": chat, "ask": bool(settings.get("TELEGRAM_ASK"))}] if token else [],
+    }
+
+
+OLD_STYLE = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ASK", "DOWNLOAD_CLIENT", "PROWLARR_API_KEY")
+
+
 def run(test, **settings):
     """Start the fake services, point the config at them, and run `test(hunter, fakes)`."""
     async def body():
@@ -25,19 +45,20 @@ def run(test, **settings):
         await server.start_server()
         base = str(server.make_url("")).rstrip("/")
         values = {
-            "SLM_URL": base, "SLM_API_KEY": "slm_test", "PROWLARR_URL": base,
-            "PROWLARR_API_KEY": "prowlarr_test", "NZBGET_URL": base, "NZBGET_USER": "nzbget", "NZBGET_PASSWORD": "tegen",
-            "DOWNLOAD_CLIENT": "nzbget",
-            "DOWNLOAD_CATEGORY": "games", "TITLEDB_VERSIONS_URL": base + "/versions.json",
+            "SLM_URL": base, "SLM_API_KEY": "slm_test", "TITLEDB_VERSIONS_URL": base + "/versions.json",
             "AUTO_DOWNLOAD": "off", "AUTO_BUNDLES": False, "INCLUDE_DLC": False,
             "SEARCH_DELAY_SECONDS": 0, "BACKLOG_PER_RUN": 0, "SEARCH_INTERVAL_HOURS": 24,
             "SEARCH_BY_TITLE_ID": False, "GRAB_WAIT_MINUTES": 60, "WATCH_SECONDS": 120,
-            "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "", "TELEGRAM_API_URL": base,
-            "TELEGRAM_ASK": False, **settings}
+            "TELEGRAM_API_URL": base, "BACKUP_FOLDER": "backups", "PROWLARR_INDEXER_IDS": [],
+            **providers(base, **settings), **{k: v for k, v in settings.items() if k not in OLD_STYLE}}
+        for kind in config.KINDS:  # "BASE" in an address of an entry: the fake services
+            values[kind] = [{k: v.replace("BASE", base) if isinstance(v, str) else v for k, v in e.items()}
+                            for e in values[kind]]
         saved = {k: getattr(config, k) for k in values}
         for path in (config.STATE_FILE, config.VERSIONS_FILE):
             if os.path.exists(path):
                 os.remove(path)
+        shutil.rmtree(os.path.join(config.DATA_DIR, "backups"), ignore_errors=True)
         try:
             for k, v in values.items():
                 setattr(config, k, v)
@@ -170,15 +191,18 @@ def test_every_game_is_searched_once_per_interval():
 
 def test_test_buttons_use_the_values_of_the_form():
     async def test(hunter, fakes):
-        good = config.overlay({})
-        assert await hunter.test("slm", good) == "8 games in the library"
-        assert await hunter.test("prowlarr", good) == "Prowlarr 2.0.0, 1 usenet indexer"
-        assert await hunter.test("downloader", good) == "NZBGet 24.5"
-        assert await hunter.test("downloader", config.overlay({"DOWNLOAD_CLIENT": "prowlarr"})) == "via Prowlarr: NZBGet"
-        for service, values in (("slm", {"SLM_API_KEY": "slm_wrong"}), ("prowlarr", {"PROWLARR_API_KEY": "x"}),
-                                ("downloader", {"NZBGET_PASSWORD": "x"}), ("slm", {"SLM_URL": ""})):
+        prowlarr, nzbget = config.INDEXERS[0], config.DOWNLOAD_CLIENTS[0]
+        assert await hunter.test("slm", config.overlay({})) == "8 games in the library"
+        # A torrent indexer is counted, and said not to be searched without a torrent client.
+        assert await hunter.test("INDEXERS", prowlarr) == (
+            "Prowlarr 2.0.0, 1 usenet indexer, 1 torrent indexer (not searched: no torrent client)")
+        assert await hunter.test("DOWNLOAD_CLIENTS", nzbget) == "NZBGet 24.5"
+        own = {"id": "pc", "type": "prowlarr", "name": "The download client of Prowlarr", "enabled": True}
+        assert await hunter.test("DOWNLOAD_CLIENTS", own) == "via Prowlarr: NZBGet"
+        for kind, entry in (("slm", config.overlay({"SLM_API_KEY": "slm_wrong"})), ("slm", config.overlay({"SLM_URL": ""})),
+                            ("INDEXERS", {**prowlarr, "api_key": "x"}), ("DOWNLOAD_CLIENTS", {**nzbget, "password": "x"})):
             with pytest.raises(hunter_module.clients.ServiceError):
-                await hunter.test(service, config.overlay(values))
+                await hunter.test(kind, entry)
         # Testing changed nothing.
         assert config.SLM_API_KEY == "slm_test" and not os.path.exists(config.SETTINGS_FILE)
     run(test)
@@ -201,7 +225,7 @@ def test_same_release_on_two_indexers_keeps_the_one_that_goes_first():
         await hunter.round()
         item = hunter.state["items"][HADES]
         kept = item["candidates"][0]
-        hunter.priorities = {1: 10, 7: 3, 8: 40}
+        hunter.priorities = {("px", 1): 10, ("px", 7): 3, ("px", 8): 40}
         twin = {**kept, "guid": "other-indexer", "indexerId": 7, "indexer": "Better"}
         assert hunter.offer(item, twin) is False  # not a new candidate, it replaces its twin
         assert [(c["guid"], c["priority"]) for c in item["candidates"]] == [("other-indexer", 3)]
@@ -401,14 +425,13 @@ def test_dlc_pack_is_listed_once_per_game():
 
 def test_telegram_test_button():
     async def test(hunter, fakes):
-        good = config.overlay({"TELEGRAM_BOT_TOKEN": "TESTTOKEN", "TELEGRAM_CHAT_ID": "42"})
-        assert await hunter.test("telegram", good) == "Test message sent"
+        good = {"id": "tg", "type": "telegram", "name": "Telegram", "enabled": True, "bot_token": "TESTTOKEN", "chat_id": "42"}
+        assert await hunter.test("CONNECTIONS", good) == "Test message sent"
         assert fakes["telegram"] == ["NSWHunter\nThis is a test message."]
-        for values, expected in (({"TELEGRAM_BOT_TOKEN": "WRONGTOKEN", "TELEGRAM_CHAT_ID": "42"}, "bot token is wrong"),
-                                 ({"TELEGRAM_BOT_TOKEN": "TESTTOKEN", "TELEGRAM_CHAT_ID": "7"}, "chat not found"),
-                                 ({"TELEGRAM_BOT_TOKEN": "TESTTOKEN"}, "fill in the bot token and the chat ID")):
+        for values, expected in (({"bot_token": "WRONGTOKEN"}, "bot token is wrong"), ({"chat_id": "7"}, "chat not found"),
+                                 ({"chat_id": ""}, "fill in the bot token and the chat ID")):
             with pytest.raises(hunter_module.clients.ServiceError) as error:
-                await hunter.test("telegram", config.overlay(values))
+                await hunter.test("CONNECTIONS", {**good, **values})
             assert expected in str(error.value) and "TOKEN" not in str(error.value)
     run(test)
 
@@ -434,12 +457,15 @@ def test_state_survives_a_restart():
 
 
 def test_missing_settings_are_listed():
-    saved = config.PROWLARR_API_KEY, config.SLM_URL
+    saved = config.SLM_URL, config.INDEXERS, config.DOWNLOAD_CLIENTS
     try:
-        config.PROWLARR_API_KEY, config.SLM_URL = "", ""
-        assert len(config.problems()) >= 2
+        config.SLM_URL, config.INDEXERS, config.DOWNLOAD_CLIENTS = "", [], []
+        assert len(config.problems()) == 3
+        # An entry that is switched off does not count.
+        config.INDEXERS = [{"id": "px", "type": "prowlarr", "name": "Prowlarr", "enabled": False}]
+        assert len(config.problems()) == 3
     finally:
-        config.PROWLARR_API_KEY, config.SLM_URL = saved
+        config.SLM_URL, config.INDEXERS, config.DOWNLOAD_CLIENTS = saved
 
 
 def test_state_of_an_older_version_does_not_stop_the_round():
