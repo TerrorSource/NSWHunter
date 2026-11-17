@@ -676,8 +676,11 @@ def add_root_folder(path, library_path=""):
     names it (the same, unless the two containers mount it under different paths)."""
     path = clean_folder("Path", path)
     library_path = clean_folder("Path in Switch-library-manager-web", library_path or path)
-    if path == "/" or path == DATA_DIR or path.startswith(DATA_DIR.rstrip("/") + "/"):
-        raise ValueError(f"{path} cannot be a root folder: it is not where your games are")
+    # Not the folders NSWHunter keeps its own files in. A library that is a volume somewhere under
+    # the data folder is fine: many setups have everything under /data.
+    own = [DATA_DIR.rstrip("/") + "/" + name for name in ("logs", "covers", "certs", "backups")] + [os.path.join(DATA_DIR, BACKUP_FOLDER)]
+    if path in ("/", DATA_DIR.rstrip("/")) or any(path == folder or path.startswith(folder.rstrip("/") + "/") for folder in own):
+        raise ValueError(f"{path} cannot be a root folder: NSWHunter keeps its own files there. Choose the folder of your library.")
     if not os.path.isdir(path):
         raise ValueError(f"{path} is not a folder in this container. Add the folder of your library as a volume of the container first.")
     if not os.access(path, os.W_OK):

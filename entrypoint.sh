@@ -18,14 +18,25 @@ case "$PUID$PGID" in
 esac
 
 if [ "$(id -u)" = "0" ]; then
-  for dir in /data /backup; do
-    [ -d "$dir" ] || continue
-    owner="$(stat -c '%u:%g' "$dir")"
+  # /data: only the folder itself and what NSWHunter keeps in it, by name. Never everything under
+  # it: your library or your downloads may be volumes somewhere inside /data, and their owner is
+  # not for NSWHunter to change.
+  owner="$(stat -c '%u:%g' /data 2>/dev/null || echo none)"
+  if [ "$owner" != "none" ] && [ "$owner" != "$PUID:$PGID" ]; then
+    echo "[nswhunter] Changing the owner of /data to $PUID:$PGID (was $owner)."
+    chown "$PUID:$PGID" /data || echo "[nswhunter] Warning: could not change the owner of /data." >&2
+    for name in settings.json settings.json.tmp state.json state.json.tmp sessions.json sessions.json.tmp \
+                initial-password titledb-versions.json logs covers certs backups; do
+      [ -e "/data/$name" ] && { chown -R "$PUID:$PGID" "/data/$name" || true; }
+    done
+  fi
+  if [ -d /backup ]; then
+    owner="$(stat -c '%u:%g' /backup)"
     if [ "$owner" != "$PUID:$PGID" ]; then
-      echo "[nswhunter] Changing the owner of $dir to $PUID:$PGID (was $owner)."
-      chown -R "$PUID:$PGID" "$dir" || echo "[nswhunter] Warning: could not change the owner of $dir." >&2
+      echo "[nswhunter] Changing the owner of /backup to $PUID:$PGID (was $owner)."
+      chown -R "$PUID:$PGID" /backup || echo "[nswhunter] Warning: could not change the owner of /backup." >&2
     fi
-  done
+  fi
   exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups --inh-caps=-all -- "$@"
 fi
 

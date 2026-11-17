@@ -1640,6 +1640,8 @@ const FORMS = {
       {name: "UI_TIME_FORMAT", label: "Time Format", options: [["browser", "As the browser does"], ["24", "17:00/17:30"], ["12", "5:00 pm/5:30 pm"]]},
       {name: "UI_RELATIVE_DATES", label: "Show Relative Dates", checkbox: true, help: "Show relative (3 hours ago) or absolute dates"}]}],
 };
+// A field that is no part of a login: a password manager should not fill it in, nor offer to.
+const NO_LOGIN = {autocomplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "true", "data-form-type": "other"};
 // What the window of an entry held when the File Browser took its place.
 const held = {editing: null, typed: {}};
 document.addEventListener("click", e => {
@@ -1656,7 +1658,7 @@ function control(f, values, secrets, where) {
     return h("div", {class: "row"},
       h("input", {id, name: f.name, type: "password", autocomplete: f.current ? "current-password" : "new-password", disabled: wipe,
                   // A key of a service is no login: a password manager should not fill it in or offer to save it.
-                  ...(f.name.startsWith("PANEL_") || f.local ? {} : {"data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "true", "data-form-type": "other"}),
+                  ...(f.name.startsWith("PANEL_") || f.local ? {} : NO_LOGIN),
                   placeholder: wipe ? "will be cleared on save" : f.local ? "" : set ? "set; leave empty to keep it" : "not set"}),
       // A key can be emptied; the password of the panel can only be replaced.
       set && !f.required ? h("button", {type: "button", class: "small", onclick: () => { wipe ? clearing.delete(where + f.name) : clearing.add(where + f.name); rerender(); }},
@@ -1664,7 +1666,8 @@ function control(f, values, secrets, where) {
   }
   if (f.number) return h("div", {class: "row"}, h("input", {id, name: f.name, type: "number", min: "1", value: values[f.name], inputmode: "numeric"}), h("span", {class: "line"}, f.unit || ""));
   const value = Array.isArray(values[f.name]) ? values[f.name].join(",") : values[f.name];
-  const input = h("input", {id, name: f.name, type: "text", value: value === undefined || value === null ? "" : value, placeholder: f.placeholder || "", spellcheck: "false"});
+  const input = h("input", {id, name: f.name, type: "text", value: value === undefined || value === null ? "" : value, placeholder: f.placeholder || "", spellcheck: "false",
+                            ...(f.name === "PANEL_USER" ? {autocomplete: "username"} : NO_LOGIN)});
   if (!f.browse) return input;
   // A folder or a file of the container: the File Browser can fill it in.
   const from = () => (input.value.startsWith("/") ? input.value : input.value ? "/data/" + input.value : "/");
@@ -1772,8 +1775,8 @@ function addRoot() {
 function rootDialog(values, wrong) {
   editing = null; viewing = null;
   const says = h("div", {class: "testresult bad", role: "alert"}, wrong || "");
-  const path = h("input", {type: "text", id: "root-path", value: values.path, placeholder: "/games/switch", spellcheck: "false"});
-  const theirs = h("input", {type: "text", id: "root-theirs", value: values.theirs, placeholder: "the same", spellcheck: "false"});
+  const path = h("input", {type: "text", id: "root-path", value: values.path, placeholder: "/games/switch", spellcheck: "false", ...NO_LOGIN});
+  const theirs = h("input", {type: "text", id: "root-theirs", value: values.theirs, placeholder: "the same", spellcheck: "false", ...NO_LOGIN});
   const go = async () => {
     says.textContent = "";
     const failed = await changeRoots({action: "add", path: path.value, library_path: theirs.value});
@@ -1802,7 +1805,7 @@ function browseFor(start, done, files) {
   browsing = {path: start || "/", files: Boolean(files), done, listing: null, timer: null};
   const b = browsing;
   const box = h("input", {type: "text", id: "browse-path", value: b.path, placeholder: "Start typing or select a path below",
-    spellcheck: "false", autocomplete: "off", "aria-label": "Path",
+    spellcheck: "false", "aria-label": "Path", ...NO_LOGIN,
     oninput: e => { b.path = e.target.value; clearTimeout(b.timer); b.timer = setTimeout(loadBrowser, 250); },
     onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); closeBrowser(true); } }});
   put($("modal"), dialog("File Browser", [box, h("div", {id: "browse-list", class: "browse"}, h("div", {class: "line"}, "Loading…"))],

@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.10.3] - 2026-11-17
+
+### Fixed
+
+- **A library that is a volume somewhere under `/data` can be a root folder.** Many setups have everything under `/data` (`/data/media/...`, `/data/usenet/...`), and with the same paths in every container nothing has to be translated. It was refused with "it is not where your games are". Only the folders NSWHunter keeps its own files in are still refused: `/data` itself, and its logs, covers, certificates and backups.
+- **The start of the container no longer changes the owner of everything under `/data`.** When it starts as root and `/data` belongs to another user, it now changes the owner of `/data` itself and of NSWHunter's own files in it, by name. A library or a download folder mounted inside `/data` keeps its owner.
+
+### Changed
+
+- Fields for paths and search terms ask password managers to leave them alone: they are no part of a login.
+
 ## [3.10.2] - 2026-11-17
 
 ### Security
