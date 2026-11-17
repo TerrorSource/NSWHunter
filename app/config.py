@@ -631,7 +631,7 @@ def clean_folder(name, value):
     """The whole path of a folder, without a slash at the end."""
     value = clean_text(name, value)
     if not value.startswith("/") or ".." in value.split("/") or "\\" in value:
-        raise ValueError(f"{name}: fill in the whole path of a folder, like /media/games/switch")
+        raise ValueError(f"{name}: fill in the whole path of a folder, like /games/switch")
     return value.rstrip("/") or "/"
 
 

@@ -1718,7 +1718,7 @@ function renderRoots() {
 function rootDialog() {
   editing = null; viewing = null;
   const says = h("div", {class: "testresult bad", role: "alert"});
-  const path = h("input", {type: "text", id: "root-path", placeholder: "/media/games/switch", spellcheck: "false"});
+  const path = h("input", {type: "text", id: "root-path", placeholder: "/games/switch", spellcheck: "false"});
   const theirs = h("input", {type: "text", id: "root-theirs", placeholder: "the same", spellcheck: "false"});
   const go = async () => {
     says.textContent = "";

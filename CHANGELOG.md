@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.8.1] - 2026-11-17
+
+### Changed
+
+- The example path of a root folder in the panel is a neutral one.
+
 ## [3.8.0] - 2026-11-17
 
 ### Added
