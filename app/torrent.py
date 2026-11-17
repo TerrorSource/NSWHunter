@@ -42,8 +42,20 @@ def _cookies(response):
     return "; ".join(pair for pair in pairs if "=" in pair)
 
 
-def _state(state, percent):
-    return {"state": state, "percent": 100 if state == "done" else percent}
+def _state(state, percent, path=None):
+    # Where it is only counts once it is complete: before that a client may name a folder for
+    # unfinished downloads, or the place it will move to later.
+    known = state == "done" and isinstance(path, str) and path
+    return {"state": state, "percent": 100 if state == "done" else percent, "path": path if known else None}
+
+
+def _inside(folder, name):
+    """The path of `name` in `folder`, written as the client writes its paths: with backslashes
+    if that is what the folder has. None if one of the two is not known."""
+    if not isinstance(folder, str) or not isinstance(name, str) or not folder or not name:
+        return None
+    separator = "\\" if "\\" in folder and "/" not in folder else "/"
+    return folder.rstrip("/\\") + separator + name
 
 
 # ---------------------------------------------------------------- hashes
@@ -226,7 +238,10 @@ async def _qbittorrent_states(session, client, only=None):
             state = "downloading"
             if name.startswith("checking"):
                 percent = None  # while checking, the progress is that of the check
-        found[str(torrent.get("hash", "")).lower()] = _state(state, percent)
+        # content_path: the file of a torrent with one file, the folder of one with more. Older
+        # versions do not have it; there the name in the save path is the same place.
+        path = torrent.get("content_path") or _inside(torrent.get("save_path"), torrent.get("name"))
+        found[str(torrent.get("hash", "")).lower()] = _state(state, percent, path)
     found.pop("", None)
     return found
 
@@ -314,7 +329,7 @@ async def _transmission_add(session, client, kind, content):
 
 
 async def _transmission_states(session, client):
-    fields = ["hashString", "status", "error", "percentDone", "leftUntilDone", "sizeWhenDone"]
+    fields = ["hashString", "status", "error", "percentDone", "leftUntilDone", "sizeWhenDone", "downloadDir", "name"]
     answer = await _transmission(session, client, "torrent-get", {"fields": fields})
     found = {}
     for torrent in answer.get("torrents") or []:
@@ -327,7 +342,10 @@ async def _transmission_states(session, client):
             state = "done"
         else:
             state = "downloading"
-        found[str(torrent.get("hash_string", "")).lower()] = _state(state, _percent(torrent.get("percent_done"), 1))
+        # downloadDir is the folder the torrent was put in; the name is its file or folder there.
+        path = _inside(torrent.get("download_dir"), torrent.get("name"))
+        found[str(torrent.get("hash_string", "")).lower()] = _state(
+            state, _percent(torrent.get("percent_done"), 1), path)
     found.pop("", None)
     return found
 
@@ -416,8 +434,8 @@ async def _utorrent_states(session, client):
     answer = await _utorrent(session, client, [("list", "1")])
     found = {}
     for row in answer.get("torrents") or []:
-        # A torrent is a row without names: 0 hash, 1 status (bits), 4 progress in per mille,
-        # 18 bytes still to go.
+        # A torrent is a row without names: 0 hash, 1 status (bits), 2 name, 4 progress in per
+        # mille, 18 bytes still to go, 26 save path (not in every version).
         if not isinstance(row, list) or len(row) < 5 or not isinstance(row[1], int):
             continue
         complete = row[4] == 1000 and (len(row) < 19 or row[18] == 0)
@@ -427,7 +445,13 @@ async def _utorrent_states(session, client):
             state = "done"
         else:
             state = "downloading"
-        found[str(row[0]).lower()] = _state(state, _percent(row[4], 1000))
+        # The save path of a torrent with several files is its own folder, which carries its
+        # name. A path that does not end in the name is taken as the folder the torrent's one
+        # file is in. uTorrent documents neither: this is how other tools read it.
+        path, name = row[26] if len(row) > 26 else None, row[2]
+        if isinstance(path, str) and isinstance(name, str) and re.split(r"[/\\]", path.rstrip("/\\"))[-1] != name:
+            path = _inside(path, name)
+        found[str(row[0]).lower()] = _state(state, _percent(row[4], 1000), path)
     return found
 
 
@@ -483,9 +507,11 @@ async def add(session, client, kind, content):
 
 
 async def states(session, client):
-    """{info hash: {"state": "downloading" | "done" | "failed", "percent": 0-100 or None}} of
-    every torrent the client has. done: the download itself is complete, whether it seeds or
-    was stopped after. failed: an error that does not pass by itself."""
+    """{info hash: {"state": "downloading" | "done" | "failed", "percent": 0-100 or None,
+    "path": text or None}} of every torrent the client has. done: the download itself is
+    complete, whether it seeds or was stopped after. failed: an error that does not pass by
+    itself. path: the file or folder of a torrent that is done, as the client itself names
+    it; None if it is not done or the client does not say."""
     return await _call(client, _STATES, session, client)
 
 

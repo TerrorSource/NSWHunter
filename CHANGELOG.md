@@ -2,6 +2,24 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.8.0] - 2026-11-17
+
+### Added
+
+- **Importing: a finished download is put in the folder of its game**, as Completed Download Handling does in Sonarr and Radarr. Off until you switch it on (Settings > Media Management > Import Completed Downloads).
+  - **Root Folders** (Settings > Media Management): where your library is, as a volume of the container, with its free space. If Switch-library-manager-web has the same folder under another path, the root folder says which.
+  - The download client says where a finished download is (NZBGet, SABnzbd, qBittorrent, Transmission, uTorrent). The Switch files in it (NSP, NSZ, XCI, XCZ) go **next to the updates or DLC the game already has, or else next to the game itself**. They keep their names.
+  - A usenet download is moved. A torrent is linked, or copied if that cannot be done, so it goes on seeding.
+  - Nothing is overwritten, and nothing is written outside a root folder. The game itself, from a bundle, is left in the download: the library has it already.
+  - A download client can have a **Remote Path** and a **Local Path**, for when this container has the download folder under another path than the client names.
+  - If it cannot be done, the Queue says why ("Downloaded, import failed"), with a button to try again; it is also tried again by itself. You get a notification (On Download Failure) once.
+  - **Remove Completed** (optional): after a usenet download was put in the library, it is taken out of the download client too.
+  - The History has a line **Imported** with where the files went.
+
+### Changed
+
+- The download folder and the library have to be volumes of the container for this; without the setting NSWHunter still touches no files of your games.
+
 ## [3.7.0] - 2026-11-17
 
 ### Added

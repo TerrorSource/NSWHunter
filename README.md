@@ -19,6 +19,7 @@ Use [docker-compose.yml](docker-compose.yml): replace the two `/path/to/...` fol
 - `/data` holds the settings and the state, `/backup` the backups of both. Both folders have to belong to the user of the `user:` line: `chown -R 1000:1000 <folder>`.
 - The container runs read-only, never as root and without privileges; it only writes to those two folders.
 - HTTPS is optional (Settings > General): publish its port as well, like `3443:3443`.
+- Importing is optional (Settings > Media Management): to have finished downloads put in the folder of their game, add the download folder and your library as volumes too, under the same paths your download client and Switch-library-manager-web use for them.
 - If the image is private, the server needs a login for `ghcr.io` to pull it: your GitHub username and a token with the `read:packages` scope.
 
 ## The first login

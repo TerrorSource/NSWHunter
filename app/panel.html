@@ -255,6 +255,7 @@
            padding: 5vh 12px 12px; overflow-y: auto; z-index: 20; }
   .dialog.wide { max-width: 1280px; }
   .dialog .about { margin: 0 8px 4px; }
+  .sub.bad { color: var(--bad); overflow-wrap: anywhere; }
   .abouttop { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .dialog { background: var(--panel); border-radius: 6px; width: 100%; max-width: 860px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); }
   .mhead { display: flex; align-items: center; padding: 16px 24px; border-bottom: 1px solid var(--line); font-size: 18px; color: var(--head); }
@@ -561,6 +562,8 @@ const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack
 const SENT = {sent: "Queued", downloading: "Downloading", done: "Downloaded, waiting for the library",
               stuck: "Downloaded, not seen in your library"};
 function sentText(grab) {
+  if (grab.import_error && !grab.imported) return "Downloaded, import failed";
+  if (grab.imported) return grab.state === "stuck" ? "Imported, not seen in your library" : "Imported, waiting for the library";
   const percent = grab.state === "downloading" && grab.percent !== null && grab.percent !== undefined ? " " + grab.percent + "%" : "";
   return (SENT[grab.state] || SENT.sent) + percent;
 }
@@ -1220,26 +1223,32 @@ function renderQueue() {
   const all = sortedBy("queue", QUEUE_COLUMNS, queueRows()), set = ticked.queue;
   const head = tickAll(set, all.map(r => r.id));
   const rows = paged("queue", all).map(({id, item}) => {
-    const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent, [drawing, cls] = QUEUE_MARK[g.state] || QUEUE_MARK.sent;
+    const g = item.grab, percent = g.state === "done" || g.state === "stuck" ? 100 : g.percent, unplaced = g.import_error && !g.imported;
+    const [drawing, cls] = unplaced ? ["warn", "bad"] : QUEUE_MARK[g.state] || QUEUE_MARK.sent;
     return h("tr", {class: set.has(id) ? "picked" : ""},
       tick(set, id, g.title),
       h("td", {class: "tight"}, mark(drawing, sentText(g), cls)),
       h("td", {}, h("button", {class: "linkish", title: "Open the page of this game", onclick: () => showGame(item.game_id)}, item.name),
         h("div", {class: "sub"}, whatOf(item))),
-      h("td", {class: "wrap"}, g.title),
+      h("td", {class: "wrap"}, g.title,
+        unplaced ? h("div", {class: "sub bad"}, "Not put in your library: " + g.import_error)
+          : g.imported_to ? h("div", {class: "sub"}, "Put in " + g.imported_to) : null),
       h("td", {class: "tight"}, protocol(g.protocol)),
       h("td", {}, g.client_name || "–"), h("td", {}, g.indexer || "–"),
       h("td", {class: "tight"}, ago(g.at) + (g.auto ? " · automatic" : "")),
       h("td", {class: "tight"}, percent !== null && percent !== undefined
         ? h("progress", {max: "100", value: String(percent), title: percent + "%", "aria-label": percent + "%"}) : "–"),
-      h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove from the queue", () => removeDialog([{id, item}]), busy.has("bulk")))));
+      h("td", {}, h("div", {class: "acts"},
+        unplaced ? ibtn("refresh", "Try the import again", () => post("/api/import", {key: item.key}, "m" + item.key).then(d => d.ok && toast("Put in your library")),
+                        busy.has("m" + item.key)) : null,
+        ibtn("remove", "Remove from the queue", () => removeDialog([{id, item}]), busy.has("bulk")))));
   });
   put($("queue"), table([head, ...QUEUE_COLUMNS], rows, "Queue is empty", "queue", render),
     all.length ? pager("queue", all.length, render) : null);
 }
 // History: what was sent, what arrived and what failed.
-const PAST = {all: "All", grabbed: "Grabbed", arrived: "Arrived", failed: "Failed"};
-const PAST_MARK = {grabbed: ["download", "Grabbed: sent to the download client", "info"], arrived: ["check", "Arrived in your library", "good"],
+const PAST = {all: "All", grabbed: "Grabbed", imported: "Imported", arrived: "Arrived", failed: "Failed"};
+const PAST_MARK = {grabbed: ["download", "Grabbed: sent to the download client", "info"], imported: ["box", "Imported: put in the folder of its game", "info"], arrived: ["check", "Arrived in your library", "good"],
                    failed: ["warn", "Download failed", "bad"]};
 async function loadHistory() {
   try {
@@ -1327,6 +1336,9 @@ function health() {
   if (st.error) issues.push(["error", st.error.text + " (" + ago(st.error.at) + ")"]);
   if (st.skipped) issues.push(["warn", "The last round left out " + plural(st.skipped, "game or release", "games or releases") + " because of an error; the Events page says which."]);
   for (const text of state.missing || []) issues.push(["warn", text]);
+  if (state.settings.importing && !state.settings.root_folders) {
+    issues.push(["warn", "Import Completed Downloads is on, but there is no root folder yet (Settings > Media Management > Root Folders)."]);
+  }
   for (const [name, s] of Object.entries(state.services)) {
     if (!s.ok && name !== "config") issues.push(["error", s.name && !s.text.startsWith(s.name) ? s.name + ": " + s.text : s.text]);
   }
@@ -1568,6 +1580,11 @@ const FORMS = {
        help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."},
       {name: "HIDE_FAILED_DOWNLOADS", label: "Hide Failed Downloads", checkbox: true,
        help: "Keep failed downloads out of the lists: no \"failed\" label on Wanted and on the page of a game, and the same usenet release is not offered again when another indexer has it too. They stay on Activity > Blocklist, where one can be tried again."}]},
+    {title: "Importing", fields: [
+      {name: "IMPORT_COMPLETED", label: "Import Completed Downloads", checkbox: true,
+       help: "Put a finished download in the folder of its game in your library, as Completed Download Handling does in Sonarr and Radarr. It needs a root folder (below), and the download folder as a volume of the container."},
+      {name: "REMOVE_COMPLETED", label: "Remove Completed", checkbox: true,
+       help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."}]},
     {title: "Searching", fields: [
       {name: "SEARCH_INTERVAL_HOURS", label: "Automatic Search", options: [
         ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
@@ -1664,6 +1681,60 @@ function renderForm() {
   build();
   put($("extra"));
   if (page === "general") { renderSecurity(); loadSessions(); }
+  if (page === "media") { renderRoots(); loadRoots(); }
+}
+// Under the form of Media Management: the root folders, as Sonarr and Radarr have them there.
+// A root folder is where your library is; a finished download is put in the folder of its game in it.
+let roots = null;
+async function loadRoots() {
+  try {
+    roots = (await request("/api/rootfolders")).data.folders || [];
+    if (page === "media") renderRoots();
+  } catch (e) { /* the list stays as it was */ }
+}
+// Returns what went wrong, or "" if it went well.
+async function changeRoots(body) {
+  try {
+    const {data} = await request("/api/rootfolders", body);
+    if (!data.ok) return data.error || "Failed";
+    roots = data.folders; renderRoots(); load();
+    return "";
+  } catch (e) { return e === LOGIN ? "Log in first" : "No connection to NSWHunter"; }
+}
+function renderRoots() {
+  if (page !== "media" || !settings) return;
+  put($("extra"),
+    h("h2", {}, "Root Folders"),
+    roots ? table(["Path", "Path in Switch-library-manager-web", "Free Space#", ""], roots.map(r => h("tr", {},
+        h("td", {class: "mono"}, r.path, r.ok ? null : [" ", h("span", {class: "label error", title: "The folder is not there in this container, or NSWHunter may not write in it"}, "cannot be written")]),
+        h("td", {class: "mono"}, r.library_path === r.path ? "the same" : r.library_path),
+        h("td", {class: "num"}, r.free === null ? "–" : size(r.free) || "0 MB"),
+        h("td", {}, h("div", {class: "acts"}, ibtn("remove", "Remove this root folder. The folder and what is in it stay.",
+          async () => { const wrong = await changeRoots({action: "remove", path: r.path}); if (wrong) toast(wrong); }))))),
+      "No root folder yet. Add the folder of your library to have finished downloads put in it.") : h("div", {class: "line"}, "Loading…"),
+    h("div", {class: "tabs"}, h("button", {type: "button", class: "primary", onclick: rootDialog}, "Add Root Folder"),
+      h("span", {class: "line"}, "The folder of your library, as a volume of this container. A download is put next to the updates or DLC its game already has, or else next to the game.")));
+}
+function rootDialog() {
+  editing = null; viewing = null;
+  const says = h("div", {class: "testresult bad", role: "alert"});
+  const path = h("input", {type: "text", id: "root-path", placeholder: "/media/games/switch", spellcheck: "false"});
+  const theirs = h("input", {type: "text", id: "root-theirs", placeholder: "the same", spellcheck: "false"});
+  const go = async () => {
+    says.textContent = "";
+    const wrong = await changeRoots({action: "add", path: path.value, library_path: theirs.value});
+    if (wrong) { says.textContent = wrong; return; }
+    closeModal(); toast("Root folder added");
+  };
+  for (const field of [path, theirs]) field.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  put($("modal"), dialog("Add Root Folder", [
+    h("div", {class: "field"}, h("label", {for: "root-path"}, "Path"), h("div", {}, path, says),
+      h("div", {class: "help"}, "The folder of your library in this container. It has to be a volume of the container that NSWHunter may write in.")),
+    h("div", {class: "field"}, h("label", {for: "root-theirs"}, "Path in Switch-library-manager-web"), theirs,
+      h("div", {class: "help"}, "Only if that container has the same folder under another path, like /mnt/roms: NSWHunter reads from the library where the files of a game are, and has to know which folder of its own that is. Leave it empty if both containers use the same path."))],
+    [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Cancel"), h("button", {type: "button", class: "primary", onclick: go}, "Add")]));
+  $("modal").hidden = false;
+  path.focus();
 }
 // Under the form of General: the second step of the login and the browsers that are logged in.
 // Both work at once, without Save Changes.
@@ -1797,7 +1868,7 @@ $("config").addEventListener("submit", e => { e.preventDefault(); saveForm(); })
 // How the fields of an indexer, a download client or a connection are called and explained.
 const LABELS = {url: "URL", api_key: "API Key", categories: "Categories", priority: "Indexer Priority", username: "Username",
                 password: "Password", category: "Category", bot_token: "Bot Token", chat_id: "Chat ID", ask: "Choose in Telegram",
-                webhook: "Webhook URL", urls: "Apprise URLs"};
+                webhook: "Webhook URL", urls: "Apprise URLs", remote_path: "Remote Path", local_path: "Local Path"};
 const TRIGGERS = {on_grab: "On Grab", on_arrive: "On Arrival", on_fail: "On Download Failure", on_choice: "On Manual Interaction Required", on_health: "On Health Issue"};
 const TRIGGER_HELP = {on_grab: "a release was sent automatically", on_arrive: "what was sent is in your library",
                       on_fail: "a download failed, did not arrive, or was never seen in the library",
@@ -1812,6 +1883,8 @@ const HELP = {
   "qbittorrent.url": "The address of the Web UI, for example http://192.168.1.10:8080",
   "transmission.url": "For example http://192.168.1.10:9091", "utorrent.url": "The address of the Web UI, for example http://192.168.1.10:8080",
   "category": "Adding a category specific to NSWHunter avoids conflicts with unrelated downloads",
+  "remote_path": "Only for importing, and only if this container has the download folder under another path than the download client: the folder as the download client names it, like /downloads/complete",
+  "local_path": "The same folder as this container has it, like /downloads. Leave both empty if the paths are the same.",
   "telegram.bot_token": "Create a bot with @BotFather in Telegram; it gives you the token",
   "telegram.chat_id": "You must start a conversation with the bot or add it to your group to receive messages. @userinfobot tells you your own ID; for a group it is a number with a minus in front.",
   "telegram.ask": "For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round. Only this chat can press them. Switch this on only for a bot that NSWHunter has to itself: it then reads what the bot receives, and another program that reads the same bot would miss its messages.",

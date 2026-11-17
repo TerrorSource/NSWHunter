@@ -88,6 +88,14 @@ SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # the clock does not run.
 WAITS = (30, 60, 120, 360, 1440)
 GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 60)
+# Importing: put a finished download in the library, as Sonarr and Radarr do. Off until it is
+# switched on; it needs a root folder, and the download folder as a volume of the container.
+IMPORT_COMPLETED = flag("IMPORT_COMPLETED")
+# After a usenet download was put in the library: take it out of the download client too.
+REMOVE_COMPLETED = flag("REMOVE_COMPLETED")
+# Where the library is: [{"path": the folder in this container, "library_path": the same folder
+# as Switch-library-manager-web names it}]. Set in the panel only (see add_root_folder).
+ROOT_FOLDERS = []
 # Keep failed downloads out of the lists of the panel, and do not offer the same usenet release
 # again when another indexer has it too: it is the same post, and would fail the same way.
 HIDE_FAILED_DOWNLOADS = flag("HIDE_FAILED_DOWNLOADS", True)
@@ -174,6 +182,7 @@ EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
+    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
@@ -184,7 +193,7 @@ EDITABLE = {
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
 # Kept in the settings file too, but no setting of a form: set by steps of their own in the panel.
-PRIVATE = ("TOTP_SECRET",)
+PRIVATE = ("TOTP_SECRET", "ROOT_FOLDERS")
 # A key or password belongs to the address it was saved for: it is never sent to another one.
 BOUND = {"SLM_URL": "SLM_API_KEY"}
 
@@ -295,7 +304,10 @@ def normalize(name, value):
 # The lists of things that can be added in the panel. Per type: the name shown, and its fields
 # with their kind ("url", "text", "secret", "bool", "numbers", "chat" or "priority").
 INDEXER_FIELDS = {"url": "url", "api_key": "secret", "categories": "numbers", "priority": "priority"}
-TORRENT_FIELDS = {"url": "url", "username": "text", "password": "secret", "category": "text"}
+# remote_path / local_path: where the download client says its downloads are, and where the
+# same folder is in this container. Only for importing, and only if the two differ.
+PATHS = {"remote_path": "folder", "local_path": "folder"}
+TORRENT_FIELDS = {"url": "url", "username": "text", "password": "secret", "category": "text", **PATHS}
 # What a connection is told about; each can be switched off per connection.
 TRIGGERS = {
     "on_grab": "bool",    # a release was sent automatically
@@ -313,9 +325,9 @@ PROVIDERS = {
     },
     "DOWNLOAD_CLIENTS": {
         "nzbget": {"label": "NZBGet", "protocol": "usenet", "fields": {
-            "url": "url", "username": "text", "password": "secret", "category": "text"}},
+            "url": "url", "username": "text", "password": "secret", "category": "text", **PATHS}},
         "sabnzbd": {"label": "SABnzbd", "protocol": "usenet", "fields": {
-            "url": "url", "api_key": "secret", "category": "text"}},
+            "url": "url", "api_key": "secret", "category": "text", **PATHS}},
         "qbittorrent": {"label": "qBittorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
         "transmission": {"label": "Transmission", "protocol": "torrent", "fields": TORRENT_FIELDS},
         "utorrent": {"label": "uTorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
@@ -404,6 +416,8 @@ def normalize_entry(kind, entry, keep_id=True):
             value = clean_numbers(label, value)
         elif field_kind == "bool":
             value = clean_bool(value)
+        elif field_kind == "folder":
+            value = clean_folder(label, value) if str(value or "").strip() else ""
         elif field_kind == "chat":
             value = clean_chat(label, value)
         elif field_kind == "priority":
@@ -419,6 +433,8 @@ def normalize_entry(kind, entry, keep_id=True):
     if kept and old and "url" in spec["fields"] and origin(clean["url"]) != origin(old.get("url")):
         raise ValueError(f"{name}: fill in the {kept[0].replace('_', ' ')} again, because the address changed. "
                          "A saved key or password is only sent to the address it was saved for.")
+    if bool(clean.get("remote_path")) != bool(clean.get("local_path")):
+        raise ValueError(f"{name}: fill in the Remote Path and the Local Path both, or neither")
     if type_ == "discord" and clean["webhook"] and not clean["webhook"].lower().startswith("https://"):
         raise ValueError(f"{name}: a Discord webhook starts with https://")
     return clean
@@ -521,6 +537,13 @@ def load_saved():
     kept = dict(data)
     # Not a setting of a form: only its own steps in the panel set or remove it.
     globals()["TOTP_SECRET"] = data["TOTP_SECRET"] if isinstance(data.get("TOTP_SECRET"), str) else ""
+    folders = []
+    for root in data.get("ROOT_FOLDERS") if isinstance(data.get("ROOT_FOLDERS"), list) else []:
+        try:
+            folders.append({"path": clean_folder("Path", root["path"]), "library_path": clean_folder("Path", root["library_path"])})
+        except (ValueError, KeyError, TypeError):
+            continue  # a broken one is left out, the rest still works
+    globals()["ROOT_FOLDERS"] = folders
     for name, value in data.items():
         if name in KINDS or name in PRIVATE:
             continue
@@ -602,6 +625,38 @@ def update(values, clear=()):
         if os.path.exists(INITIAL_PASSWORD_FILE):
             os.remove(INITIAL_PASSWORD_FILE)
     return changed
+
+
+def clean_folder(name, value):
+    """The whole path of a folder, without a slash at the end."""
+    value = clean_text(name, value)
+    if not value.startswith("/") or ".." in value.split("/") or "\\" in value:
+        raise ValueError(f"{name}: fill in the whole path of a folder, like /media/games/switch")
+    return value.rstrip("/") or "/"
+
+
+def add_root_folder(path, library_path=""):
+    """A folder of the library as this container sees it, and as Switch-library-manager-web
+    names it (the same, unless the two containers mount it under different paths)."""
+    path = clean_folder("Path", path)
+    library_path = clean_folder("Path in Switch-library-manager-web", library_path or path)
+    if path == "/" or path == DATA_DIR or path.startswith(DATA_DIR.rstrip("/") + "/"):
+        raise ValueError(f"{path} cannot be a root folder: it is not where your games are")
+    if not os.path.isdir(path):
+        raise ValueError(f"{path} is not a folder in this container. Add the folder of your library as a volume of the container first.")
+    if not os.access(path, os.W_OK):
+        raise ValueError(f"{path} cannot be written by NSWHunter. The user of the container has to own it, or be in its group.")
+    if any(root["path"] == path for root in ROOT_FOLDERS):
+        raise ValueError(f"{path} is a root folder already")
+    folders = ROOT_FOLDERS + [{"path": path, "library_path": library_path}]
+    write({**saved(), "ROOT_FOLDERS": folders})
+    globals()["ROOT_FOLDERS"] = folders
+
+
+def remove_root_folder(path):
+    folders = [root for root in ROOT_FOLDERS if root["path"] != path]
+    write({**saved(), "ROOT_FOLDERS": folders})
+    globals()["ROOT_FOLDERS"] = folders
 
 
 def set_totp(secret):

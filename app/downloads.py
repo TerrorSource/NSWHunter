@@ -71,7 +71,9 @@ async def send(session, release):
 
 async def _states(session, client):
     """{the client's id for a download: {"state": "downloading" | "done" | "failed",
-    "percent": 0-100 or None}} of what one client has in its queue and its history."""
+    "percent": 0-100 or None, "path": text or None}} of what one client has in its queue and
+    its history. path: the folder or file of a download that is done, as the client itself
+    names it; None if it is not done or the client does not say."""
     kind = client["type"]
     states = {}
     if kind == "nzbget":
@@ -79,23 +81,27 @@ async def _states(session, client):
             status_ = str(entry.get("Status", ""))
             # SUCCESS/ALL, WARNING/HEALTH: the files are there. FAILURE/PAR, DELETED/MANUAL: not.
             done = status_.startswith(("SUCCESS", "WARNING"))
-            states[str(entry.get("NZBID"))] = {"state": "done" if done else "failed", "percent": None}
+            # FinalDir is only filled when a post-processing script moved the files out of DestDir.
+            path = entry.get("FinalDir") or entry.get("DestDir")
+            states[str(entry.get("NZBID"))] = {"state": "done" if done else "failed", "percent": None,
+                                               "path": path if done and isinstance(path, str) and path else None}
         for entry in await clients.nzbget(session, client, "listgroups", [0]) or []:
             total, left = entry.get("FileSizeMB"), entry.get("RemainingSizeMB")
             percent = _percent(total - left, total) if isinstance(total, (int, float)) and isinstance(
                 left, (int, float)) else None
-            states[str(entry.get("NZBID"))] = {"state": "downloading", "percent": percent}
+            states[str(entry.get("NZBID"))] = {"state": "downloading", "percent": percent, "path": None}
     elif kind == "sabnzbd":
         history = await clients.sabnzbd(session, client, {"mode": "history", "limit": "300"})
         for slot in (history.get("history") or {}).get("slots") or []:
-            status_ = str(slot.get("status", ""))
+            status_, path = str(slot.get("status", "")), slot.get("storage")
+            done = status_ == "Completed"
             states[str(slot.get("nzo_id"))] = {
-                "state": "done" if status_ == "Completed" else "failed" if status_ == "Failed" else "downloading",
-                "percent": None}
+                "state": "done" if done else "failed" if status_ == "Failed" else "downloading",
+                "percent": None, "path": path if done and isinstance(path, str) and path else None}
         queue = await clients.sabnzbd(session, client, {"mode": "queue"})
         for slot in (queue.get("queue") or {}).get("slots") or []:
             states[str(slot.get("nzo_id"))] = {
-                "state": "downloading", "percent": _percent(slot.get("percentage"), 100)}
+                "state": "downloading", "percent": _percent(slot.get("percentage"), 100), "path": None}
     elif kind in torrent.TYPES:
         states = await torrent.states(session, client)
     return states  # the download client of Prowlarr tells nothing back

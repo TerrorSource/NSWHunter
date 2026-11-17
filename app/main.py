@@ -16,6 +16,7 @@ import auth
 import backup
 import clients
 import config
+import importer
 import logs
 import tls
 import totp
@@ -491,6 +492,35 @@ async def do_unsend(hunter, body):
     await hunter.unsend(str(body["key"]), remove=bool(body.get("remove")), block=bool(body.get("block")))
 
 
+async def do_import(hunter, body):
+    """Try once more to put a finished download in the library."""
+    await hunter.import_now(str(body["key"]))
+
+
+async def api_root_folders(request):
+    return web.json_response({"ok": True, "folders": importer.root_folders()})
+
+
+async def api_root_folders_change(request):
+    """Add a root folder, or remove one. Removing only makes NSWHunter forget it: the folder stays."""
+    try:
+        body = await request.json()
+        what, path = str(body["action"]), str(body["path"])
+        if what == "add":
+            config.add_root_folder(path, str(body.get("library_path") or ""))
+            request.app["hunter"].event(f"Root folder added: {path}")
+        elif what == "remove":
+            config.remove_root_folder(path)
+            request.app["hunter"].event(f"Root folder removed: {path}")
+        else:
+            raise KeyError
+    except ValueError as e:
+        return refuse(400, str(e).partition(": ")[2] if str(e).startswith("Path") else str(e))
+    except (KeyError, TypeError, AttributeError):
+        return refuse(400, "Invalid request")
+    return web.json_response({"ok": True, "folders": importer.root_folders()})
+
+
 async def do_dismiss(hunter, body):
     """Take a failed download off the list. The release stays rejected."""
     hunter.dismiss(str(body["key"]), str(body["guid"]))
@@ -734,6 +764,9 @@ def make_app():
         web.post("/api/restore", action(do_restore)),
         web.post("/api/unsend", action(do_unsend)),
         web.post("/api/dismiss", action(do_dismiss)),
+        web.post("/api/import", action(do_import)),
+        web.get("/api/rootfolders", api_root_folders),
+        web.post("/api/rootfolders", api_root_folders_change),
     ])
     return app
 

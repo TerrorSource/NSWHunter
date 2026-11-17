@@ -12,6 +12,7 @@ import backup
 import clients
 import config
 import downloads
+import importer
 import indexers
 import logs
 import matcher
@@ -74,6 +75,7 @@ class Hunter:
         self.lock = asyncio.Lock()  # one round or search at a time
         self.tell_later, self.dropped, self.finished = [], False, False  # of follow_grabs
         self.games = {}  # game id -> matcher.Game, only games that miss something
+        self.files = {}  # game id -> where its files are, as the library names them
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
         # (id of a Prowlarr in the settings, id that Prowlarr has for an indexer) -> priority
         self.priorities = {}
@@ -437,6 +439,9 @@ class Hunter:
             "size": sum(int(f.get("size") or 0) for f in title.get("files") or [] if isinstance(f, dict))})
         if not update and not missing_dlc:
             return
+        # Where the files of the game are, as the library names them: a download is put next to them.
+        self.files[game_id] = [{"type": str(f.get("type") or ""), "path": f["path"], "version": int(f.get("version") or 0)}
+                               for f in title.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
         game = matcher.Game(
             id=game_id, name=name,
             local_version=int(title.get("localUpdate") or 0),
@@ -794,6 +799,16 @@ class Hunter:
                 self.follow(item, states, now, wait, waited)
             except Exception as e:  # noqa: BLE001
                 self.skip(f"the download of {item['name']}", e)
+        if config.IMPORT_COMPLETED:
+            # Downloaded and not in the library yet: put it there. One that could not be put
+            # there is tried again every time, in case what was wrong has been put right.
+            for item in pending:
+                grab = item.get("grab") or {}
+                if grab.get("state") in ("done", "stuck") and not grab.get("imported"):
+                    try:
+                        await self.bring_in(item)
+                    except Exception as e:  # noqa: BLE001
+                        self.skip(f"the import of {item['name']}", e)
         tell, dropped, finished = self.tell_later, self.dropped, self.finished
         if finished and not await clients.library_rescan(self.session) and not self.state.get("rescan_hint"):
             self.state["rescan_hint"] = True
@@ -822,6 +837,8 @@ class Hunter:
                 return
         state = (known or {}).get("state")
         grab["percent"] = (known or {}).get("percent")
+        if (known or {}).get("path"):
+            grab["path"] = known["path"]  # where the download client says the download is
         if state == "failed":
             self.tell_later.append(self.drop(
                 item, f"Download failed: {grab['title']}. The next release gets its turn.",
@@ -836,8 +853,10 @@ class Hunter:
                 self.event(f"Downloaded: {grab['title']}. Waiting for the library.")
             elif grab["state"] == "done" and now - grab["done_at"] > wait:
                 grab["state"] = "stuck"
-                text = (f"Downloaded, but not in your library after {waited}: {grab['title']}. "
-                        "Does Switch-library-manager-web scan the folder of your download client?")
+                hint = ("Does Switch-library-manager-web scan the folder of your download client?" if not config.IMPORT_COMPLETED
+                        else "It could not be put there: " + grab["import_error"] if grab.get("import_error")
+                        else "It was put in its folder; has Switch-library-manager-web scanned since?")
+                text = f"Downloaded, but not in your library after {waited}: {grab['title']}. {hint}"
                 self.event(text, "warn")
                 self.tell_later.append(text)
         elif grab.get("state") not in ("done", "stuck") and now - grab["at"] > wait:
@@ -845,6 +864,61 @@ class Hunter:
                 item, f"Not arrived after {waited}: {grab['title']}. The next release gets its turn.",
                 f"unknown to the download client and not in the library after {waited}"))
             self.dropped = True
+
+    async def bring_in(self, item):
+        """Put a finished download in the library (see importer.py). True if it is there now.
+        What went wrong is kept with the download and said once, not at every try."""
+        grab = item["grab"]
+        client = next((c for c in config.providers("DOWNLOAD_CLIENTS") if c["id"] == grab.get("client")), None)
+        wanted = "UPD" if item["type"] == "update" else "DLC"
+        try:
+            if client is None:
+                raise importer.ImportProblem("the download client this was sent to is no longer in the settings")
+            if client["type"] == "prowlarr":
+                raise importer.ImportProblem("it went through the download client of Prowlarr, which does not say where its downloads are")
+            # Moving a file to another disk takes a while: not in the way of everything else.
+            done, left = await asyncio.to_thread(importer.bring, client, grab.get("path"), self.files.get(item["game_id"]) or [],
+                                                 wanted, grab.get("protocol") or "usenet")
+        except importer.ImportProblem as e:
+            text = str(e)
+            if grab.get("import_error") != text:
+                grab["import_error"] = text
+                self.event(f"Import failed: {grab['title']}: {text}", "warn")
+                if hasattr(self, "tell_later"):
+                    self.tell_later.append(f"Downloaded, but it could not be put in your library: {grab['title']}. {text}")
+            return False
+        folder = done[0]["folder"]
+        grab.update(imported=int(time.time()), imported_to=folder)
+        grab.pop("import_error", None)
+        more = f" ({len(left)} file(s) of the game itself left in the download)" if left else ""
+        self.event(f"Imported: {grab['title']}: {len(done)} file(s) to {folder}{more}", "grab")
+        self.record("imported", item, grab["title"], client=grab.get("client_name", ""),
+                    note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}")
+        self.finished = True  # the library is asked to scan
+        if config.REMOVE_COMPLETED and (grab.get("protocol") or "usenet") == "usenet":
+            # The files are in the library: what is left of the download can go. Never a torrent, which seeds on.
+            try:
+                await downloads.remove(self.session, client, grab.get("client_id"))
+            except clients.ServiceError as e:
+                self.event(f"Imported, but not removed from {client['name']}: {e}", "warn")
+        return True
+
+    async def import_now(self, key):
+        """The button "Try the import again" of the Queue."""
+        item = self.state["items"].get(key)
+        grab = (item or {}).get("grab")
+        if not grab or grab.get("state") not in ("done", "stuck"):
+            raise clients.ServiceError("This download is not finished")
+        if grab.get("imported"):
+            return True
+        self.tell_later = []
+        grab.pop("import_error", None)  # so the outcome of this try is said, also if it is the same
+        done = await self.bring_in(item)
+        self.save()
+        if not done:
+            raise clients.ServiceError(grab.get("import_error") or "The import failed")
+        await clients.library_rescan(self.session)
+        return True
 
     async def watch(self):
         """Between rounds: follow the downloads. Skipped while a round runs; that does it too."""
@@ -1307,6 +1381,7 @@ class Hunter:
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
                 "wait_minutes": config.GRAB_WAIT_MINUTES, "asking": self.asking(),
                 "hide_failed": config.HIDE_FAILED_DOWNLOADS,
+                "importing": config.IMPORT_COMPLETED, "root_folders": len(config.ROOT_FOLDERS),
             },
             "configured": not config.problems(),
             "missing": config.problems(),
