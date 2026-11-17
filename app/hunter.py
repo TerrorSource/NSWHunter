@@ -31,7 +31,8 @@ MAX_EVENTS = 1000
 COVER_ID = re.compile(r"[0-9A-F]{16}")
 # What a round is made of, as the Tasks page lists it: name -> how it is called there.
 TASKS = {"health": "Check Health", "library": "Library Sync", "rss": "Rss Sync", "search": "Search Missing",
-         "downloads": "Refresh Monitored Downloads", "versions": "Refresh Version List", "backup": "Backup"}
+         "downloads": "Refresh Monitored Downloads", "import": "Rescan Download Folder",
+         "versions": "Refresh Version List", "backup": "Backup"}
 MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
@@ -155,6 +156,8 @@ class Hunter:
         open_games = [g for g in self.games if any(not i["ignored"] and not i["grab"] for i in self.items_of(g))]
         oldest = min((searched.get(g, 0) for g in open_games), default=None)
         queued = any(i.get("grab") for i in self.state["items"].values())
+        unplaced = config.IMPORT_COMPLETED and bool(self.unplaced())
+        watched = (done.get("downloads", {}).get("last", 0) + config.WATCH_SECONDS)
         scheduled = [b["at"] for b in backup.listing() if b["kind"] == "scheduled"]
         fetched = self.state.get("versions_fetched") or 0
 
@@ -168,8 +171,10 @@ class Hunter:
             "rss": (every_round, next_round, "The newest posts of your indexers, held against what is missing"),
             "search": (hours, None if oldest is None else after(oldest + hours),
                        "Every game that misses something, by name; a game is searched when its turn comes"),
-            "downloads": (config.WATCH_SECONDS, (done.get("downloads", {}).get("last", 0) + config.WATCH_SECONDS) if queued else None,
-                          "Only while something is in the queue"),
+            "downloads": (config.WATCH_SECONDS, watched if queued else None, "Only while something is in the queue"),
+            "import": (config.WATCH_SECONDS, watched if unplaced else None,
+                       "Finished downloads that are not in the folder of their game yet: their folders are looked at again, "
+                       "as after unpacking one by hand. Only while Import Completed Downloads is on"),
             "versions": (86400, after(fetched + 86400), "Every update of every game with its date"),
             "backup": (days, after(max(scheduled) + days) if scheduled else next_round, "The settings and the state"),
         }
@@ -206,6 +211,8 @@ class Hunter:
                 await self.task("rss", self.feed())
             elif name == "downloads":
                 await self.task("downloads", self.follow_grabs())
+            elif name == "import":
+                await self.task("import", self.rescan_downloads())
             elif name == "versions":
                 self.state["versions_fetched"] = 0
                 await self.task("versions", self.refresh_versions())
@@ -906,6 +913,42 @@ class Hunter:
             except clients.ServiceError as e:
                 self.event(f"Imported, but not removed from {client['name']}: {e}", "warn")
         return True
+
+    def unplaced(self):
+        """The finished downloads that are not in the folder of their game yet."""
+        return [i for i in self.state["items"].values()
+                if (i.get("grab") or {}).get("state") in ("done", "stuck") and not i["grab"].get("imported")]
+
+    async def rescan_downloads(self):
+        """The task "Rescan Download Folder": ask the download clients once more, and look again
+        in the folder of every finished download that is not in the folder of its game yet. For
+        after something was put right by hand: a download unpacked, a folder made a volume.
+        What still goes wrong is said again, also if it is the same as before. Returns (how
+        many were put in the library, how many there were)."""
+        if not config.IMPORT_COMPLETED:
+            raise clients.ServiceError("Import Completed Downloads is off (Settings > Media Management)")
+        # Every download that is not in its place yet, before the clients are asked: asking them
+        # puts in place what can be, and those count as done by this task too.
+        open_ = [i for i in self.state["items"].values() if i.get("grab") and not i["grab"].get("imported")]
+        if open_:
+            await self.follow_grabs()  # what finished a moment ago counts too
+        waiting = [i for i in open_ if (i.get("grab") or {}).get("state") in ("done", "stuck")]
+        self.tell_later = []  # said in the Events, not once more as a notification
+        placed = 0
+        for item in waiting:
+            if not item["grab"].get("imported"):
+                item["grab"].pop("import_error", None)  # so it is said again, also if it is the same
+                try:
+                    await self.bring_in(item)
+                except Exception as e:  # noqa: BLE001
+                    self.skip(f"the import of {item['name']}", e)
+            placed += bool(item["grab"].get("imported"))
+        self.tell_later = []
+        if placed:
+            await clients.library_rescan(self.session)
+        self.event(f"Rescanned the download folder: {placed} of {len(waiting)} finished download(s) put in the library"
+                   if waiting else "Rescanned the download folder: no finished download waits to be put in the library")
+        return placed, len(waiting)
 
     def guessed_path(self, client, grab):
         """Where a finished download probably is when its client no longer lists it (taken out

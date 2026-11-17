@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.12.0] - 2026-11-17
+
+### Added
+
+- **The task Rescan Download Folder** (System > Tasks): asks the download clients once more and looks again in the folder of every finished download that is not in the folder of its game yet. For after something was put right by hand, such as a download that came out packed and was unpacked. What still cannot be imported is said again in the Events. It also runs by itself with Refresh Monitored Downloads, while a finished download waits.
+
 ## [3.11.2] - 2026-11-17
 
 ### Changed
