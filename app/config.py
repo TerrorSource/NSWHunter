@@ -77,7 +77,7 @@ if AUTO_DOWNLOAD not in AUTO_LEVELS:
     AUTO_DOWNLOAD = "off"
 AUTO_BUNDLES = flag("AUTO_BUNDLES")  # also send base+update bundles automatically
 MAX_GRABS_PER_RUN = int(number("MAX_GRABS_PER_RUN", 10))
-INCLUDE_DLC = flag("INCLUDE_DLC")
+INCLUDE_DLC = flag("INCLUDE_DLC", True)
 
 SYNC_INTERVAL_MINUTES = max(5, number("SYNC_INTERVAL_MINUTES", 60))
 # Every game that misses something is searched by name once per this many hours. That costs
@@ -92,18 +92,18 @@ SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # failed and the next release gets its turn. While the download client is still downloading,
 # the clock does not run.
 WAITS = (30, 60, 120, 360, 1440)
-GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 60)
-# Importing: put a finished download in the library, as Sonarr and Radarr do. Off until it is
-# switched on; it needs a root folder, and the download folder as a volume of the container.
-IMPORT_COMPLETED = flag("IMPORT_COMPLETED")
+GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 30)
+# Importing: put a finished download in the library, as Sonarr and Radarr do. It needs a root
+# folder, and the download folder as a volume of the container.
+IMPORT_COMPLETED = flag("IMPORT_COMPLETED", True)
 # The folder of a game in a root folder, written as Organize of Switch-library-manager-web
 # writes it: {TITLE_NAME} and {TITLE_ID}. Empty: a download goes next to the files its game
 # already has, as the library names them.
 FOLDER_TEMPLATE = env("FOLDER_TEMPLATE", "{TITLE_NAME} [{TITLE_ID}]")
 # After a usenet download was put in the library: take it out of the download client too.
-REMOVE_COMPLETED = flag("REMOVE_COMPLETED")
+REMOVE_COMPLETED = flag("REMOVE_COMPLETED", True)
 # After the files of a download were moved to the library: remove its folder if nothing is left in it.
-DELETE_EMPTY_FOLDERS = flag("DELETE_EMPTY_FOLDERS")
+DELETE_EMPTY_FOLDERS = flag("DELETE_EMPTY_FOLDERS", True)
 # Where the library is: [{"path": the folder in this container, "library_path": the same folder
 # as Switch-library-manager-web names it}]. Set in the panel only (see add_root_folder).
 ROOT_FOLDERS = []

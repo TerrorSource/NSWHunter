@@ -2,6 +2,13 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.17.0] - 2026-11-20
+
+### Changed
+
+- **Defaults for a working setup**, so a new installation needs fewer settings: Missing DLC on, Wait for the Library 30 minutes, Import Completed Downloads on, Remove Completed on, Delete Empty Folders in Download Folder on. The rest stays as it was: Automatic Download off, Hide Failed Downloads on, Folder Name Template `{TITLE_NAME} [{TITLE_ID}]`, Automatic Search every 24 hours, Log Level Info, Log Retention 14 days, backups in `/config/backups`, theme, dates and times as the system and the browser do, relative dates on.
+- A setting that was saved in the panel or set as an environment variable keeps its value: only what was never set gets the new default. With importing on and no root folder yet, System > Status says to add one.
+
 ## [3.16.0] - 2026-11-20
 
 ### Changed
