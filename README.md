@@ -47,6 +47,8 @@ The settings are in the menu on the left; every field has its explanation next t
 2. **Settings > Indexers**: your Prowlarr, or a Newznab or Torznab indexer directly.
 3. **Settings > Download Clients**: NZBGet or SABnzbd for usenet; qBittorrent, Transmission or uTorrent for torrents. Torrents are only searched when a torrent client is enabled.
 
+**SABnzbd** renames files with an extension it does not know, because of its option *Deobfuscate final filenames* (on by default), and `.nsp` is not on its list. Add `nsp, nsz, xci, xcz` to **Config > Special > ext_rename_ignore** in SABnzbd, and it leaves Switch files as they are.
+
 The rest has defaults that work: **Media Management** (automatic download, searching, DLC), **General** (login, logging, backups) and **UI** (theme, dates).
 
 ## How a release is judged
