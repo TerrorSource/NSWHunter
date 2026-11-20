@@ -2217,6 +2217,9 @@ function renderEditor() {
       if (editing.kind === "DOWNLOAD_CLIENTS" && !Object.keys(spec.fields).length) {
         note = "Lets Prowlarr hand a usenet release it found to the download client that is set up in Prowlarr itself. NSWHunter then cannot follow the download: only the time counts.";
       }
+      if (editing.entry.type === "sabnzbd") {
+        note = "Change one setting in SABnzbd itself: add nsp, nsz, xci, xcz to Config > Special > ext_rename_ignore. Otherwise its option Deobfuscate final filenames renames the Switch files, because SABnzbd does not know these extensions.";
+      }
     }
     const triggers = !editing.library && editing.kind === "CONNECTIONS";
     const form = h("form", {id: "editor", autocomplete: "off", onsubmit: e => { e.preventDefault(); saveEditor(); }},

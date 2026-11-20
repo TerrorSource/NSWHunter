@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.17.1] - 2026-11-20
+
+### Changed
+
+- **Adding SABnzbd** shows which setting to change in SABnzbd itself: add `nsp, nsz, xci, xcz` to Config > Special > ext_rename_ignore, or its option Deobfuscate final filenames renames the Switch files.
+
 ## [3.17.0] - 2026-11-20
 
 ### Changed
