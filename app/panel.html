@@ -37,6 +37,12 @@
     --info-bg: #1f1f3d; --info-line: #2e6da4; --bad: #f58a85; --bad-bg: #5a2523; --mute-bg: #444444;
     --shadow: 0 0 10px 1px rgba(0, 0, 0, .25);
   }
+  /* Color-impaired mode: blue for good and orange for bad, which stay apart without red and green. */
+  :root[data-impaired] { --good: #1f5fa8; --good-bg: #dbe8f7; --bad: #a84a00; --bad-bg: #fbe6d4; }
+  @media (prefers-color-scheme: dark) {
+    :root[data-impaired]:not([data-theme=light]) { --good: #8cc2ff; --good-bg: #1d3f66; --bad: #ffb36b; --bad-bg: #5c3312; }
+  }
+  :root[data-impaired][data-theme=dark] { --good: #8cc2ff; --good-bg: #1d3f66; --bad: #ffb36b; --bad-bg: #5c3312; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -490,7 +496,7 @@ let gameView = remembered("gameview", "table");  // "table" or "posters"
 let hiddenColumns = new Set(remembered("gamecolumns", "").split(",").filter(Boolean));
 let perPage = Number(remembered("pagesize", "50")) || 50;  // rows on a page of a long list
 let past = null, pastOnly = "all";
-let ui = {theme: "auto", date: "browser", time: "browser", relative: true};
+let ui = {theme: "auto", date: "browser", time: "browser", relative: true, long: "browser", impaired: false};
 const BULK = 9;  // "Download all" takes the best release of a game from this score on
 
 // Every call to the server. Without a login the server says so, and the login screen comes up.
@@ -592,6 +598,16 @@ function dateText(d) {
   if (ui.date === "long") return day + " " + MONTHS[m] + " " + y;
   return d.toLocaleDateString(undefined, {dateStyle: "short"});
 }
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function longDateText(d) {
+  const w = WEEKDAYS[d.getDay()], m = MONTH_NAMES[d.getMonth()];
+  if (ui.long === "dmy") return w + ", " + d.getDate() + " " + m + ", " + d.getFullYear();
+  if (ui.long === "mdy") return w + ", " + m + " " + d.getDate() + ", " + d.getFullYear();
+  return d.toLocaleDateString(undefined, {dateStyle: "full"});
+}
+// A date in a window of details: in full, with the time.
+function fullMoment(ts) { const d = new Date(ts * 1000); return longDateText(d) + " " + timeText(d); }
 function timeText(d) {
   if (ui.time === "24") return two(d.getHours()) + ":" + two(d.getMinutes());
   if (ui.time === "12") return (d.getHours() % 12 || 12) + ":" + two(d.getMinutes()) + (d.getHours() < 12 ? " am" : " pm");
@@ -1344,7 +1360,7 @@ function pastRow(e, own) {
       h("td", {}, h("div", {class: "acts"}, ibtn("info", "Details", () => details(PAST[e.kind] || e.kind, [
         ["Release", e.title], ["Game", e.name], ["For", e.what], ["Indexer", e.indexer], ["Protocol", e.protocol],
         ["Score", e.score ? e.score + " of 10" : null], ["Automatic", e.kind === "grabbed" ? (e.auto ? "Yes" : "No, chosen by hand") : null],
-        ["Download Client", e.client], ["Message", e.note], ["Date", moment(e.at)]])))));
+        ["Download Client", e.client], ["Message", e.note], ["Date", fullMoment(e.at)]])))));
 }
 // Blocklist: releases that are never offered or sent again: rejected by you, or failed.
 function blockRows() {
@@ -1382,7 +1398,7 @@ function renderBlocklist() {
         ibtn("info", "Details", () => details(failed ? "Download Failed" : "Rejected", [
           ["Release", release.title], ["Game", item.name], ["For", whatOf(item)], ["Indexer", release.indexer],
           ["Protocol", release.protocol], ["Size", size(release.size)], ["Message", failed ? release.why : "You rejected this release."],
-          ["Date", row.at > 0 ? moment(row.at) : null]])),
+          ["Date", row.at > 0 ? fullMoment(row.at) : null]])),
         failed ? ibtn("refresh", "Try again: send this release to the download client once more", () => grab(item, release), busy.has(release.guid)) : null,
         ibtn("remove", kind === "unnamed" ? "Remove them all from the blocklist: they return at the next search" : "Remove from the blocklist: it is offered again",
              () => post("/api/restore", {}, id, () => unblock(row)), busy.has(id)))));
@@ -1706,13 +1722,18 @@ const FORMS = {
       {name: "BACKUP_RETENTION_DAYS", label: "Retention", number: true, unit: "days",
        help: "Automatic backups older than the retention period are cleaned up automatically. A backup you make yourself stays until you delete it."}]}],
   ui: [
-    {title: "Style", fields: [
-      {name: "UI_THEME", label: "Theme", options: [["auto", "Auto: as the system"], ["dark", "Dark"], ["light", "Light"]]}]},
     {title: "Dates", fields: [
       {name: "UI_DATE_FORMAT", label: "Short Date Format", options: [["browser", "As the browser does"], ["iso", "2026-03-25"], ["dmy", "25-03-2026"],
         ["mdy", "03/25/2026"], ["long", "25 Mar 2026"]]},
+      {name: "UI_LONG_DATE_FORMAT", label: "Long Date Format", options: [["browser", "As the browser does"],
+        ["dmy", "Tuesday, 25 March, 2026"], ["mdy", "Tuesday, March 25, 2026"]]},
       {name: "UI_TIME_FORMAT", label: "Time Format", options: [["browser", "As the browser does"], ["24", "17:00/17:30"], ["12", "5:00 pm/5:30 pm"]]},
-      {name: "UI_RELATIVE_DATES", label: "Show Relative Dates", checkbox: true, help: "Show relative (3 hours ago) or absolute dates"}]}],
+      {name: "UI_RELATIVE_DATES", label: "Show Relative Dates", checkbox: true, help: "Show relative (Today/3 hours ago/etc) or absolute dates"}]},
+    {title: "Style", fields: [
+      {name: "UI_THEME", label: "Theme", options: [["auto", "Auto"], ["dark", "Dark"], ["light", "Light"]],
+       help: "Change the theme of the panel. Auto follows your system: light or dark mode."},
+      {name: "UI_COLOR_IMPAIRED", label: "Enable Color-Impaired Mode", checkbox: true,
+       help: "Altered style to allow color-impaired users to better distinguish color coded information"}]}],
 };
 // A field that is no part of a login: a password manager should not fill it in, nor offer to.
 const NO_LOGIN = {autocomplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "true", "data-form-type": "other"};
@@ -2499,6 +2520,7 @@ function render() {
   lastRender = Date.now();
   ui = state.ui || ui;
   if (ui.theme === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", ui.theme);
+  document.documentElement.toggleAttribute("data-impaired", Boolean(ui.impaired));
   $("version").textContent = "v" + state.version;
   const st = state.status, here = PAGES[page];
   document.title = here.text + " - NSWHunter";

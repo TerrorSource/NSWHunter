@@ -193,6 +193,9 @@ UI_DATE_FORMAT = choice("UI_DATE_FORMAT", DATE_FORMATS, "browser")
 TIME_FORMATS = ("browser", "24", "12")
 UI_TIME_FORMAT = choice("UI_TIME_FORMAT", TIME_FORMATS, "browser")
 UI_RELATIVE_DATES = flag("UI_RELATIVE_DATES", True)
+LONG_DATE_FORMATS = ("browser", "dmy", "mdy")
+UI_LONG_DATE_FORMAT = choice("UI_LONG_DATE_FORMAT", LONG_DATE_FORMATS, "browser")
+UI_COLOR_IMPAIRED = flag("UI_COLOR_IMPAIRED")  # blue and orange instead of green and red
 
 
 # ---------------------------------------------------------------- single settings
@@ -210,7 +213,7 @@ EDITABLE = {
     "BACKUP_FOLDER": "path", "BACKUP_INTERVAL_DAYS": range(1, 91), "BACKUP_RETENTION_DAYS": range(1, 366),
     "BACKUP_PASSWORD": "secret",
     "UI_THEME": THEMES, "UI_DATE_FORMAT": DATE_FORMATS, "UI_TIME_FORMAT": TIME_FORMATS,
-    "UI_RELATIVE_DATES": "bool",
+    "UI_RELATIVE_DATES": "bool", "UI_LONG_DATE_FORMAT": LONG_DATE_FORMATS, "UI_COLOR_IMPAIRED": "bool",
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
 # Kept in the settings file too, but no setting of a form: set by steps of their own in the panel.

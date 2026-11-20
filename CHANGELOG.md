@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.16.0] - 2026-11-20
+
+### Changed
+
+- **Settings > UI is laid out as in Prowlarr**: Dates first (Short Date Format, Long Date Format, Time Format, Show Relative Dates), then Style (Theme, Enable Color-Impaired Mode).
+
+### Added
+
+- **Long Date Format**: "Tuesday, 25 March, 2026", "Tuesday, March 25, 2026" or as the browser does. Used for the date in the Details window of History and Blocklist. As an environment variable: `UI_LONG_DATE_FORMAT`.
+- **Enable Color-Impaired Mode**: blue and orange instead of green and red, in light and dark. As an environment variable: `UI_COLOR_IMPAIRED`.
+
 ## [3.15.0] - 2026-11-18
 
 ### Added

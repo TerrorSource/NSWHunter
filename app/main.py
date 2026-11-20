@@ -319,7 +319,8 @@ async def api_state(request):
     view["user"] = config.PANEL_USER
     view["data_dir"] = config.DATA_DIR
     view["ui"] = {"theme": config.UI_THEME, "date": config.UI_DATE_FORMAT, "time": config.UI_TIME_FORMAT,
-                  "relative": config.UI_RELATIVE_DATES}
+                  "relative": config.UI_RELATIVE_DATES, "long": config.UI_LONG_DATE_FORMAT,
+                  "impaired": config.UI_COLOR_IMPAIRED}
     return web.json_response(view)
 
 
