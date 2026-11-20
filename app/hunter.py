@@ -133,8 +133,10 @@ class Hunter:
     def save(self):
         os.makedirs(config.DATA_DIR, exist_ok=True)
         tmp = config.STATE_FILE + ".tmp"
-        with open(tmp, "w") as f:
+        # Only for the owner: the download links in it hold the API key of Prowlarr.
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
             json.dump(self.state, f)
+        os.chmod(tmp, 0o600)  # a .tmp left behind keeps the mode it was made with
         os.replace(tmp, config.STATE_FILE)
 
     def log(self):

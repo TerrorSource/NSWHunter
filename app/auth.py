@@ -141,8 +141,23 @@ def check_login(user, password):
     return right_user and right_password
 
 
+def _who(address):
+    """Who the wrong logins are counted for: an IPv4 address, or the /64 of an IPv6 address,
+    as one machine can have every address of its /64."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if ip.version == 4:
+        return str(ip)
+    if ip.ipv4_mapped:
+        return str(ip.ipv4_mapped)
+    return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+
+
 def wait_for(address):
     """Seconds this address has to wait before its next login; 0 if it may try now."""
+    address = _who(address)
     count, last = failures.get(address, (0, 0))
     now = time.time()
     if now - last > FORGET:
@@ -155,14 +170,18 @@ def wait_for(address):
 
 
 def failed(address):
-    if len(failures) > 2000:  # an attacker with many addresses must not fill the memory
-        failures.clear()
+    address = _who(address)
+    if address not in failures and len(failures) >= 2000:
+        # An attacker with many addresses must not fill the memory, nor free the ones that
+        # wait: the oldest address that does not wait makes room, else the oldest of all.
+        free = [a for a, (count, _) in failures.items() if count < FREE_TRIES]
+        del failures[min(free or failures, key=lambda a: failures[a][1])]
     count, _ = failures.get(address, (0, 0))
     failures[address] = (count + 1, time.time())
 
 
 def succeeded(address):
-    failures.pop(address, None)
+    failures.pop(_who(address), None)
 
 
 # ---------------------------------------------------------------- host names

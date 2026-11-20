@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.17.2] - 2026-11-20
+
+### Security
+
+- **The login only changes under Settings > Security**, with the current password. The window for choosing a password of your own at the first start no longer answers once that is done.
+- **Wrong logins that arrive together are all counted**: the wait after 5 wrong logins can no longer be skipped by sending many logins at once.
+- **Wrong logins are counted per IPv6 network (/64)** instead of per single address, and a full list of addresses no longer frees the ones that have to wait.
+- **A download link into your own network is only followed to an indexer of the settings**, so a hostile indexer cannot make NSWHunter call other services of your network.
+- **`state.json` is only readable by its owner** (mode 0600): its download links hold the API key of Prowlarr.
+
 ## [3.17.1] - 2026-11-20
 
 ### Changed

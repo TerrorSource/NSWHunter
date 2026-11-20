@@ -8,6 +8,8 @@ Every release comes back in one shape, whatever found it:
 """
 import asyncio
 import email.utils
+import ipaddress
+import socket
 import xml.etree.ElementTree as ET
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -270,6 +272,38 @@ async def search_all(session, query):
     return releases, errors
 
 
+def _place(address):
+    """(host, port) of an http(s) address, the port filled in."""
+    parts = urlsplit(address)
+    return (parts.hostname or "").lower(), parts.port or (443 if parts.scheme == "https" else 80)
+
+
+async def _inside(host, port):
+    """Is this host an address of your own network or of this machine?"""
+    try:
+        found = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except OSError:
+            return False  # the request itself fails and says why
+        found = [ipaddress.ip_address(info[4][0].split("%")[0]) for info in infos]
+    return any(not ip.is_global for ip in found)
+
+
+async def _allowed(address):
+    """A download link may point into your own network only at an indexer of the settings:
+    a hostile indexer must not make NSWHunter call other services of the network."""
+    # shortcut: the name is resolved again for the request itself, so a name that changes its
+    # address in between (DNS rebinding) gets through; a resolver of our own would close that.
+    host, port = _place(address)
+    if (host, port) in {_place(i["url"]) for i in config.providers("INDEXERS")}:
+        return
+    if await _inside(host, port):
+        raise ServiceError(f"The download link points into your own network, at {host}:{port}, "
+                           "and that is not the address of an indexer in the settings")
+
+
 async def fetch(session, release):
     """Get what a download client needs of a release: ("nzb", bytes) for usenet, and for a
     torrent ("file", the .torrent as bytes) or ("magnet", the magnet link)."""
@@ -284,6 +318,7 @@ async def fetch(session, release):
             return "magnet", address
         if not address.startswith(("http://", "https://")):
             raise ServiceError("The indexer gave no download link for this release")
+        await _allowed(address)
         try:
             async with session.get(address, timeout=LONG, allow_redirects=False) as r:
                 if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location"):

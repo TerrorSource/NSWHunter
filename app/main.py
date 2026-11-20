@@ -163,6 +163,9 @@ async def api_session(request):
 async def api_password(request):
     """Choose a name and a password of your own. This is all the made-up password of the first
     start can do, and it ends that password."""
+    if not config.must_change_password():
+        # Later the login only changes under Settings > Security, with the current password.
+        return refuse(403, "Change the password under Settings > Security")
     try:
         body = await request.json()
         user, password = str(body["user"]).strip(), str(body["password"])
@@ -182,14 +185,16 @@ async def api_password(request):
 
 async def api_login(request):
     address = request.remote or "?"
-    wait = auth.wait_for(address)
-    if wait:
-        return refuse(429, f"Too many wrong logins. Try again in {wait} seconds.", wait=wait)
     try:
         body = await request.json()
         user, password = str(body["user"]), str(body["password"])
     except (KeyError, ValueError, TypeError, AttributeError):
         return refuse(400, "Invalid request")
+    # Only after the body is in: from here to auth.failed nothing awaits, so logins that
+    # arrive together cannot all pass the check before one of them is counted.
+    wait = auth.wait_for(address)
+    if wait:
+        return refuse(429, f"Too many wrong logins. Try again in {wait} seconds.", wait=wait)
     def wrong(text, **more):
         auth.failed(address)
         wait = auth.wait_for(address)
