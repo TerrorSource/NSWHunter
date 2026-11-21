@@ -1,6 +1,7 @@
 """What every talk with a service shares, the library, and the two usenet download clients.
 The indexers are in indexers.py, the torrent clients in torrent.py, sending in downloads.py."""
 import base64
+import html
 import json
 import re
 from urllib.parse import urlsplit, urlunsplit
@@ -24,8 +25,28 @@ async def _check(response, what):
     if response.status == 401 or response.status == 403:
         raise ServiceError(f"{what}: access denied (HTTP {response.status}). Check the API key or the login.")
     if response.status >= 400:
-        body = (await response.text())[:200].strip()
-        raise ServiceError(f"{what}: HTTP {response.status} {body}")
+        reason = _reason(await response.text())
+        raise ServiceError(f"{what}: HTTP {response.status}" + (f", {reason}" if reason else ""))
+
+
+def _reason(body):
+    """The readable part of an error answer: the description of a Newznab error, the message of
+    a JSON error, or else the start of the text; nothing for an HTML page."""
+    body = body.strip()
+    found = re.search(r'<error\b[^>]*\bdescription="([^"]*)"', body)
+    if found:
+        return html.unescape(found.group(1)).strip()[:200]
+    try:
+        answer = json.loads(body)
+    except ValueError:
+        answer = None
+    if isinstance(answer, dict):
+        for key in ("message", "error", "description", "errorMessage"):
+            if isinstance(answer.get(key), str) and answer[key].strip():
+                return answer[key].strip()[:200]
+    if body.lower().startswith(("<!doctype", "<html")):
+        return ""
+    return " ".join(body.split())[:200]
 
 
 async def _read(response, limit=SMALL):

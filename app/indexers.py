@@ -312,14 +312,16 @@ async def fetch(session, release):
     if indexer is not None and indexer["type"] == "prowlarr" and address.startswith(("http://", "https://")):
         address = _via_prowlarr(indexer, address)
     torrent = release.get("protocol") == "torrent"
-    what = "Fetching the torrent" if torrent else "Fetching the NZB"
+    name = release.get("indexer") or (indexer["name"] if indexer else "the indexer")
+    through = f" through {indexer['name']}" if indexer and indexer["type"] == "prowlarr" and indexer["name"] != name else ""
+    what = f"Fetching the {'torrent' if torrent else 'NZB'} from {name}{through}"
     for _ in range(6):  # a link to a torrent often leads on to a magnet link
         if torrent and address.startswith("magnet:"):
             return "magnet", address
         if not address.startswith(("http://", "https://")):
             raise ServiceError("The indexer gave no download link for this release")
-        await _allowed(address)
         try:
+            await _allowed(address)
             async with session.get(address, timeout=LONG, allow_redirects=False) as r:
                 if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location"):
                     address = urljoin(address, r.headers["Location"])
@@ -330,11 +332,11 @@ async def fetch(session, release):
             raise _wrap(what, e) from e
         if not torrent:
             if b"<nzb" not in data[:4000].lower():
-                raise ServiceError("Fetching the NZB: the answer of the indexer is not an NZB file")
+                raise ServiceError(f"{what}: the answer is not an NZB file")
             return "nzb", data
         if data[:7] == b"magnet:":
             return "magnet", data.decode("utf-8", "replace").strip()
         if data[:1] != b"d":  # a .torrent file is a bencoded dictionary
-            raise ServiceError("Fetching the torrent: the answer of the indexer is not a torrent file")
+            raise ServiceError(f"{what}: the answer is not a torrent file")
         return "file", data
     raise ServiceError(f"{what}: the link keeps leading on to another one")

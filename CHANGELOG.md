@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.17.4] - 2026-11-21
+
+### Changed
+
+- **A download that cannot be fetched says which indexer and why**, in plain words instead of the raw answer: for example "Fetching the NZB from NZBgeek through Prowlarr: HTTP 429, Indexer is disabled till 11/21/2026 11:03:31 due to recent failures." Error answers of every service are shortened the same way: the description of a Newznab error or the message of a JSON error, and no HTML.
+
 ## [3.17.3] - 2026-11-21
 
 ### Fixed
