@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.18.0] - 2026-11-21
+
+### Added
+
+- **Rescan Folder** in the toolbar of the page of a game: switch-library-manager-web scans its folders, NSWHunter waits until that is done (at most 15 minutes) and reads the game anew. For files you put in the folder of a game yourself. It needs an API key with the Editor role.
+
 ## [3.17.4] - 2026-11-21
 
 ### Changed

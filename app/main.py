@@ -512,6 +512,11 @@ async def do_manual_import(hunter, body):
                                       dry=bool(body.get("preview")))
 
 
+async def do_rescan_game(hunter, body):
+    """Rescan Folder: the library scans its folders, and the game is read anew."""
+    return await hunter.rescan_game(str(body["game_id"]).upper())
+
+
 async def api_browse(request):
     """The File Browser of the panel: the folders of a path in this container."""
     try:
@@ -805,6 +810,7 @@ def make_app():
         web.post("/api/forget", action(do_forget)),
         web.post("/api/import", action(do_import)),
         web.post("/api/manual-import", action(do_manual_import)),
+        web.post("/api/rescan-game", action(do_rescan_game)),
         web.post("/api/browse", api_browse),
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),

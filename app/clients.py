@@ -215,6 +215,17 @@ async def sabnzbd(session, client, fields, nzb=None, strict=True):
     return data
 
 
+async def library_scanning(session):
+    """Is switch-library-manager-web scanning its folders now? None if it does not say."""
+    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY else {}
+    try:
+        async with session.get(f"{config.SLM_URL}/sync", headers=headers, timeout=SHORT) as r:
+            answer = await _json(r) if r.status == 200 else None
+    except Exception:  # noqa: BLE001
+        return None
+    return bool(answer.get("synchronizing")) if isinstance(answer, dict) else None
+
+
 async def library_rescan(session):
     """Ask switch-library-manager-web to scan its folders again. True if it will. A key with
     only "Read only" is refused; then the library is seen at its own next scan."""

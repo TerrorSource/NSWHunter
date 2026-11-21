@@ -37,6 +37,8 @@ MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
 DISK_SECONDS = 60  # how long the free space of the disks is taken as known
+SCAN_WAIT = 900  # Rescan Folder: the longest wait for the library to finish its scan
+SCAN_LOOK = 3  # seconds between two looks whether it is done
 MAX_ASKS = 10  # questions in Telegram per round
 ASK_DELAY = 1.1  # seconds between two messages: Telegram allows about one per second to a chat
 DEFAULT_PRIORITY = 25  # what Prowlarr gives an indexer that has none set
@@ -1054,16 +1056,37 @@ class Hunter:
         await self.rescan()
         return True
 
-    async def manual_import(self, game_id, path, key=None, dry=False):
-        """Manual Import: move the Switch files of a folder or file the user chose to the folder
-        of a game. key: the item of the Queue it is done for; its download then counts as put
-        in the library. dry: only say what would be moved. Returns {"files": [{"file",
-        "folder", "how"}], "left": [names of files that stay where they are]}."""
+    def game_name(self, game_id):
         name = next((g.get("name") for g in self.state.get("games", []) if g.get("id") == game_id), None)
         if name is None and game_id in self.games:
             name = self.games[game_id].name or game_id
         if name is None:
             raise clients.ServiceError("This game is not in your library")
+        return name
+
+    async def rescan_game(self, game_id):
+        """Rescan Folder of a game page: let the library scan its folders, wait until it is
+        done, and read it anew. Returns how many updates and DLC the game still misses."""
+        name = self.game_name(game_id)
+        if not await self.rescan():
+            raise clients.ServiceError("Switch-library-manager-web refuses to scan on request: give its API key the Editor role")
+        end = time.time() + SCAN_WAIT
+        while time.time() < end and await clients.library_scanning(self.session):
+            await asyncio.sleep(SCAN_LOOK)
+        async with self.lock:
+            if not await self.sync_library():
+                raise clients.ServiceError(self.state["services"]["slm"]["text"])
+            self.save()
+        missing = sum(1 for i in self.state["items"].values() if i["game_id"] == game_id and not i.get("ignored"))
+        self.event(f"Rescan Folder: {name}: " + (f"{missing} update(s) or DLC still missing" if missing else "nothing missing"))
+        return {"missing": missing}
+
+    async def manual_import(self, game_id, path, key=None, dry=False):
+        """Manual Import: move the Switch files of a folder or file the user chose to the folder
+        of a game. key: the item of the Queue it is done for; its download then counts as put
+        in the library. dry: only say what would be moved. Returns {"files": [{"file",
+        "folder", "how"}], "left": [names of files that stay where they are]}."""
+        name = self.game_name(game_id)
         item = self.state["items"].get(key) if key else None
         if item is not None and item["game_id"] != game_id:
             raise ValueError

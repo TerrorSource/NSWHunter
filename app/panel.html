@@ -2385,6 +2385,9 @@ function renderToolbar() {
     left.push(
       tool("search", searching ? "Searching…" : "Search Game", () => search(game), {disabled: !game || searching, title: "Automatic Search: look for this game on your indexers now"}),
       tool("person", "Interactive Search", () => openGame(gameId), {disabled: !game, title: "Everything that was found for this game, to choose from"}),
+      tool("refresh", busy.has("rs" + gameId) ? "Rescanning…" : "Rescan Folder",
+        () => post("/api/rescan-game", {game_id: gameId}, "rs" + gameId).then(d => d.ok && toast(d.missing ? plural(d.missing, "update or DLC", "updates or DLC") + " still missing" : "Nothing missing")),
+        {disabled: busy.has("rs" + gameId), title: "Let switch-library-manager-web scan its folders, and read this game anew when it is done"}),
       tool("folder", busy.has("mi" + gameId) ? "Importing…" : "Manual Import", () => manualImport(gameId, ((library || []).find(x => x.id === gameId) || game || {name: gameId}).name),
         {disabled: busy.has("mi" + gameId), title: "Choose a folder or a file yourself: its Switch files are moved to the folder of this game"}),
       h("span", {class: "sep"}),
