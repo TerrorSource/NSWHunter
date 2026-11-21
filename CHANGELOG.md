@@ -2,6 +2,13 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.17.3] - 2026-11-21
+
+### Fixed
+
+- **A connection whose Test works is no longer shown as failing.** The Test button of a saved indexer, download client or connection now puts its card and the warning on every page right; before, a connection stayed red until its next message.
+- **Telegram tries once more** when it cannot connect, after 3 seconds, and the error says what went wrong: no answer in time, or which kind of connection error.
+
 ## [3.17.2] - 2026-11-20
 
 ### Security

@@ -1,11 +1,14 @@
 """Telling the user something: through Telegram, Discord or Apprise. Each is an entry of the
 connections in the settings."""
+import asyncio
 import json
 
 import aiohttp
 
 import config
 from clients import SHORT, ServiceError, _read
+
+RETRY_SECONDS = 3
 
 
 async def telegram_call(session, connection, method, body, wait=0):
@@ -15,15 +18,25 @@ async def telegram_call(session, connection, method, body, wait=0):
         raise ServiceError("Telegram: fill in the bot token and the chat ID")
     # The address holds the token: no error may ever show it.
     address = f"{config.TELEGRAM_API_URL}/bot{connection['bot_token']}/{method}"
-    try:
-        async with session.post(address, json=body, timeout=aiohttp.ClientTimeout(total=wait + 30)) as r:
-            status = r.status
-            try:
-                answer = json.loads(await _read(r))
-            except ValueError:
-                answer = None
-    except Exception as e:  # noqa: BLE001
-        raise ServiceError("Telegram: no connection to Telegram") from e
+    for attempt in (1, 2):
+        try:
+            async with session.post(address, json=body, timeout=aiohttp.ClientTimeout(total=wait + 30)) as r:
+                status = r.status
+                try:
+                    answer = json.loads(await _read(r))
+                except ValueError:
+                    answer = None
+            break
+        except aiohttp.ClientConnectorError as e:
+            # Nothing reached Telegram yet, so trying once more cannot send a message twice.
+            if attempt == 1:
+                await asyncio.sleep(RETRY_SECONDS)
+                continue
+            raise ServiceError(f"Telegram: no connection to Telegram ({type(e).__name__})") from e
+        except TimeoutError as e:
+            raise ServiceError("Telegram: no answer from Telegram (timeout)") from e
+        except Exception as e:  # noqa: BLE001  (only the kind of error: its text may hold the address, and so the token)
+            raise ServiceError(f"Telegram: no connection to Telegram ({type(e).__name__})") from e
     if status in (401, 404):
         raise ServiceError("Telegram: the bot token is wrong")
     if status == 409:

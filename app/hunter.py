@@ -1508,6 +1508,18 @@ class Hunter:
         or connection."""
         if kind == "slm":
             return f"{len(await clients.library(self.session, entry))} games in the library"
+        saved = next((e for e in config.providers(kind) if e["id"] == entry.get("id")), None) if kind in config.KINDS else None
+        try:
+            text = await self.tried(kind, entry)
+        except clients.ServiceError as e:
+            if saved:
+                self.provider(kind, saved, False, str(e))
+            raise
+        if saved:  # the card says what the Test said, not an older failure
+            self.provider(kind, saved, True, text)
+        return text
+
+    async def tried(self, kind, entry):
         if kind == "INDEXERS":
             return await indexers.status(self.session, entry)
         if kind == "DOWNLOAD_CLIENTS":
