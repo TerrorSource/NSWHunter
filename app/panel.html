@@ -262,6 +262,12 @@
   .dialog.wide { max-width: 1280px; }
   .searchline { display: flex; gap: 8px; margin-bottom: 16px; }
   .searchline input { flex: 1; min-width: 0; }
+  /* Add Game: a list of games to paste, and what became of every line. */
+  .listinput { font: inherit; width: 100%; min-height: 180px; padding: 7px 12px; border-radius: 4px; border: 1px solid var(--edge);
+               background: var(--input); color: var(--text); resize: vertical; margin-bottom: 12px; }
+  .listinput:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
+  .listdone { margin: 0 0 16px; padding-left: 20px; overflow-wrap: anywhere; }
+  .listdone .ok { color: var(--good); } .listdone .bad { color: var(--bad); }
   .dialog .about { margin: 0 8px 4px; }
   /* The File Browser: a box to type in, and the folders to click through under it. */
   #browse-path { font: inherit; width: 100%; padding: 7px 12px; border-radius: 4px; border: 1px solid var(--edge); background: var(--input); color: var(--text); }
@@ -632,6 +638,18 @@ function size(bytes) {
   return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + " GB" : Math.round(bytes / 1048576) + " MB";
 }
 function day(iso) { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? dateText(d) : ""; }
+// A release date of the list of all games: a number like 20260521.
+function released(n) { return n ? dateText(new Date(Math.floor(n / 10000), Math.floor(n / 100) % 100 - 1, n % 100)) : ""; }
+function upcoming(n) { const d = new Date(); return !!n && n > d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+// "in 3 hours": when something comes, as ago() says when it was.
+function until(ts) {
+  if (!ui.relative) return moment(ts);
+  const s = ts - state.now;
+  if (s < 90) return "soon";
+  if (s < 5400) return "in " + Math.round(s / 60) + " min";
+  if (s < 129600) return "in " + plural(Math.round(s / 3600), "hour");
+  return "in " + plural(Math.round(s / 86400), "day");
+}
 // Nintendo numbers updates in steps of 65536: v720896 is update 11.
 function upd(version) {
   if (!version) return "no update";
@@ -652,8 +670,10 @@ function ask(text, yes, action) {
 function games() {
   const byGame = new Map();
   for (const item of state.items) {
-    if (!byGame.has(item.game_id)) byGame.set(item.game_id, {id: item.game_id, name: item.name, items: []});
-    byGame.get(item.game_id).items.push(item);
+    if (!byGame.has(item.game_id)) byGame.set(item.game_id, {id: item.game_id, name: item.name, items: [], cover: false});
+    const game = byGame.get(item.game_id);
+    game.items.push(item);
+    game.cover = game.cover || !!item.cover;  // a game of the wishlist: its picture is from the list of all games
   }
   const value = SORTS[sortBy] || SORTS.score, way = (value.down ? -1 : 1) * (flipped ? -1 : 1);
   const byName = (a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"});
@@ -845,7 +865,16 @@ function gameStatus(game) {
   if (game.items.some(waiting)) return ["warn", "Awaiting Choice"];
   if (live(game).some(i => i.grab)) return ["info", "In Queue"];
   if (live(game).some(i => i.status === "tried")) return ["mute", "Already Tried"];
+  if (game.items.some(i => i.type === "game" && upcoming(i.released))) return ["info", "Not Released Yet"];
   return game.items.some(i => i.status === "none") ? ["danger", "Nothing Found"] : ["mute", "Not Searched"];
+}
+// What a status label of a row says when the pointer rests on it.
+function statusTip(game, text) {
+  if (text === "Already Tried") return TRIED;
+  const whole = game.items.find(i => i.type === "game");
+  if (text === "Not Released Yet") return "Comes out on " + released(whole.released) + ". NSWHunter goes on searching for it.";
+  if (text === "Nothing Found" && whole) return "Nothing was found under this name. Interactive Search can search with other words, like a shorter name.";
+  return null;
 }
 function missingText(game) {
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc").length;
@@ -859,13 +888,15 @@ function wantedRow(game) {
   return h("tr", {class: selected.has(game.id) ? "picked" : ""},
     h("td", {class: "check"}, h("input", {type: "checkbox", checked: selected.has(game.id), "aria-label": "Select " + game.name,
       onchange: e => { e.target.checked ? selected.add(game.id) : selected.delete(game.id); render(); }})),
+    page === "wishlist" ? h("td", {class: "pic"}, cover(game, "cover", "40")) : null,
     h("td", {}, h("button", {class: "linkish", title: "Open the page of this game", onclick: () => showGame(game.id)}, game.name)),
     h("td", {class: "tight"}, page === "wishlist" ? ago(Math.max(0, ...game.items.map(i => i.first_seen || 0))) : missingText(game)),
     h("td", {class: "wrap"}, top ? [top.release.title, count > 1 ? h("span", {class: "sub"}, " · " + (count - 1) + " more") : null] : "–"),
     h("td", {class: "tight"}, top ? score(top.release.score, "Score of the best release that was found") : "–"),
-    h("td", {class: "tight"}, h("span", {class: "label wide " + cls, ...(text === "Already Tried" ? {title: TRIED} : {})}, text),
+    h("td", {class: "tight"}, h("span", {class: "label wide " + cls, title: statusTip(game, text)}, text),
       failed(game).length ? h("span", {class: "label error"}, failed(game).length + " failed") : null),
-    h("td", {class: "tight"}, searched ? ago(searched) : "never"),
+    h("td", {class: "tight", title: searched && !game.items.every(i => i.ignored || i.grab)
+        ? "Next automatic search: " + until(searched + state.settings.search_hours * 3600) : null}, searched ? ago(searched) : "never"),
     h("td", {}, h("div", {class: "acts"},
       ibtn("search", searching ? "Searching…" : "Automatic Search: look for this game on your indexers now", () => search(game), searching),
       ibtn("person", "Interactive Search: choose a release yourself", () => openGame(game.id)),
@@ -887,6 +918,7 @@ function renderWanted() {
       h("thead", {}, h("tr", {},
         h("th", {class: "check"}, h("input", {type: "checkbox", checked: all, "aria-label": "Select all",
           onchange: e => { rows.forEach(g => e.target.checked ? selected.add(g.id) : selected.delete(g.id)); render(); }})),
+        page === "wishlist" ? h("th", {class: "pic"}) : null,
         headsOf().map(([text, key]) => {
           const on = sortBy === key, down = on && SORTS[key].down !== flipped;
           return h("th", {"aria-sort": on ? (down ? "descending" : "ascending") : null},
@@ -1098,7 +1130,7 @@ function renderGamePage() {
   const fact = (text, value) => value ? h("span", {}, h("b", {}, text + " "), value) : null;
   const history = (past || []).filter(e => e.game_id === gameId);
   put($("game"),
-    h("div", {class: "ghead"}, cover(g, "art", "170"),
+    h("div", {class: "ghead"}, cover(g || game, "art", "170"),
       h("div", {class: "ginfo"},
         h("h1", {}, name),
         h("div", {class: "gfacts"},
@@ -1106,7 +1138,9 @@ function renderGamePage() {
           g ? fact("You Have", upd(g.local) + (g.version ? " (v" + g.version + ")" : "")) : null,
           g && g.latest ? fact("Latest", upd(g.latest)) : null,
           g && g.dlc_owned + g.dlc_missing ? fact("DLC", g.dlc_owned + " of " + (g.dlc_owned + g.dlc_missing)) : null,
-          g ? fact("Size on Disk", size(g.size)) : null),
+          g ? fact("Size on Disk", size(g.size)) : null,
+          !g && items.some(i => i.released) ? fact(upcoming(items.find(i => i.released).released) ? "Comes Out" : "Released",
+                                                    released(items.find(i => i.released).released)) : null),
         h("div", {}, g ? gameLabels(g) : h("span", {class: "label wide info"}, "Not in Your Library")))),
     h("h2", {}, "Missing"),
     table(MISSING_COLUMNS, sortedBy("gamemissing", MISSING_COLUMNS, items.filter(i => i.type !== "dlcpack" || i.candidates.length || i.grab)).map(item => {
@@ -1309,11 +1343,11 @@ function renderQueue() {
 // Manual Import: choose a folder or a file in the File Browser, see what would be moved, and
 // move it to the folder of the game. item: the download of the Queue it is done for, if any.
 let importFrom = "/";
-// Add Game: look for a game that is not in the library yet. A search by name on the indexers
-// finds the title IDs in the release names; one can also be filled in by hand.
+// Add Game: look for a game that is not in the library yet, by name in the list of all games
+// (or on the indexers), by title ID, or a whole list at once.
 let lookup = null;
 function addGame() {
-  const st = lookup || (lookup = {name: "", games: null, busy: false});
+  const st = lookup || (lookup = {name: "", games: null, from: "", busy: false, list: false, text: "", lines: null});
   editing = null; viewing = null;
   const find = async () => {
     st.name = $("newname").value.trim();
@@ -1321,7 +1355,7 @@ function addGame() {
     st.busy = true; addGame();
     try {
       const {data} = await request("/api/game/lookup", {name: st.name});
-      if (data.ok) st.games = data.games; else toast(data.error || "Failed");
+      if (data.ok) { st.games = data.games; st.from = data.from; } else toast(data.error || "Failed");
     } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); }
     st.busy = false;
     if (lookup === st) addGame();
@@ -1330,22 +1364,51 @@ function addGame() {
     const d = await post("/api/game/add", {id, name}, "add" + id);
     if (d.ok) { lookup = null; closeModal(); toast(name + " is on the wishlist: " + (d.found ? plural(d.found, "release") + " found" : "nothing found yet")); }
   };
+  // The lines that could not be added stay in the box, to put right and try again.
+  const addList = async () => {
+    st.text = $("newlist").value;
+    if (!st.text.trim()) return;
+    st.busy = true; addGame();
+    try {
+      const {data} = await request("/api/game/add-list", {text: st.text});
+      if (data.ok) { st.lines = data.lines; st.text = data.lines.filter(l => !l.ok).map(l => l.line).join("\n"); }
+      else toast(data.error || "Failed");
+    } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); }
+    st.busy = false;
+    await load();
+    if (lookup === st) addGame();
+  };
   const state_ = g => g.owned ? h("span", {class: "label"}, "In your library") : g.wanted ? h("span", {class: "label"}, "On the Wishlist")
     : h("button", {type: "button", class: "primary", disabled: busy.has("add" + g.id), onclick: () => add(g.id, g.name)}, "Add");
-  put($("modal"), dialog("Add Game", [
+  const titles = st.from !== "indexers";
+  const byName = [
     h("form", {class: "searchline", onsubmit: e => { e.preventDefault(); find(); }},
       h("input", {id: "newname", type: "search", value: st.name, placeholder: "Name of the game", autocomplete: "off", "aria-label": "Name of the game"}),
       h("button", {type: "submit", class: "primary", disabled: st.busy}, st.busy ? "Searching…" : "Search")),
-    st.games === null ? h("p", {class: "sub"}, "NSWHunter searches your indexers by name, and shows the games of the releases by the title ID in their names. Games for the Switch 2 are never shown.")
-      : st.games.length ? table(["Game", "Title ID", "Releases", ""], st.games.map(g => h("tr", {},
-          h("td", {class: "wrap"}, g.name), h("td", {class: "tight mono"}, g.id), h("td", {class: "tight num"}, g.releases), h("td", {class: "tight"}, state_(g)))))
-      : h("div", {class: "alert"}, "No release with a title ID was found for this name. Try other words, or fill in the title ID below."),
+    st.games === null ? h("p", {class: "sub"}, "NSWHunter looks the name up in the list of all Switch games of Switch-library-manager-web, also games that are not out yet. Games for the Switch 2 are never shown.")
+      : st.games.length ? [
+          titles ? null : h("p", {class: "sub"}, "The list of all games has no game of this name, or could not be fetched: these games are from the release names on your indexers."),
+          table(["", "Game", "Title ID", titles ? "Released" : "Releases", ""], st.games.map(g => h("tr", {},
+            h("td", {class: "pic"}, cover(g, "cover", "40")),
+            h("td", {class: "wrap"}, g.name), h("td", {class: "tight mono"}, g.id),
+            h("td", {class: "tight" + (titles ? "" : " num")}, titles ? (g.released ? released(g.released) + (upcoming(g.released) ? " (coming)" : "") : "–") : g.releases),
+            h("td", {class: "tight"}, state_(g)))))]
+      : h("div", {class: "alert"}, "No game of this name was found. Try other words, or fill in the title ID below."),
     h("form", {class: "searchline", onsubmit: e => { e.preventDefault(); add($("newid").value.trim().toUpperCase(), $("newname").value.trim()); }},
       h("input", {id: "newid", placeholder: "Or the title ID, like 0100F2C0115B6000", autocomplete: "off", "aria-label": "Title ID", maxlength: 16}),
-      h("button", {type: "submit"}, "Add by Title ID"))],
-    [h("span", {class: "grow"}), h("button", {type: "button", onclick: () => { lookup = null; closeModal(); }}, "Close")], "wide"));
+      h("button", {type: "submit"}, "Add by Title ID"))];
+  const byList = [
+    h("p", {class: "sub"}, "One game per line: a name, a title ID, or a title ID with the name after it. A name is added when only one game of the list of all games has it. The games are searched one after the other after they were added."),
+    st.lines ? h("ul", {class: "listdone"}, st.lines.map(l => h("li", {class: l.ok ? "ok" : "bad"}, l.ok ? l.text : l.line + ": " + l.text))) : null,
+    h("form", {onsubmit: e => { e.preventDefault(); addList(); }},
+      h("textarea", {id: "newlist", class: "listinput", "aria-label": "Games, one per line", placeholder: "Some Game\n0100F2C0115B6000", spellcheck: "false"}, st.text),
+      h("button", {type: "submit", class: "primary", disabled: st.busy}, st.busy ? "Adding…" : "Add All"))];
+  put($("modal"), dialog("Add Game", st.list ? byList : byName,
+    [h("button", {type: "button", onclick: () => { st.list = !st.list; st.lines = null; addGame(); }}, st.list ? "Search by Name" : "Add a List"),
+     h("span", {class: "grow"}), h("button", {type: "button", onclick: () => { lookup = null; closeModal(); }}, "Close")], "wide"));
   $("modal").hidden = false;
-  if (!st.busy && st.games === null) $("newname").focus();
+  if (!st.busy && !st.list && st.games === null) $("newname").focus();
+  if (!st.busy && st.list) $("newlist").focus();
 }
 function manualImport(id, name, item) {
   const key = item ? item.key : undefined;
@@ -1722,6 +1785,8 @@ const FORMS = {
         ["off", "Off: I choose myself"], ["10", "Score 10 only"], ["9", "From score 9"], ["8", "From score 8"],
         ["7", "From score 7"], ["6", "From score 6"], ["5", "From score 5"]],
        help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
+      {name: "AUTO_WISHLIST", label: "Automatic Download for the Wishlist", checkbox: true,
+       help: "Also send a game of the wishlist by itself, as Automatic Download does with updates and DLC. Off: a whole game always waits for your click, and a notification says when releases are found for it."},
       {name: "GRAB_WAIT_MINUTES", label: "Wait for the Library", options: [
         ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
        help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."},

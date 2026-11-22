@@ -91,7 +91,7 @@ Within a game the releases are ordered by score, then by age (newest post first)
 
 On the Media Management page you choose from which score the best release of a game is sent automatically: off (default), or from 10, 9, 8, 7, 6 or 5.
 
-Bundles are sent automatically only with `AUTO_BUNDLES=true`. Per round at most `MAX_GRABS_PER_RUN` releases are sent.
+Bundles are sent automatically only with `AUTO_BUNDLES=true`, a game of the wishlist only with **Automatic Download for the Wishlist** on. Per round at most `MAX_GRABS_PER_RUN` releases are sent.
 
 Start with off and watch for a few days whether the scores match how updates are named on your indexers. From 9 is careful; from 7 also takes releases whose version is derived.
 

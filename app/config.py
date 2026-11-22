@@ -51,6 +51,7 @@ STATE_FILE = os.path.join(DATA_DIR, "state.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 VERSIONS_FILE = os.path.join(DATA_DIR, "titledb-versions.json")
+TITLES_FILE = os.path.join(DATA_DIR, "titledb-games.json")
 # The password the first start made up, kept until the user has chosen one of their own.
 INITIAL_PASSWORD_FILE = os.path.join(DATA_DIR, "initial-password")
 INITIAL_PASSWORD = None  # that password, while it is the one that works (set by first_login)
@@ -76,6 +77,8 @@ AUTO_DOWNLOAD = LEGACY_LEVELS.get(AUTO_DOWNLOAD, AUTO_DOWNLOAD)
 if AUTO_DOWNLOAD not in AUTO_LEVELS:
     AUTO_DOWNLOAD = "off"
 AUTO_BUNDLES = flag("AUTO_BUNDLES")  # also send base+update bundles automatically
+# Also send a game of the wishlist automatically. Off: a whole game always waits for a click.
+AUTO_WISHLIST = flag("AUTO_WISHLIST")
 MAX_GRABS_PER_RUN = int(number("MAX_GRABS_PER_RUN", 10))
 INCLUDE_DLC = flag("INCLUDE_DLC", True)
 
@@ -120,6 +123,11 @@ TITLEDB_VERSIONS_URL = env(
     "TITLEDB_VERSIONS_URL",
     "https://github.com/DeLFuS77/switch-library-manager-web/releases/download/data/versions.json,"
     "https://raw.githubusercontent.com/blawar/titledb/master/versions.json")
+# The name, picture and release date of every Switch game, for Add Game: titles.json of
+# switch-library-manager-web, compressed with zstd (a plain JSON file works too).
+TITLEDB_TITLES_URL = env(
+    "TITLEDB_TITLES_URL",
+    "https://github.com/DeLFuS77/switch-library-manager-web/releases/download/data/titles.json.zst")
 TELEGRAM_API_URL = url("TELEGRAM_API_URL", "https://api.telegram.org")
 
 
@@ -204,7 +212,7 @@ UI_COLOR_IMPAIRED = flag("UI_COLOR_IMPAIRED")  # blue and orange instead of gree
 # empty), a range of whole numbers, or the tuple of allowed values.
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
-    "AUTO_DOWNLOAD": AUTO_LEVELS, "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
+    "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",

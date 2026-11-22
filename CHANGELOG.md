@@ -2,6 +2,21 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.0] - 2026-11-22
+
+### Added
+
+- **Add Game looks the name up in the list of all Switch games** of switch-library-manager-web: clean names, a picture and the release date, also of games that are not out yet. NSWHunter fetches that list once a week (`TITLEDB_TITLES_URL`). A name the list does not know is searched on your indexers, as before.
+- **Add a List** in Add Game: paste names or title IDs, one per line. A name is added when only one game has it; a line that cannot be added says why and stays in the box. The games are searched one after the other.
+- **Pictures** of the games on the wishlist, in its rows, on the page of the game and in Add Game.
+- **A notification when releases are found** for a game of the wishlist (trigger On Manual Interaction Required). With Choose in Telegram the question says so.
+- **Automatic Download for the Wishlist** (Settings > Media Management, `AUTO_WISHLIST`): off by default, so a whole game always waits for your click, also when Automatic Download is on.
+- **Not Released Yet** as the status of a game of the wishlist that is not out yet. The Last Search column says when the next automatic search is, and Nothing Found on the wishlist points to Interactive Search with other words.
+
+### Changed
+
+- **When a game of the wishlist is in your library**, it says so in the History and in a notification (On Arrival), and its updates and DLC are searched at once instead of at the next turn of the game.
+
 ## [3.20.0] - 2026-11-22
 
 ### Added

@@ -2,6 +2,7 @@
 The indexers are in indexers.py, the torrent clients in torrent.py, sending in downloads.py."""
 import base64
 import html
+import io
 import json
 import re
 from urllib.parse import urlsplit, urlunsplit
@@ -116,6 +117,56 @@ async def titledb_versions(session):
         except Exception as e:  # noqa: BLE001
             error = _wrap("Version list", e)
     raise error
+
+
+async def titledb_titles(session):
+    """titles.json of switch-library-manager-web, as it comes: compressed or not (see
+    title_list)."""
+    try:
+        async with session.get(config.TITLEDB_TITLES_URL, timeout=LONG) as r:
+            await _check(r, "Title list")
+            return bytes(await _read(r, LARGE))
+    except Exception as e:
+        raise _wrap("Title list", e) from e
+
+
+ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+TITLE_KEY = re.compile(r'\s*,?\s*"([0-9A-Fa-f]{16})"\s*:\s*')
+
+
+def title_list(data):
+    """{base title ID: [name, picture address, release date as YYYYMMDD or 0]} of every game
+    of the first Switch in titles.json (zstd or plain). It is read one game at a time: the
+    whole file, with every description and screenshot, is over 100 MB."""
+    from compression import zstd  # only here: the module is not in every Python build
+    stream = zstd.ZstdFile(io.BytesIO(data)) if data[:4] == ZSTD_MAGIC else io.BytesIO(data)
+    text, decoder, found = io.TextIOWrapper(stream, encoding="utf-8", errors="replace"), json.JSONDecoder(), {}
+    buffer = text.read(2**20)
+    start = buffer.find("{")
+    if start < 0:
+        raise ServiceError("Title list: not a list of games")
+    position = start + 1
+    while True:
+        key = TITLE_KEY.match(buffer, position)
+        try:
+            if not key:
+                raise ValueError
+            title, position = decoder.raw_decode(buffer, key.end())
+        except ValueError:
+            more = text.read(2**20)
+            if not more:
+                break  # the closing brace, or a cut off file: what was read is kept
+            buffer, position = buffer[position:] + more, 0
+            continue
+        title_id = key.group(1).upper()
+        if (isinstance(title, dict) and title_id.startswith("01") and not int(title_id, 16) & 0x1FFF
+                and isinstance(title.get("name"), str) and title["name"].strip() and not title.get("isDemo")):
+            picture = title.get("iconUrl") if isinstance(title.get("iconUrl"), str) else ""
+            day = title.get("releaseDate") if isinstance(title.get("releaseDate"), int) else 0
+            found[title_id] = [" ".join(title["name"].split()), picture, day]
+    if not found:
+        raise ServiceError("Title list: no games in it")
+    return found
 
 
 # ---------------------------------------------------------------- download clients

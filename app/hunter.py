@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import time
+import unicodedata
 
 import backup
 import clients
@@ -37,6 +38,8 @@ MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
 MAX_LOOKUP = 10  # Add Game: the games a search by name offers at most
+MAX_LIST = 50  # Add Game: the lines of a pasted list
+TITLES_DAYS = 7  # how often the names of all games are fetched anew
 DISK_SECONDS = 60  # how long the free space of the disks is taken as known
 SCAN_WAIT = 900  # Rescan Folder: the longest wait for the library to finish its scan
 SCAN_LOOK = 3  # seconds between two looks whether it is done
@@ -74,6 +77,15 @@ def published_ordinal(release):
     return day.toordinal() if day else 0
 
 
+
+def words_of(name):
+    """The words of a name, to hold names against each other: without case, accents, marks
+    like ™ and punctuation. "Assassin's Creed®" and "assassins creed" are the same."""
+    text = unicodedata.normalize("NFKD", re.sub("[™®©℠]", " ", str(name)))  # NFKD would make ™ "TM"
+    text = "".join(c for c in text if not unicodedata.combining(c)).casefold()
+    return tuple(re.sub(r"[^\w]+", " ", re.sub(r"['’`]", "", text)).split())
+
+
 class Hunter:
     def __init__(self, session):
         self.session = session
@@ -83,6 +95,10 @@ class Hunter:
         self.files = {}  # game id -> where its files are, as the library names them; of every game
         self.disks = (0, [])  # (when it was looked at, the free space of the folders that matter)
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
+        self.titles = {}  # titledb: base title ID -> [name, picture address, YYYYMMDD], for Add Game
+        self.titles_gate = asyncio.Lock()
+        self.background = set()  # tasks that run on their own, kept until they are done
+        self.newly_owned = []  # games of the wishlist the last library sync found in the library
         # (id of a Prowlarr in the settings, id that Prowlarr has for an indexer) -> priority
         self.priorities = {}
         self.status = {"running": False, "phase": None, "last_run": None, "next_run": None,
@@ -108,7 +124,8 @@ class Hunter:
             "covers_fetched": 0,
             "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
-            "new_games": [],  # the wishlist: games that are not in the library yet, to look for: {"id", "name", "added"}
+            "new_games": [],  # the wishlist: games that are not in the library yet: {"id", "name", "added", "released"}
+            "titles_fetched": 0,
         }
         self.load()
 
@@ -133,6 +150,11 @@ class Hunter:
                 self.versions = json.load(f)
         except (FileNotFoundError, ValueError):
             self.state["versions_fetched"] = 0
+        try:
+            with open(config.TITLES_FILE) as f:
+                self.titles = json.load(f)
+        except (FileNotFoundError, ValueError):
+            self.state["titles_fetched"] = 0
 
     def save(self):
         os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -183,7 +205,8 @@ class Hunter:
             "import": (config.WATCH_SECONDS, watched if unplaced else None,
                        "Finished downloads that are not in the folder of their game yet: their folders are looked at again, "
                        "as after unpacking one by hand. Only while Import Completed Downloads is on"),
-            "versions": (86400, after(fetched + 86400), "Every update of every game with its date"),
+            "versions": (86400, after(fetched + 86400), "Every update of every game with its date; once a week also "
+                         "the names of all games, for Add Game"),
             "backup": (days, after(max(scheduled) + days) if scheduled else next_round, "The settings and the state"),
         }
         result = []
@@ -222,8 +245,9 @@ class Hunter:
             elif name == "import":
                 await self.task("import", self.rescan_downloads())
             elif name == "versions":
-                self.state["versions_fetched"] = 0
+                self.state["versions_fetched"] = self.state["titles_fetched"] = 0
                 await self.task("versions", self.refresh_versions())
+                await self.refresh_titles()
                 await self.sync_library()  # the dates of the updates are used when the library is read
             elif name == "backup":
                 self.backups(now=True)
@@ -329,6 +353,36 @@ class Hunter:
         fresh = time.time() - self.state["versions_fetched"] < 86400
         return bool(source) and not (fresh and self.state.get("versions_source") == source)
 
+    def titles_due(self):
+        return bool(config.TITLEDB_TITLES_URL) and time.time() - self.state.get("titles_fetched", 0) > TITLES_DAYS * 86400
+
+    async def refresh_titles(self):
+        """The name, picture and release date of every game, for Add Game. Once a week: it is a
+        download of over 20 MB. Without it Add Game searches the indexers by name."""
+        async with self.titles_gate:  # Add Game may ask for it while a round fetches it
+            if self.titles_due():
+                await self.fetch_titles()
+
+    async def fetch_titles(self):
+        try:
+            data = await clients.titledb_titles(self.session)
+            titles = await asyncio.to_thread(clients.title_list, data)
+        except Exception as e:  # noqa: BLE001 - a broken download (zstd, JSON) must not break the round
+            self.event(f"The list of all games for Add Game could not be fetched: {e}", "warn")
+            self.state["titles_fetched"] = int(time.time()) - (TITLES_DAYS - 1) * 86400  # again in a day
+            return
+        self.titles = titles
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        with open(config.TITLES_FILE + ".tmp", "w") as f:
+            json.dump(titles, f, ensure_ascii=False, separators=(",", ":"))
+        os.replace(config.TITLES_FILE + ".tmp", config.TITLES_FILE)
+        self.state["titles_fetched"] = int(time.time())
+        logs.debug(f"Title list: {len(titles)} games")
+
+    def cover_address(self, game_id):
+        """Where the picture of a game is: the library first, then the list of all games."""
+        return self.state.get("covers", {}).get(game_id) or (self.titles.get(game_id) or ["", ""])[1]
+
     async def refresh_covers(self):
         """Where the small pictures of the games are, as switch-library-manager-web says. Asked
         once a day. Without them the games are listed without a picture: nothing else needs them."""
@@ -345,8 +399,8 @@ class Hunter:
     async def cover(self, game_id):
         """(content type, bytes) of the small picture of a game, or None if there is none. A
         picture is fetched once and then kept in the folder covers of the config folder."""
-        address = self.state.get("covers", {}).get(game_id)
-        if not COVER_ID.fullmatch(game_id) or not address:
+        address = self.cover_address(game_id) if COVER_ID.fullmatch(game_id) else ""
+        if not address:
             return None
         # The address is part of the name: a new picture in the library is fetched anew.
         stem = f"{game_id}_{hashlib.sha256(address.encode()).hexdigest()[:8]}"
@@ -398,7 +452,9 @@ class Hunter:
         arrived = []
         for key in [k for k in items if k not in wanted and items[k]["game_id"] not in broken]:
             gone = items.pop(key)
-            if gone.get("grab") and gone["type"] != "dlcpack":
+            if gone["type"] == "game":
+                self.arrive(gone, gone.get("grab") or {"title": gone["name"]}, "it leaves the wishlist")
+            elif gone.get("grab") and gone["type"] != "dlcpack":
                 arrived.append(f"Arrived: {self.label(gone)} is now in the library")
                 self.arrive(gone, gone["grab"])
         for key, facts in wanted.items():
@@ -429,8 +485,13 @@ class Hunter:
         for text in arrived:
             self.event(text, "grab")
             await self.tell(text, "arrive")
+        self.newly_owned = [game["id"] for game in added]
         for game in added:
-            self.event(f"{game['name']} is in your library now: it leaves the wishlist")
+            # Its updates and DLC are searched at once, not when the turn of the game comes.
+            self.state["searched"].pop(game["id"], None)
+            text = f"Arrived: {game['name']} is in your library now and leaves the wishlist"
+            self.event(text, "grab")
+            await self.tell(text + ". NSWHunter looks for its updates and DLC now.", "arrive")
         return True
 
     def want_new_games(self, games, wanted, owned):
@@ -440,7 +501,8 @@ class Hunter:
         self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] not in owned]
         for new in self.state["new_games"]:
             games[new["id"]] = matcher.Game(id=new["id"], name=new["name"])
-            wanted[new["id"] + ":game"] = {"type": "game", "game_id": new["id"], "name": new["name"]}
+            wanted[new["id"] + ":game"] = {"type": "game", "game_id": new["id"], "name": new["name"],
+                                           "released": new.get("released") or 0}
         return left
 
     def read_title(self, title, games, wanted, listed):
@@ -882,7 +944,8 @@ class Hunter:
         waiting = any((i.get("grab") or {}).get("state") == "done" or (i.get("grab") or {}).get("imported")
                       for i in self.state["items"].values())
         if waiting and now - (self.state["library"].get("fetched") or 0) > config.WATCH_SECONDS:
-            await self.sync_library()
+            if await self.sync_library() and self.newly_owned:
+                await self.search_games(self.newly_owned)  # between rounds: the backlog would wait for the next one
         for text in tell:
             await self.tell(text, "fail")
         if dropped:
@@ -1081,12 +1144,40 @@ class Hunter:
             raise clients.ServiceError("This game is not in your library")
         return name
 
+    def find_titles(self, name):
+        """The games of the list of all games whose name holds every word of `name` (as the
+        start of one of its words): the same name first, then the ones that start with it,
+        then the shortest names, then the newest."""
+        wanted = words_of(name)
+        if not wanted:
+            return []
+        if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
+            self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
+        hits = []
+        for title_id, have in self.title_words.items():
+            if all(any(w.startswith(q) for w in have) for q in wanted):
+                rank = 0 if have == wanted else 1 if have[:len(wanted)] == wanted else 2
+                hits.append((rank, len(have), -(self.titles[title_id][2] or 0), title_id))
+        return [t[3] for t in sorted(hits)]
+
     async def lookup_game(self, name):
-        """Add Game: search the indexers by name, and offer the games the releases are of, by the
-        title IDs in their names. A Switch 2 title ID is never offered."""
+        """Add Game: the games of that name, from the list of all games. Without that list, or
+        when it has no game of that name, the indexers are searched by name and the games of
+        the releases are offered by the title IDs in their names. A Switch 2 title ID is never offered."""
         term = matcher.search_term(name)
-        if not term:
+        if not term and not words_of(name):
             raise clients.ServiceError("Fill in the name of a game")
+        if not self.titles:
+            await self.refresh_titles()
+        owned = {g["id"] for g in self.state.get("games", [])}
+        wanted = {g["id"] for g in self.state["new_games"]}
+        hits = self.find_titles(name)[:MAX_LOOKUP] if self.titles else []
+        if hits:
+            return {"from": "titles", "games": [
+                {"id": tid, "name": self.titles[tid][0], "released": self.titles[tid][2] or 0,
+                 "cover": bool(self.cover_address(tid)), "owned": tid in owned, "wanted": tid in wanted} for tid in hits]}
+        if not term:
+            return {"from": "titles", "games": []}
         releases, errors = await indexers.search_all(self.session, term)
         self.heard(errors)
         if errors and len(errors) == len(config.indexers()):
@@ -1102,36 +1193,96 @@ class Hunter:
                 guessed = matcher.guessed_name(release["title"])
                 if guessed:
                     entry["names"][guessed] = entry["names"].get(guessed, 0) + 1
-        owned = {g["id"] for g in self.state.get("games", [])}
-        wanted = {g["id"] for g in self.state["new_games"]}
         offered = sorted(found.values(), key=lambda e: -e["releases"])[:MAX_LOOKUP]
-        return [{"id": e["id"], "name": max(e["names"], key=e["names"].get) if e["names"] else name.strip(),
-                 "releases": e["releases"], "owned": e["id"] in owned, "wanted": e["id"] in wanted} for e in offered]
+        return {"from": "indexers", "games": [
+            {"id": e["id"], "name": max(e["names"], key=e["names"].get) if e["names"] else name.strip(),
+             "releases": e["releases"], "cover": bool(self.cover_address(e["id"])),
+             "owned": e["id"] in owned, "wanted": e["id"] in wanted} for e in offered]}
 
-    async def add_game(self, game_id, name):
+    async def add_game(self, game_id, name, search=True):
         """Add Game: look for a game that is not in the library yet. Returns how many releases
-        the first search found for it."""
+        the first search found for it; `search` False: it is searched later (see add_games)."""
         game_id, name = game_id.strip().upper(), " ".join(str(name).split())[:200]
+        known = self.titles.get(game_id) or ["", "", 0]
+        name = name or known[0]
         if game_id.startswith("04"):
             raise clients.ServiceError("That is a game for the Switch 2: NSWHunter is for the first Switch only")
         if not re.fullmatch(r"01[0-9A-F]{14}", game_id) or int(game_id, 16) & 0x1FFF:
             raise clients.ServiceError("A title ID of a game has 16 characters, starts with 01 and ends with 000")
         if not name:
-            raise clients.ServiceError("Fill in the name of the game")
+            raise clients.ServiceError("This title ID is not in the list of all games: fill in the name of the game too")
         if any(g["id"] == game_id for g in self.state.get("games", [])):
             raise clients.ServiceError(f"{name} is in your library already")
         if any(g["id"] == game_id for g in self.state["new_games"]):
             raise clients.ServiceError(f"{name} is on the wishlist already")
-        self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time())})
+        self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time()), "released": known[2] or 0})
         wanted = {}
         self.want_new_games(self.games, wanted, set())
         key = game_id + ":game"
         self.state["items"][key] = {"key": key, "candidates": [], "blocked": [], "ignored": False, "grab": None,
                                     "first_seen": int(time.time()), **wanted[key]}
         self.event(f"Added to the wishlist: {name}")
-        found = await self.search_game(game_id)
+        found = await self.search_game(game_id) if search else None
         self.save()
         return found
+
+    def pick_title(self, line):
+        """One line of a pasted list: (title ID, name). A title ID, a title ID with a name, or
+        a name that only one game of the list of all games has."""
+        whole = re.fullmatch(r"([0-9A-Fa-f]{16})(?:\s+(.+))?", line)
+        if whole:
+            return whole.group(1).upper(), whole.group(2) or ""
+        hits = self.find_titles(line)
+        if not hits:
+            raise clients.ServiceError("No game of this name in the list of all games: add it with Search or by title ID")
+        same = [tid for tid in hits if words_of(self.titles[tid][0]) == words_of(line)]
+        if len(same) == 1 or (not same and len(hits) == 1):
+            tid = (same or hits)[0]
+            return tid, self.titles[tid][0]
+        raise clients.ServiceError(f"{len(same) or len(hits)} games match this name: choose one with Search")
+
+    async def add_games(self, text):
+        """Add Game with a list: one name or title ID per line. Returns what became of every
+        line. The games that were added are searched one after the other, after this answer."""
+        lines = [" ".join(line.split()) for line in str(text).splitlines()]
+        lines = [line for line in lines if line]
+        if not lines:
+            raise clients.ServiceError("Fill in one name or title ID per line")
+        if len(lines) > MAX_LIST:
+            raise clients.ServiceError(f"At most {MAX_LIST} lines at a time")
+        if not self.titles:
+            await self.refresh_titles()
+        done, added = [], []
+        for line in lines:
+            try:
+                game_id, name = self.pick_title(line)
+                await self.add_game(game_id, name, search=False)
+                added.append(game_id)
+                done.append({"line": line, "ok": True, "text": "Added: " + self.games[game_id].name})
+            except clients.ServiceError as e:
+                done.append({"line": line, "ok": False, "text": str(e)})
+        if added:
+            self.later(self.search_games(added))
+        return done
+
+    async def search_games(self, game_ids):
+        """Search some games by name, one after the other, as the backlog does."""
+        for n, game_id in enumerate(game_ids):
+            if n:
+                await asyncio.sleep(config.SEARCH_DELAY_SECONDS)
+            try:
+                await self.search_game(game_id)
+            except clients.ServiceError:
+                break  # no indexer answers; heard() has said which
+            except Exception as e:  # noqa: BLE001
+                self.skip(game_id, e)
+        self.save()
+
+    def later(self, work):
+        """Run something on its own, after the answer to the panel."""
+        task = asyncio.create_task(work)
+        self.background.add(task)
+        task.add_done_callback(self.background.discard)
 
     def remove_game(self, game_id):
         """Stop looking for a game of Add Game. What was found for it goes too."""
@@ -1247,6 +1398,8 @@ class Hunter:
             return None
         if best["kind"] == "unlocker":
             return None  # a DLC unlocker only goes out with a click of its own
+        if item["type"] == "game" and not config.AUTO_WISHLIST:
+            return None  # a whole game of the wishlist waits for a click, unless asked otherwise
         return best
 
     async def grab(self, key, guid, auto=False):
@@ -1397,6 +1550,22 @@ class Hunter:
                 self.place(item, {k: release.get(k) for k in RELEASE_FIELDS})
         self.save()
 
+    async def tell_found(self):
+        """A notification when releases are found for a game of the wishlist for the first time.
+        With questions in Telegram the question says so itself (see ask)."""
+        for item in self.state["items"].values():
+            if item["type"] != "game" or item.get("found_told") or not item["candidates"]:
+                continue
+            if item["grab"] or not self.awaits(item):
+                item["found_told"] = True  # sent automatically, or nothing left to choose: said otherwise
+                continue
+            if self.asking():
+                continue  # the question in Telegram tells it
+            item["found_told"] = True
+            best = self.untried(item)[0]
+            await self.tell(f"Found for your wishlist: {item['name']}: {len(self.untried(item))} release(s), "
+                            f"the best scores {best.get('score', 0)}/10: {best['title']}", "choice")
+
     # ------------------------------------------------------------ choosing in Telegram
 
     def asker(self):
@@ -1421,7 +1590,8 @@ class Hunter:
             best = self.untried(item)[0]
             facts = [f"{best['size'] / 2**20:.0f} MB" if best.get("size") else "", best.get("indexer") or "",
                      (best.get("published") or "")[:10]]
-            text = "\n".join([self.label(item), f"{best.get('score', 0)}/10 · {best['title']}",
+            head = f"Found for your wishlist: {item['name']}" if item["type"] == "game" else self.label(item)
+            text = "\n".join([head, f"{best.get('score', 0)}/10 · {best['title']}",
                               " · ".join(f for f in facts if f), "; ".join(best.get("reasons") or [])])
             token = secrets.token_hex(6)
             try:
@@ -1432,6 +1602,7 @@ class Hunter:
                 self.provider("CONNECTIONS", connection, False, str(e))
                 return
             item["asked"] = best["guid"]
+            item["found_told"] = True
             item["ask"] = {"token": token, "guid": best["guid"], "message_id": message_id,
                            "text": "NSWHunter\n" + text}
 
@@ -1581,6 +1752,7 @@ class Hunter:
                 self.status["phase"] = "reading the library"
                 if self.versions_due():
                     await self.task("versions", self.refresh_versions())
+                await self.refresh_titles()
                 if await self.task("library", self.sync_library()) and self.working("INDEXERS"):
                     self.status["phase"] = "checking new posts"
                     await self.task("rss", self.feed())
@@ -1593,6 +1765,7 @@ class Hunter:
                     self.status["phase"] = "sending"
                     await self.auto_grab()
                 now_waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
+                await self.tell_found()
                 if self.asking():
                     await self.ask()
                 elif now_waiting > waiting:
@@ -1658,6 +1831,8 @@ class Hunter:
         shown["failed"] = [{k: v for k, v in f.items() if k not in hidden} for f in item.get("failed", [])]
         if item["type"] == "update":
             shown["ladder"] = self.ladder_text(item["game_id"])
+        if item["type"] == "game":
+            shown["cover"] = bool(self.cover_address(item["game_id"]))
         auto = self.automatic(item)
         shown["auto_guid"] = auto["guid"] if auto else None
         if item["ignored"]:
