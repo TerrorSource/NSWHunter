@@ -19,7 +19,9 @@ from dataclasses import asdict, dataclass, field
 # product of three chances: that it is this game, that it is the newest update, and that it is
 # an update and nothing else.
 IDENTITY = {"tid": 1.0, "exact": 0.9, "extras": 0.5, "fuzzy": 0.35}
-KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0, "dlcpack": 1.0}
+KIND = {"update": 1.0, "unknown": 0.92, "bundle": 0.75, "dlc": 1.0, "dlcpack": 1.0, "base": 1.0}
+UNSAID = 0.85  # a release of a new game that says neither game, update nor DLC
+VERSIONED = 0.7  # ... and does have a version above 1.0.0: it can be an update without the word
 WHOLE_GAME = 0.75  # an "update" as big as the game itself: the game is probably in it
 ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the library
 PACK = 0.55  # a pack of DLC that does not say which DLC
@@ -90,7 +92,7 @@ class Game:
 @dataclass
 class Candidate:
     score: int  # 1-10: how likely it is that this download is the right one
-    kind: str  # update | bundle | dlc | dlcpack | unlocker | unknown
+    kind: str  # update | bundle | dlc | dlcpack | unlocker | base | unknown
     name_match: str  # tid | exact | fuzzy
     internal_version: int | None
     display_version: str | None
@@ -333,8 +335,9 @@ def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, 
              only_version=False, size=0):
     """Judge one release for one game: a Candidate, or a Rejection with the reason.
 
-    want: "update"; "dlc" with `dlc` = {"id": ..., "name": ...} of the missing DLC; or
-    "dlcpack" for a pack of the game's DLC that names none of them.
+    want: "update"; "dlc" with `dlc` = {"id": ..., "name": ...} of the missing DLC;
+    "dlcpack" for a pack of the game's DLC that names none of them; or "game" for the game
+    itself, of a game that is not in the library yet.
     size: bytes of the release, if known.
     """
     result = _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size)
@@ -438,6 +441,9 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     else:
         kind = "unknown"
 
+    if want == "game":
+        return _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons,
+                              bool(outside & SWITCH_WORDS))
     if want in ("dlc", "dlcpack"):
         return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
                              bool(outside & SWITCH_WORDS), pack=want == "dlcpack")
@@ -551,6 +557,48 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     identity = "tid" if name_match == "tid" else "fuzzy" if name_match == "fuzzy" else "extras" if extras else "exact"
     return Candidate(mark(identity, chance, kind, crack), kind, name_match, internal, display, is_latest,
                      reasons, estimated, deduced)
+
+
+def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons, switch):
+    """A release judged as the game itself, for a game that is not in the library yet. A
+    bundle with its update or DLC is as good: it holds the game."""
+    if kind == "update":
+        return Rejection("update only, not the game")
+    if kind == "dlc" or words & UNLOCKER_WORDS:
+        return Rejection("DLC only, not the game")
+    chance = 1.0
+    if kind == "bundle":
+        reasons.append("the game with its update or DLC")
+    elif kind == "base":
+        reasons.append("the game itself")
+    else:
+        internal, display = _versions(text, rest)
+        if internal:
+            return Rejection(f"v{internal} is an update, not the game")
+        if display and version_tuple(display) > (1, 0, 0):
+            chance = VERSIONED
+            reasons.append(f"v{display} without 'update': can be an update")
+        else:
+            chance = UNSAID
+            reasons.append("says neither update nor DLC: probably the game itself")
+    if not (own_ids or switch):
+        chance *= UNMARKED
+        reasons.append("the title names no platform")
+    crack = bool(words & CRACK_WORDS)
+    if crack:
+        reasons.append("with crack: the files were changed")
+    identity = "tid" if name_match == "tid" else "fuzzy" if name_match == "fuzzy" else "extras" if extras else "exact"
+    return Candidate(mark(identity, chance, "base", crack), "bundle" if kind == "bundle" else "base",
+                     name_match, None, None, None, reasons)
+
+
+def guessed_name(title):
+    """The name of the game at the start of a release title: up to the first bracket, title ID,
+    version or word of the platform. "" if nothing is left."""
+    text = EXTENSION_RE.sub("", title.strip())
+    text = re.split(r"[\[(]|(?<![0-9a-z])0[14][0-9a-f]{14}|[ ._-][vV]\.?\d|[ ._-](?:NSW|NSP|NSZ|XCI|XCZ|Switch|Update|UPD|DLC|Base|incl)(?![0-9a-z])",
+                    text, maxsplit=1, flags=re.IGNORECASE)[0]
+    return " ".join(re.sub(r"[._]", " ", text).split()).strip(" -")
 
 
 def _dlc_words(game, name, telling=True):

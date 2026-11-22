@@ -2,6 +2,13 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.19.0] - 2026-11-22
+
+### Added
+
+- **Add Game**, in the toolbar of the Games page: look for a game that is not in your library yet. Search by name: NSWHunter searches your indexers and shows the games of the releases by the title ID in their names; or fill in the title ID yourself. The game is on Wanted (filter **New Games**) and is searched like the others. The game itself and a bundle with its update or DLC are wanted; an update or DLC alone is ruled out, and so is anything for the Switch 2. Importing gives it a folder of its own by the Folder Name Template. When the library has it, it leaves the list and its updates and DLC are looked for as usual. **Remove** on the page of the game stops looking for it.
+- **The name NSWHunter at the top** leads to the Games page.
+
 ## [3.18.0] - 2026-11-21
 
 ### Added

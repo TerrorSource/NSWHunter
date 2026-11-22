@@ -1,6 +1,6 @@
 # NSWHunter
 
-Searches your indexers for the Switch updates and DLC that your library misses and sends them to your download client.
+Searches your indexers for the Switch updates and DLC that your library misses, and for games you add yourself, and sends them to your download client.
 
 1. Fetches the export of [switch-library-manager-web](https://github.com/DeLFuS77/switch-library-manager-web) and takes all games that miss an update or DLC.
 2. Searches for releases of those games: through Prowlarr, or on a Newznab or Torznab indexer directly.

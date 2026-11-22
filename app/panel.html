@@ -52,7 +52,7 @@
   /* ---- the frame */
   .shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: 60px 1fr; min-height: 100vh; }
   #top { grid-column: 1 / -1; background: var(--top); color: var(--on-dark); display: flex; align-items: center; gap: 14px; padding: 0 20px 0 0; }
-  .brand { width: 210px; flex: none; padding-left: 20px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--accent-on-dark); white-space: nowrap; }
+  .brand { text-decoration: none; width: 210px; flex: none; padding-left: 20px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--accent-on-dark); white-space: nowrap; }
   .brand small { font-size: 12px; font-weight: 400; color: var(--on-dark); opacity: .6; margin-left: 4px; }
   .find { display: flex; align-items: center; gap: 8px; color: var(--on-dark); }
   .find input { all: unset; width: 200px; padding: 4px 2px; border-bottom: 1px solid var(--on-dark); color: var(--on-dark); font-size: 14px; }
@@ -260,6 +260,8 @@
   #modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-start; justify-content: center;
            padding: 5vh 12px 12px; overflow-y: auto; z-index: 20; }
   .dialog.wide { max-width: 1280px; }
+  .searchline { display: flex; gap: 8px; margin-bottom: 16px; }
+  .searchline input { flex: 1; min-width: 0; }
   .dialog .about { margin: 0 8px 4px; }
   /* The File Browser: a box to type in, and the folders to click through under it. */
   #browse-path { font: inherit; width: 100%; padding: 7px 12px; border-radius: 4px; border: 1px solid var(--edge); background: var(--input); color: var(--text); }
@@ -329,7 +331,7 @@
 <div id="app" class="shell" hidden>
   <header id="top">
     <button id="menu" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="brand">NSWHunter<small id="version"></small></div>
+    <a class="brand" id="brand" href="#games" title="Games">NSWHunter<small id="version"></small></a>
     <label class="find" id="findbox"><input id="find" type="search" placeholder="Search" aria-label="Search a game"></label>
     <span class="grow"></span>
     <div id="topright"></div>
@@ -406,6 +408,7 @@ function put(el, ...children) {
 // The small drawings of the menu and the toolbar.
 const ICONS = {
   play: "M8 5v14l11-7z",
+  add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z",
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3v6l5 3 .9-1.5-3.9-2.3V7z",
   warn: "M12 2 1 21h22L12 2zm-1 7h2v6h-2V9zm0 8h2v2h-2v-2z",
   sliders: "M3 6h10v2H3zm14 0h4v2h-4zm-3-2h2v6h-2zM3 11h4v2H3zm8 0h10v2H11zm-3-2h2v6H8zM3 16h12v2H3zm16 0h2v2h-2zm-3-2h2v6h-2z",
@@ -572,7 +575,7 @@ function score(value, title) {
   const level = value >= 9 ? "high" : value >= 7 ? "good" : value >= 4 ? "mid" : "";
   return h("span", {class: "score " + level, title: title || "The chance that this download is the right one"}, String(value || "?"), h("small", {}, "/10"));
 }
-const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unlocker: "DLC unlocker", unknown: ""};
+const KIND = {update: "update", bundle: "bundle", dlc: "DLC", dlcpack: "DLC pack", unlocker: "DLC unlocker", base: "game", unknown: ""};
 // How a sent release is doing, as the download client tells it.
 const SENT = {sent: "Queued", downloading: "Downloading", done: "Downloaded, waiting for the library",
               stuck: "Downloaded, not seen in your library"};
@@ -635,7 +638,7 @@ function upd(version) {
   return version % 65536 === 0 ? "update " + version / 65536 : "v" + version;
 }
 function whatOf(item) {
-  return item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id) : item.type === "dlcpack" ? "DLC pack" : "Update";
+  return item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id) : item.type === "dlcpack" ? "DLC pack" : item.type === "game" ? "Game" : "Update";
 }
 // A question in the page before something big happens: no window of the browser.
 function ask(text, yes, action) {
@@ -696,6 +699,7 @@ const WANTED = {
   all: {text: "All", has: () => true, none: "Your library misses no updates. Or the first round is still running."},
   updates: {text: "Update Missing", has: g => g.items.some(i => i.type === "update"), none: "No game misses an update."},
   dlc: {text: "DLC Missing", has: g => g.items.some(i => i.type === "dlc"), none: "No game misses DLC."},
+  newgames: {text: "New Games", has: g => g.items.some(i => i.type === "game"), none: "No new game is looked for. Add one with Add Game on the Games page."},
   choice: {text: "Awaiting Choice", has: g => g.items.some(waiting), none: "Nothing awaits your choice. Releases that are found show up here."},
   tried: {text: "Already Tried", has: g => live(g).some(i => i.status === "tried"), none: "No game has only releases that were sent before."},
   queue: {text: "In Queue", has: g => live(g).some(i => i.grab), none: "Nothing is in the queue."},
@@ -740,6 +744,7 @@ function ibtn(name, title, onclick, disabled) {
 }
 function versions(item) {
   if (item.type === "dlc") return "DLC: " + (item.dlc_name || item.dlc_id);
+  if (item.type === "game") return "not in your library yet";
   const local = upd(item.local_version) + (item.local_display ? " (v" + item.local_display + ")" : "");
   return "you have " + local + " → latest is " + upd(item.latest_version) + (item.latest_date ? " of " + item.latest_date : "");
 }
@@ -840,7 +845,8 @@ function gameStatus(game) {
 }
 function missingText(game) {
   const update = game.items.find(i => i.type === "update"), dlc = game.items.filter(i => i.type === "dlc").length;
-  return [update ? upd(update.local_version) + " → " + upd(update.latest_version) : null, dlc ? dlc + " DLC" : null].filter(Boolean).join(" · ");
+  const whole = game.items.some(i => i.type === "game") ? "Game" : null;
+  return [whole, update ? upd(update.local_version) + " → " + upd(update.latest_version) : null, dlc ? dlc + " DLC" : null].filter(Boolean).join(" · ");
 }
 function wantedRow(game) {
   const top = topOf(game), [cls, text] = gameStatus(game), searching = busy.has("s" + game.id);
@@ -954,7 +960,7 @@ function renderGame() {
                     onclick: () => downloadAllOf(game)},
          busy.has("all" + game.id) ? "Sending…" : "Download All" + (sendable(game).length ? " (" + sendable(game).length + ")" : ""))),
      found.map(part),
-     empty.length ? h("div", {class: "rest"}, "Nothing found yet for: " + empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : "the update").join(" · ")) : null],
+     empty.length ? h("div", {class: "rest"}, "Nothing found yet for: " + empty.map(i => i.type === "dlc" ? (i.dlc_name || i.dlc_id) : i.type === "game" ? "the game" : "the update").join(" · ")) : null],
     [h("button", {type: "button", title: "Ignore everything of this game",
                   onclick: () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + game.id)},
        allIgnored ? "Stop ignoring" : "Ignore"),
@@ -1094,7 +1100,7 @@ function renderGamePage() {
           g && g.latest ? fact("Latest", upd(g.latest)) : null,
           g && g.dlc_owned + g.dlc_missing ? fact("DLC", g.dlc_owned + " of " + (g.dlc_owned + g.dlc_missing)) : null,
           g ? fact("Size on Disk", size(g.size)) : null),
-        h("div", {}, g ? gameLabels(g) : null))),
+        h("div", {}, g ? gameLabels(g) : h("span", {class: "label wide info"}, "Not in Your Library")))),
     h("h2", {}, "Missing"),
     table(MISSING_COLUMNS, sortedBy("gamemissing", MISSING_COLUMNS, items.filter(i => i.type !== "dlcpack" || i.candidates.length || i.grab)).map(item => {
       const [cls, text] = itemStatus(item), best = bestOf(item);
@@ -1296,6 +1302,44 @@ function renderQueue() {
 // Manual Import: choose a folder or a file in the File Browser, see what would be moved, and
 // move it to the folder of the game. item: the download of the Queue it is done for, if any.
 let importFrom = "/";
+// Add Game: look for a game that is not in the library yet. A search by name on the indexers
+// finds the title IDs in the release names; one can also be filled in by hand.
+let lookup = null;
+function addGame() {
+  const st = lookup || (lookup = {name: "", games: null, busy: false});
+  editing = null; viewing = null;
+  const find = async () => {
+    st.name = $("newname").value.trim();
+    if (!st.name) return;
+    st.busy = true; addGame();
+    try {
+      const {data} = await request("/api/game/lookup", {name: st.name});
+      if (data.ok) st.games = data.games; else toast(data.error || "Failed");
+    } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); }
+    st.busy = false;
+    if (lookup === st) addGame();
+  };
+  const add = async (id, name) => {
+    const d = await post("/api/game/add", {id, name}, "add" + id);
+    if (d.ok) { lookup = null; closeModal(); toast(name + " is on Wanted: " + (d.found ? plural(d.found, "release") + " found" : "nothing found yet")); }
+  };
+  const state_ = g => g.owned ? h("span", {class: "label"}, "In your library") : g.wanted ? h("span", {class: "label"}, "Looked for already")
+    : h("button", {type: "button", class: "primary", disabled: busy.has("add" + g.id), onclick: () => add(g.id, g.name)}, "Add");
+  put($("modal"), dialog("Add Game", [
+    h("form", {class: "searchline", onsubmit: e => { e.preventDefault(); find(); }},
+      h("input", {id: "newname", type: "search", value: st.name, placeholder: "Name of the game", autocomplete: "off", "aria-label": "Name of the game"}),
+      h("button", {type: "submit", class: "primary", disabled: st.busy}, st.busy ? "Searching…" : "Search")),
+    st.games === null ? h("p", {class: "sub"}, "NSWHunter searches your indexers by name, and shows the games of the releases by the title ID in their names. Games for the Switch 2 are never shown.")
+      : st.games.length ? table(["Game", "Title ID", "Releases", ""], st.games.map(g => h("tr", {},
+          h("td", {class: "wrap"}, g.name), h("td", {class: "tight mono"}, g.id), h("td", {class: "tight num"}, g.releases), h("td", {class: "tight"}, state_(g)))))
+      : h("div", {class: "alert"}, "No release with a title ID was found for this name. Try other words, or fill in the title ID below."),
+    h("form", {class: "searchline", onsubmit: e => { e.preventDefault(); add($("newid").value.trim().toUpperCase(), $("newname").value.trim()); }},
+      h("input", {id: "newid", placeholder: "Or the title ID, like 0100F2C0115B6000", autocomplete: "off", "aria-label": "Title ID", maxlength: 16}),
+      h("button", {type: "submit"}, "Add by Title ID"))],
+    [h("span", {class: "grow"}), h("button", {type: "button", onclick: () => { lookup = null; closeModal(); }}, "Close")], "wide"));
+  $("modal").hidden = false;
+  if (!st.busy && st.games === null) $("newname").focus();
+}
 function manualImport(id, name, item) {
   const key = item ? item.key : undefined;
   browseFor(item && item.grab && item.grab.path ? item.grab.path : importFrom, async chosen => {
@@ -2369,6 +2413,7 @@ function renderToolbar() {
   }, {disabled: busy.has("testall"), title: "Ask the library, every indexer and every download client whether it answers"});
   if (page === "games") {
     left.push(
+      tool("add", "Add Game", () => { lookup = null; addGame(); }, {title: "Look for a game that is not in your library yet"}),
       tool("refresh", st.running ? "Busy…" : "Update All", syncNow, {disabled: st.running || !state.configured, title: "Start a round now: read the library, look at the newest posts, follow the downloads"}),
       tool("rss", "RSS Sync", () => quickTask("rss", "Looked at the newest posts"), {disabled: st.running || busy.has("trss") || !state.configured, title: "Look at the newest posts of your indexers now"}),
       h("span", {class: "sep"}), searchAll);
@@ -2391,7 +2436,10 @@ function renderToolbar() {
       tool("folder", busy.has("mi" + gameId) ? "Importing…" : "Manual Import", () => manualImport(gameId, ((library || []).find(x => x.id === gameId) || game || {name: gameId}).name),
         {disabled: busy.has("mi" + gameId), title: "Choose a folder or a file yourself: its Switch files are moved to the folder of this game"}),
       h("span", {class: "sep"}),
-      tool("bookmark", allIgnored ? "Stop Ignoring" : "Ignore", () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + gameId),
+      game && game.items.some(i => i.type === "game")
+        ? tool("trash", "Remove", () => post("/api/game/remove", {id: gameId}, "rm" + gameId).then(d => d.ok && show("games")),
+               {disabled: busy.has("rm" + gameId), title: "Stop looking for this game. What was found for it goes too."})
+        : tool("bookmark", allIgnored ? "Stop Ignoring" : "Ignore", () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + gameId),
         {disabled: !game, title: "Ignore everything this game misses: it is not searched or sent any more"}));
   } else if (SECTION(page) === "wanted") {
     const n = ready().length, picked = selected.size, working = busy.has("bulk");
@@ -2487,6 +2535,7 @@ async function syncNow() {
     if (e !== LOGIN) toast("No connection to NSWHunter");
   }
 }
+$("brand").addEventListener("click", e => { e.preventDefault(); show("games"); });
 $("menu").addEventListener("click", () => {
   const open = $("side").classList.toggle("open");
   $("menu").setAttribute("aria-expanded", open ? "true" : "false");

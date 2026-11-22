@@ -512,6 +512,19 @@ async def do_manual_import(hunter, body):
                                       dry=bool(body.get("preview")))
 
 
+async def do_lookup_game(hunter, body):
+    """Add Game: the games a search by name finds, by the title IDs in the release names."""
+    return {"games": await hunter.lookup_game(str(body["name"])[:100])}
+
+
+async def do_add_game(hunter, body):
+    return {"found": await hunter.add_game(str(body["id"]), str(body["name"]))}
+
+
+async def do_remove_game(hunter, body):
+    hunter.remove_game(str(body["id"]).upper())
+
+
 async def do_rescan_game(hunter, body):
     """Rescan Folder: the library scans its folders, and the game is read anew."""
     return await hunter.rescan_game(str(body["game_id"]).upper())
@@ -811,6 +824,9 @@ def make_app():
         web.post("/api/import", action(do_import)),
         web.post("/api/manual-import", action(do_manual_import)),
         web.post("/api/rescan-game", action(do_rescan_game)),
+        web.post("/api/game/lookup", action(do_lookup_game)),
+        web.post("/api/game/add", action(do_add_game)),
+        web.post("/api/game/remove", action(do_remove_game)),
         web.post("/api/browse", api_browse),
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),

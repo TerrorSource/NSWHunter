@@ -36,6 +36,7 @@ TASKS = {"health": "Check Health", "library": "Library Sync", "rss": "Rss Sync",
 MAX_HISTORY = 500  # what was sent, arrived or failed, for the History page
 MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be restored
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
+MAX_LOOKUP = 10  # Add Game: the games a search by name offers at most
 DISK_SECONDS = 60  # how long the free space of the disks is taken as known
 SCAN_WAIT = 900  # Rescan Folder: the longest wait for the library to finish its scan
 SCAN_LOOK = 3  # seconds between two looks whether it is done
@@ -107,6 +108,7 @@ class Hunter:
             "covers_fetched": 0,
             "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
+            "new_games": [],  # games that are not in the library yet, to look for: {"id", "name", "added"}
         }
         self.load()
 
@@ -391,6 +393,7 @@ class Hunter:
                 game_id = str(title.get("id", "")).upper() if isinstance(title, dict) else ""
                 broken.add(game_id)  # what is known about it is kept as it is
                 self.skip(f"{game_id or 'a game'} of the library", e)
+        added = self.want_new_games(games, wanted, {g["id"] for g in listed} | broken)
         items = self.state["items"]
         arrived = []
         for key in [k for k in items if k not in wanted and items[k]["game_id"] not in broken]:
@@ -426,7 +429,19 @@ class Hunter:
         for text in arrived:
             self.event(text, "grab")
             await self.tell(text, "arrive")
+        for game in added:
+            self.event(f"{game['name']} is in your library now: it is no longer looked for as a new game")
         return True
+
+    def want_new_games(self, games, wanted, owned):
+        """The games of Add Game as items to look for. One that is in the library now leaves the
+        list; the games of the library are `owned`. Returns the ones that left."""
+        left = [g for g in self.state["new_games"] if g["id"] in owned]
+        self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] not in owned]
+        for new in self.state["new_games"]:
+            games[new["id"]] = matcher.Game(id=new["id"], name=new["name"])
+            wanted[new["id"] + ":game"] = {"type": "game", "game_id": new["id"], "name": new["name"]}
+        return left
 
     def read_title(self, title, games, wanted, listed):
         """One game of the export: a line for the Games page, and what it misses as items to
@@ -495,7 +510,7 @@ class Hunter:
     @staticmethod
     def what(item):
         return ("DLC: " + (item.get("dlc_name") or item["key"]) if item["type"] == "dlc"
-                else "DLC pack" if item["type"] == "dlcpack" else "update")
+                else "DLC pack" if item["type"] == "dlcpack" else "game" if item["type"] == "game" else "update")
 
     def record(self, kind, item, title, **more):
         """One line of the History page. kind: "grabbed", "imported", "arrived", "unseen" or "failed"."""
@@ -519,6 +534,8 @@ class Hunter:
             return f"{item['name']} (DLC: {item.get('dlc_name') or item['key']})"
         if item["type"] == "dlcpack":
             return f"{item['name']} (DLC pack)"
+        if item["type"] == "game":
+            return f"{item['name']} (new game)"
         return f"{item['name']} (update)"
 
     def items_of(self, game_id):
@@ -935,7 +952,7 @@ class Hunter:
         What went wrong is kept with the download and said once, not at every try."""
         grab = item["grab"]
         client = next((c for c in config.providers("DOWNLOAD_CLIENTS") if c["id"] == grab.get("client")), None)
-        wanted = "UPD" if item["type"] == "update" else "DLC"
+        wanted = {"update": "UPD", "game": "BASE"}.get(item["type"], "DLC")
         try:
             if client is None:
                 raise importer.ImportProblem("the download client this was sent to is no longer in the settings")
@@ -1064,6 +1081,74 @@ class Hunter:
             raise clients.ServiceError("This game is not in your library")
         return name
 
+    async def lookup_game(self, name):
+        """Add Game: search the indexers by name, and offer the games the releases are of, by the
+        title IDs in their names. A Switch 2 title ID is never offered."""
+        term = matcher.search_term(name)
+        if not term:
+            raise clients.ServiceError("Fill in the name of a game")
+        releases, errors = await indexers.search_all(self.session, term)
+        self.heard(errors)
+        if errors and len(errors) == len(config.indexers()):
+            raise clients.ServiceError(next(iter(errors.values())))
+        found = {}
+        for release in releases:
+            for tid in {m.group(1).upper() for m in matcher.TID_RE.finditer(matcher.clean(release["title"]))}:
+                if not tid.startswith("01"):
+                    continue  # Switch 2: only the first Switch
+                base = f"{matcher.family(tid):016X}"
+                entry = found.setdefault(base, {"id": base, "names": {}, "releases": 0})
+                entry["releases"] += 1
+                guessed = matcher.guessed_name(release["title"])
+                if guessed:
+                    entry["names"][guessed] = entry["names"].get(guessed, 0) + 1
+        owned = {g["id"] for g in self.state.get("games", [])}
+        wanted = {g["id"] for g in self.state["new_games"]}
+        offered = sorted(found.values(), key=lambda e: -e["releases"])[:MAX_LOOKUP]
+        return [{"id": e["id"], "name": max(e["names"], key=e["names"].get) if e["names"] else name.strip(),
+                 "releases": e["releases"], "owned": e["id"] in owned, "wanted": e["id"] in wanted} for e in offered]
+
+    async def add_game(self, game_id, name):
+        """Add Game: look for a game that is not in the library yet. Returns how many releases
+        the first search found for it."""
+        game_id, name = game_id.strip().upper(), " ".join(str(name).split())[:200]
+        if game_id.startswith("04"):
+            raise clients.ServiceError("That is a game for the Switch 2: NSWHunter is for the first Switch only")
+        if not re.fullmatch(r"01[0-9A-F]{14}", game_id) or int(game_id, 16) & 0x1FFF:
+            raise clients.ServiceError("A title ID of a game has 16 characters, starts with 01 and ends with 000")
+        if not name:
+            raise clients.ServiceError("Fill in the name of the game")
+        if any(g["id"] == game_id for g in self.state.get("games", [])):
+            raise clients.ServiceError(f"{name} is in your library already")
+        if any(g["id"] == game_id for g in self.state["new_games"]):
+            raise clients.ServiceError(f"{name} is in the list already")
+        self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time())})
+        wanted = {}
+        self.want_new_games(self.games, wanted, set())
+        key = game_id + ":game"
+        self.state["items"][key] = {"key": key, "candidates": [], "blocked": [], "ignored": False, "grab": None,
+                                    "first_seen": int(time.time()), **wanted[key]}
+        self.event(f"Added: {name}, to look for as a new game")
+        found = await self.search_game(game_id)
+        self.save()
+        return found
+
+    def remove_game(self, game_id):
+        """Stop looking for a game of Add Game. What was found for it goes too."""
+        key = game_id + ":game"
+        item = self.state["items"].get(key)
+        if item and item.get("grab"):
+            raise clients.ServiceError("This game is in the queue: take it out of the queue first")
+        gone = [g for g in self.state["new_games"] if g["id"] == game_id]
+        if not gone:
+            raise clients.ServiceError("This game is not in the list of new games")
+        self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] != game_id]
+        self.state["items"].pop(key, None)
+        if not self.items_of(game_id):
+            self.games.pop(game_id, None)
+        self.event(f"Removed: {gone[0]['name']}, no longer looked for")
+        self.save()
+
     async def rescan_game(self, game_id):
         """Rescan Folder of a game page: let the library scan its folders, wait until it is
         done, and read it anew. Returns how many updates and DLC the game still misses."""
@@ -1090,7 +1175,8 @@ class Hunter:
         item = self.state["items"].get(key) if key else None
         if item is not None and item["game_id"] != game_id:
             raise ValueError
-        wanted = "DLC" if item is not None and item["type"] != "update" else "UPD"
+        item_type = (item or self.state["items"].get(game_id + ":game") or {}).get("type")
+        wanted = {"game": "BASE", None: "UPD", "update": "UPD"}.get(item_type, "DLC")
         try:
             done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,
                                                  (game_id, name), dry)

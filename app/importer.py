@@ -173,12 +173,12 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
     """Put the Switch files of one finished download in the library.
 
     client: the download client entry. reported: where the client says the download is.
-    game_files: [{"type", "path", "version"}] of the game as the library has it. wanted: "UPD"
-    or "DLC", what the download was sent for. game: (title ID, name) of the game; with it and
+    game_files: [{"type", "path", "version"}] of the game as the library has it. wanted: "UPD",
+    "DLC" or "BASE" (a game that is not in the library yet), what the download was sent for. game: (title ID, name) of the game; with it and
     a folder name template, the folder comes from the template and not from the files the game
     has. Returns ([{"file", "folder", "how"}] of what was brought in, [files that were left
     where they are]). ImportProblem says why not."""
-    ready(game_files, game)
+    ready(game_files, game, wanted)
     if not reported:
         raise ImportProblem(f"{client['name']} no longer has this download in its list, so it does not say where the files are, "
                             "and no folder named after the release was found where its other downloads are")
@@ -190,10 +190,13 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
     return place(source, game_files, wanted, protocol == "torrent", game)
 
 
-def ready(game_files, game):
+def ready(game_files, game, wanted=None):
     """What importing needs before a file is looked at; ImportProblem says what is missing."""
     if not config.ROOT_FOLDERS:
         raise ImportProblem("there is no root folder yet (Settings > Media Management > Root Folders)")
+    if wanted == "BASE" and not game_files and not config.FOLDER_TEMPLATE:
+        raise ImportProblem("a game that is not in the library yet needs a Folder Name Template "
+                            "(Settings > Media Management) to get a folder of its own")
     if not (game and config.FOLDER_TEMPLATE) and not game_files:
         raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
 
@@ -202,7 +205,7 @@ def manual(path, game_files, wanted, game, dry=False):
     """Manual Import: the Switch files of a folder or a file the user chose, moved to the
     folder of a game. A file that has the title ID of another game in its name is left where
     it is. `dry`: only say what would be done. Returns what bring() returns."""
-    ready(game_files, game)
+    ready(game_files, game, wanted)
     source = os.path.normpath("/" + str(path or "").strip().lstrip("/"))
     if not os.path.exists(source):
         raise ImportProblem(f"{source} is not there in this container")
@@ -241,7 +244,7 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
                 others.append(file)  # of another game: not for the folder of this one
                 continue
             kind = kind_of(os.path.basename(file), wanted)
-            if kind == "BASE":
+            if kind == "BASE" and wanted != "BASE":
                 left.append(file)  # the game itself, from a bundle: the library has it already
                 continue
             folder, root = game_folder(*game) if templated else local_library(folder_for(game_files, kind))
