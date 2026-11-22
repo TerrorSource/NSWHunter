@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.20.0] - 2026-11-22
+
+### Added
+
+- **Wanted > Wishlist**: the games that are not in your library yet, each with when it was added, its status, the best release and its score. **Add Game** is in its toolbar, **Remove** in every row.
+
+### Changed
+
+- **Missing** only shows the games of your library; the games of Add Game are on the Wishlist now, and the filter New Games is gone. While a release of one awaits your choice it is on **Awaiting Choice** too.
+
 ## [3.19.0] - 2026-11-22
 
 ### Added

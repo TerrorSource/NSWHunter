@@ -461,7 +461,7 @@ const MENU = [
   {id: "activity", text: "Activity", icon: "clock", first: "queue", children: [
     {id: "queue", text: "Queue"}, {id: "history", text: "History"}, {id: "blocklist", text: "Blocklist"}]},
   {id: "want", text: "Wanted", icon: "warn", first: "wanted", children: [
-    {id: "wanted", text: "Missing"}, {id: "choice", text: "Awaiting Choice"}]},
+    {id: "wanted", text: "Missing"}, {id: "choice", text: "Awaiting Choice"}, {id: "wishlist", text: "Wishlist"}]},
   {id: "settings", text: "Settings", icon: "sliders", first: "settings", children: [
     {id: "media", text: "Media Management", form: true, about: "Automatic download, waiting for the library, searching and DLC"},
     {id: "indexers", text: "Indexers", kind: "INDEXERS", about: "Prowlarr, and Newznab and Torznab indexers"},
@@ -674,11 +674,16 @@ const SORTS = {
     return u ? Math.round((u.latest_version - u.local_version) / 65536) : 0; }},
   missing: {text: "Missing DLC", down: true, of: g => g.items.filter(i => i.type === "dlc").length},
   searched: {text: "Last Search", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
+  added: {text: "Added", down: true, of: g => Math.max(0, ...g.items.map(i => i.first_seen || 0))},
   release: {text: "Best Release", down: false, of: g => { const top = topOf(g); return top ? top.release.title : "\uffff"; }},
   status: {text: "Status", down: false, of: g => ["Awaiting Choice", "In Queue", "Already Tried", "Nothing Found", "Not Searched", "Ignored"].indexOf(gameStatus(g)[1])},
 };
 // The heads of the Wanted table and what each sorts on; the Sort menu of the toolbar does the same.
 const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
+// The Wishlist: games that are not in the library yet, added with Add Game. Missing leaves them out.
+const wished = g => g.items.some(i => i.type === "game");
+const WISHLIST = {has: wished, none: "The wishlist is empty. Add Game looks for a game that is not in your library yet."};
+const headsOf = () => page === "wishlist" ? WANTED_HEADS.map(head => head[1] === "behind" ? ["Added", "added"] : head) : WANTED_HEADS;
 function sortWanted(key) {
   flipped = key === sortBy ? !flipped : false; sortBy = key;
   remember("sort", sortBy); remember("flipped", flipped ? "1" : "");
@@ -699,7 +704,6 @@ const WANTED = {
   all: {text: "All", has: () => true, none: "Your library misses no updates. Or the first round is still running."},
   updates: {text: "Update Missing", has: g => g.items.some(i => i.type === "update"), none: "No game misses an update."},
   dlc: {text: "DLC Missing", has: g => g.items.some(i => i.type === "dlc"), none: "No game misses DLC."},
-  newgames: {text: "New Games", has: g => g.items.some(i => i.type === "game"), none: "No new game is looked for. Add one with Add Game on the Games page."},
   choice: {text: "Awaiting Choice", has: g => g.items.some(waiting), none: "Nothing awaits your choice. Releases that are found show up here."},
   tried: {text: "Already Tried", has: g => live(g).some(i => i.status === "tried"), none: "No game has only releases that were sent before."},
   queue: {text: "In Queue", has: g => live(g).some(i => i.grab), none: "Nothing is in the queue."},
@@ -856,7 +860,7 @@ function wantedRow(game) {
     h("td", {class: "check"}, h("input", {type: "checkbox", checked: selected.has(game.id), "aria-label": "Select " + game.name,
       onchange: e => { e.target.checked ? selected.add(game.id) : selected.delete(game.id); render(); }})),
     h("td", {}, h("button", {class: "linkish", title: "Open the page of this game", onclick: () => showGame(game.id)}, game.name)),
-    h("td", {class: "tight"}, missingText(game)),
+    h("td", {class: "tight"}, page === "wishlist" ? ago(Math.max(0, ...game.items.map(i => i.first_seen || 0))) : missingText(game)),
     h("td", {class: "wrap"}, top ? [top.release.title, count > 1 ? h("span", {class: "sub"}, " · " + (count - 1) + " more") : null] : "–"),
     h("td", {class: "tight"}, top ? score(top.release.score, "Score of the best release that was found") : "–"),
     h("td", {class: "tight"}, h("span", {class: "label wide " + cls, ...(text === "Already Tried" ? {title: TRIED} : {})}, text),
@@ -866,11 +870,14 @@ function wantedRow(game) {
       ibtn("search", searching ? "Searching…" : "Automatic Search: look for this game on your indexers now", () => search(game), searching),
       ibtn("person", "Interactive Search: choose a release yourself", () => openGame(game.id)),
       ibtn("download", top ? "Download the best release: " + top.release.title : "No release to download yet",
-           () => grab(top.item, top.release), !top || busy.has(top.release.guid)))));
+           () => grab(top.item, top.release), !top || busy.has(top.release.guid)),
+      wished(game) ? ibtn("trash", "Remove from the wishlist: stop looking for this game", () => post("/api/game/remove", {id: game.id}, "rm" + game.id),
+                          busy.has("rm" + game.id)) : null)));
 }
 function wantedRows() {
+  if (page === "wishlist") return {filter: WISHLIST, rows: games().filter(wished)};
   const key = page === "choice" ? "choice" : (WANTED[only] ? only : "all");
-  return {filter: WANTED[key], rows: games().filter(WANTED[key].has)};
+  return {filter: WANTED[key], rows: games().filter(g => WANTED[key].has(g) && (page === "choice" || !wished(g)))};
 }
 function renderWanted() {
   const {filter, rows} = wantedRows();
@@ -880,7 +887,7 @@ function renderWanted() {
       h("thead", {}, h("tr", {},
         h("th", {class: "check"}, h("input", {type: "checkbox", checked: all, "aria-label": "Select all",
           onchange: e => { rows.forEach(g => e.target.checked ? selected.add(g.id) : selected.delete(g.id)); render(); }})),
-        WANTED_HEADS.map(([text, key]) => {
+        headsOf().map(([text, key]) => {
           const on = sortBy === key, down = on && SORTS[key].down !== flipped;
           return h("th", {"aria-sort": on ? (down ? "descending" : "ascending") : null},
             h("button", {type: "button", title: "Sort by " + text, onclick: () => sortWanted(key)}, text + (on ? (down ? " ↓" : " ↑") : "")));
@@ -1321,9 +1328,9 @@ function addGame() {
   };
   const add = async (id, name) => {
     const d = await post("/api/game/add", {id, name}, "add" + id);
-    if (d.ok) { lookup = null; closeModal(); toast(name + " is on Wanted: " + (d.found ? plural(d.found, "release") + " found" : "nothing found yet")); }
+    if (d.ok) { lookup = null; closeModal(); toast(name + " is on the wishlist: " + (d.found ? plural(d.found, "release") + " found" : "nothing found yet")); }
   };
-  const state_ = g => g.owned ? h("span", {class: "label"}, "In your library") : g.wanted ? h("span", {class: "label"}, "Looked for already")
+  const state_ = g => g.owned ? h("span", {class: "label"}, "In your library") : g.wanted ? h("span", {class: "label"}, "On the Wishlist")
     : h("button", {type: "button", class: "primary", disabled: busy.has("add" + g.id), onclick: () => add(g.id, g.name)}, "Add");
   put($("modal"), dialog("Add Game", [
     h("form", {class: "searchline", onsubmit: e => { e.preventDefault(); find(); }},
@@ -2438,11 +2445,12 @@ function renderToolbar() {
       h("span", {class: "sep"}),
       game && game.items.some(i => i.type === "game")
         ? tool("trash", "Remove", () => post("/api/game/remove", {id: gameId}, "rm" + gameId).then(d => d.ok && show("games")),
-               {disabled: busy.has("rm" + gameId), title: "Stop looking for this game. What was found for it goes too."})
+               {disabled: busy.has("rm" + gameId), title: "Remove from the wishlist: stop looking for this game. What was found for it goes too."})
         : tool("bookmark", allIgnored ? "Stop Ignoring" : "Ignore", () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + gameId),
         {disabled: !game, title: "Ignore everything this game misses: it is not searched or sent any more"}));
   } else if (SECTION(page) === "wanted") {
     const n = ready().length, picked = selected.size, working = busy.has("bulk");
+    if (page === "wishlist") left.push(tool("add", "Add Game", () => { lookup = null; addGame(); }, {title: "Look for a game that is not in your library yet"}));
     left.push(searchAll, h("span", {class: "sep"}),
       tool("search", working ? "Busy…" : "Search Selected", searchSelected, {disabled: !picked || working, title: "Look for the ticked games on your indexers now"}),
       tool("download", "Download Selected", downloadSelected, {disabled: !picked || working, title: "Send the best release of every ticked game to the download client"}),

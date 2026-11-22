@@ -108,7 +108,7 @@ class Hunter:
             "covers_fetched": 0,
             "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
-            "new_games": [],  # games that are not in the library yet, to look for: {"id", "name", "added"}
+            "new_games": [],  # the wishlist: games that are not in the library yet, to look for: {"id", "name", "added"}
         }
         self.load()
 
@@ -430,7 +430,7 @@ class Hunter:
             self.event(text, "grab")
             await self.tell(text, "arrive")
         for game in added:
-            self.event(f"{game['name']} is in your library now: it is no longer looked for as a new game")
+            self.event(f"{game['name']} is in your library now: it leaves the wishlist")
         return True
 
     def want_new_games(self, games, wanted, owned):
@@ -535,7 +535,7 @@ class Hunter:
         if item["type"] == "dlcpack":
             return f"{item['name']} (DLC pack)"
         if item["type"] == "game":
-            return f"{item['name']} (new game)"
+            return f"{item['name']} (wishlist)"
         return f"{item['name']} (update)"
 
     def items_of(self, game_id):
@@ -1121,14 +1121,14 @@ class Hunter:
         if any(g["id"] == game_id for g in self.state.get("games", [])):
             raise clients.ServiceError(f"{name} is in your library already")
         if any(g["id"] == game_id for g in self.state["new_games"]):
-            raise clients.ServiceError(f"{name} is in the list already")
+            raise clients.ServiceError(f"{name} is on the wishlist already")
         self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time())})
         wanted = {}
         self.want_new_games(self.games, wanted, set())
         key = game_id + ":game"
         self.state["items"][key] = {"key": key, "candidates": [], "blocked": [], "ignored": False, "grab": None,
                                     "first_seen": int(time.time()), **wanted[key]}
-        self.event(f"Added: {name}, to look for as a new game")
+        self.event(f"Added to the wishlist: {name}")
         found = await self.search_game(game_id)
         self.save()
         return found
@@ -1141,12 +1141,12 @@ class Hunter:
             raise clients.ServiceError("This game is in the queue: take it out of the queue first")
         gone = [g for g in self.state["new_games"] if g["id"] == game_id]
         if not gone:
-            raise clients.ServiceError("This game is not in the list of new games")
+            raise clients.ServiceError("This game is not on the wishlist")
         self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] != game_id]
         self.state["items"].pop(key, None)
         if not self.items_of(game_id):
             self.games.pop(game_id, None)
-        self.event(f"Removed: {gone[0]['name']}, no longer looked for")
+        self.event(f"Removed from the wishlist: {gone[0]['name']}")
         self.save()
 
     async def rescan_game(self, game_id):
