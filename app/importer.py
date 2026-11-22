@@ -183,6 +183,10 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
         raise ImportProblem(f"{client['name']} no longer has this download in its list, so it does not say where the files are, "
                             "and no folder named after the release was found where its other downloads are")
     source = local_download(client, str(reported))
+    if not os.path.exists(source) and os.path.isdir(os.path.dirname(source.rstrip("/"))):
+        # The folder above it is there, so the volume is right: the download itself is gone.
+        raise ImportProblem(f"{source} is gone: it was removed or moved after the download. "
+                            "Download it again, or bring the files in with Manual Import.")
     if not os.path.exists(source):
         raise ImportProblem(
             f"{source} is not there in this container. Make the download folder a volume of the container, under "

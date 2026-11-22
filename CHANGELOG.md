@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.6] - 2026-11-22
+
+### Fixed
+
+- **A download that was removed or moved by hand** says so on import ("is gone: it was removed or moved after the download"). It said to make the download folder a volume of the container, which was right already.
+
 ## [3.21.5] - 2026-11-22
 
 ### Fixed
