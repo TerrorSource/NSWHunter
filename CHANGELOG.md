@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.4] - 2026-11-22
+
+### Fixed
+
+- **PC repacks** are ruled out wherever the repacker stands in the title (ElAmigos, FitGirl, GOGGames and others; also "[FitGirl Repack]" of a Switch game), and so is a build date like "(build 19.11.2025)".
+- **A game of the wishlist** only takes a release that says it is for the Switch (NSW, Switch, eShop, NSP, XCI or a title ID). Unmarked releases turned out to be PC games, mods and other consoles.
+- **Demos** are ruled out for a game of the wishlist.
+- **Another game of the same series** is ruled out for a game of the wishlist: a release that fits a longer name in the list of all games ("Double Dragon Gaiden" for "Double Dragon", "Crisis Core Final Fantasy VII" for "Final Fantasy VII"). Another edition of the same game still counts.
+- **The right game scored low**: "Complete" in a release title and "and" for a "/" in the name ("Ragnarok / Rhapsody") no longer count as other words.
+
 ## [3.21.3] - 2026-11-22
 
 ### Fixed

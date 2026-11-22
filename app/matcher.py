@@ -69,6 +69,11 @@ PC_GROUPS = {
     "gog", "rg mechanics", "masquerade", "corepack", "anomaly", "i know", "ksa", "rzr",
 }
 PC_GROUP_RE = re.compile(r"-\s*([0-9a-z_ ]+?)\s*$")
+# ... and the repackers of PC games, wherever they stand: also "[FitGirl Repack]" of a Switch
+# game is a PC emulator package. As is a build date ("(build 19.11.2025)").
+PC_TAGS = {"elamigos", "fitgirl", "goggames", "fckdrm", "voices38", "dodi", "xatab", "kaoskrew"}
+PC_BUILD_RE = re.compile(r"\(build \d{1,2}\.\d{1,2}\.\d{4}\)")
+DEMO_WORDS = {"demo", "trial"}
 # ... and these say it is the Switch.
 SWITCH_WORDS = {"nsw", "switch", "nsp", "nsz", "xci", "xcz", "eshop", "nx"}
 UNMARKED = 0.85  # a title that names no platform at all
@@ -81,7 +86,7 @@ NOISE = UPDATE_WORDS | DLC_WORDS | BUNDLE_WORDS | {
     "eur", "usa", "jpn", "jap", "jp", "eu", "us", "asia", "kor", "chn", "ww", "world", "region", "free",
     "multi", "multilang", "multilanguage", "repack", "proper", "read", "nfo", "internal", "rev", "cfw",
     "full", "unlocker", "en", "fr", "de", "es", "it", "nl", "pt", "ru", "ja", "ko", "zh", "pl",
-    "v", "ver", "version", "build", "retail", "digital", "rip", "scene", "p2p", "pack",
+    "v", "ver", "version", "build", "retail", "digital", "rip", "scene", "p2p", "pack", "complete",
 } | CRACK_WORDS
 ROMAN = {"ii", "iii", "iv", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii"}
 
@@ -184,12 +189,20 @@ def _includes_update(toks):
 
 
 def _find_name(release_tokens, name_tokens):
-    """Index of the first place where the name's words appear in a row, or None."""
+    """(index, number of words) of the first place where the name's words appear in a row, or
+    None. "Ragnarok / Rhapsody" is "Ragnarok and Rhapsody" in a release: an "and" there does not count."""
     words = [t for t, _, _ in release_tokens]
-    n = len(name_tokens)
-    for i in range(len(words) - n + 1):
-        if words[i:i + n] == name_tokens:
-            return i
+    bare = [t for t in name_tokens if t != "and"]
+    for i in range(len(words)):
+        if words[i:i + len(name_tokens)] == name_tokens:
+            return i, len(name_tokens)
+        j, got = i, []
+        while j < len(words) and len(got) < len(bare):
+            if words[j] != "and" or j == i:
+                got.append(words[j])
+            j += 1
+        if bare and got == bare:
+            return i, j - i
     return None
 
 
@@ -386,10 +399,11 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     extras = []
     at = None
     if name_tokens:
-        at = _find_name(toks, name_tokens)
-        if at is not None:
+        found = _find_name(toks, name_tokens)
+        if found is not None:
+            at, length = found
             name_match = "exact"
-            end = toks[at + len(name_tokens) - 1][2]
+            end = toks[at + length - 1][2]
             rest = text[end:]
             rest_toks = tokens(rest)
             limit = _marker_offset(rest, rest_toks)
@@ -430,6 +444,8 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         other = sorted(outside & OTHER_PLATFORMS) or [m.group() for m in [OTHER_CODE_RE.search(text)] if m]
         if other:
             return Rejection(f"for another platform ({other[0].upper()}), not for the Switch")
+        if outside & PC_TAGS or PC_BUILD_RE.search(text):
+            return Rejection("for the PC or a repack, not for the Switch")
         group = PC_GROUP_RE.search(text)
         if not words & SWITCH_WORDS and (outside & PC_WORDS or (group and group.group(1) in PC_GROUPS)):
             return Rejection("for the PC or a repack, not for the Switch")
@@ -580,6 +596,11 @@ def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons
         return Rejection("update only, not the game")
     if kind == "dlc" or words & UNLOCKER_WORDS:
         return Rejection("DLC only, not the game")
+    if DEMO_WORDS & set(extras):
+        return Rejection("a demo, not the game")
+    if not (own_ids or switch):
+        # Unmarked whole games turned out to be PC releases, mods and other consoles.
+        return Rejection("names no platform: a whole game must say it is for the Switch")
     chance = 1.0
     if kind == "bundle":
         reasons.append("the game with its update or DLC")
@@ -595,9 +616,6 @@ def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons
         else:
             chance = UNSAID
             reasons.append("says neither update nor DLC: probably the game itself")
-    if not (own_ids or switch):
-        chance *= UNMARKED
-        reasons.append("the title names no platform")
     crack = bool(words & CRACK_WORDS)
     if crack:
         reasons.append("with crack: the files were changed")

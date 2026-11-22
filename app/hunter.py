@@ -39,6 +39,9 @@ MAX_TURNED_DOWN = 25  # releases the user rejected, kept per item so they can be
 ARRIVED_DAYS = 30  # how long the panel shows what arrived
 MAX_LOOKUP = 10  # Add Game: the games a search by name offers at most
 MAX_LIST = 50  # Add Game: the lines of a pasted list
+# Words that make another edition of the same game, not another game.
+EDITION_WORDS = {"edition", "complete", "deluxe", "special", "ultimate", "definitive", "gold", "goty", "game",
+                 "of", "the", "year", "plus", "remastered", "hd", "digital", "standard", "nintendo", "switch", "and", "version"}
 TITLES_DAYS = 7  # how often the names of all games are fetched anew
 DISK_SECONDS = 60  # how long the free space of the disks is taken as known
 SCAN_WAIT = 900  # Rescan Folder: the longest wait for the library to finish its scan
@@ -645,7 +648,33 @@ class Hunter:
             del self.state["vermap"][game.id]
         if isinstance(result, matcher.Rejection):
             return result
+        if item["type"] == "game" and result.name_match != "tid":
+            other = self.other_title(game.name, release["title"])
+            if other:
+                return matcher.Rejection(f"another game: {other}")
         return {**{k: release.get(k) for k in RELEASE_FIELDS}, **result.to_dict()}
+
+    def other_title(self, name, title):
+        """For a game of the wishlist: another game of the list of all games whose whole name is
+        in the release title and longer than this one ("Double Dragon Gaiden" for "Double Dragon").
+        Another edition of the same game does not count ("... Special Edition")."""
+        if not self.titles:
+            return None
+        if getattr(self, "title_index", None) is None or self.title_index[0] != len(self.titles):
+            index = {}
+            for entry in self.titles.values():
+                words = tuple(matcher.search_term(entry[0]).split())
+                if words:
+                    index.setdefault(words[0], []).append((words, entry[0]))
+            self.title_index = (len(self.titles), index)
+        own = matcher.search_term(name).split()
+        toks = matcher.search_term(title).split()
+        for i, token in enumerate(toks):
+            for words, other in self.title_index[1].get(token, ()):
+                if len(words) > len(own) and tuple(toks[i:i + len(words)]) == words \
+                        and not set(words) - set(own) <= EDITION_WORDS:
+                    return other
+        return None
 
     def seen(self, game_id):
         """{display version: date first posted} of everything seen for a game."""
