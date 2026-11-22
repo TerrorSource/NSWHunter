@@ -262,6 +262,14 @@ class Hunter:
         self.state["searched"] = {}
         return len(self.games)
 
+    def search_wishlist(self):
+        """The button "Search All" on the Wishlist: only the games of the wishlist, at once.
+        Returns how many games that are."""
+        ids = sorted({i["game_id"] for i in self.state["items"].values() if i["type"] == "game"})
+        if ids:
+            self.later(self.search_games(ids))
+        return len(ids)
+
     def event(self, text, level="info"):
         log(text)
         self.state["events"].insert(0, {"at": int(time.time()), "text": text, "level": level})

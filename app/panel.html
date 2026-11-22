@@ -2474,10 +2474,11 @@ function renderToolbar() {
   // Someone is typing in the toolbar: leave it alone until they are done.
   if (bar.contains(focused) && focused.tagName === "INPUT") return;
   const here = PAGES[page], st = state.status, left = [], right = [];
-  const wanted = new Set(state.items.map(i => i.game_id)).size;
-  const searchAll = tool("search", "Search All", () => ask("Search all " + plural(wanted, "game") + " that miss something by name now? That is one API call per indexer per game.", "Search",
-    () => post("/api/search-all", {}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")))),
-    {disabled: !wanted || st.running, title: "Search every game that misses something on your indexers now, not only the ones whose turn it is"});
+  const onWishlist = page === "wishlist";
+  const wanted = new Set(state.items.filter(i => !onWishlist || i.type === "game").map(i => i.game_id)).size;
+  const searchAll = tool("search", "Search All", () => ask((onWishlist ? "Search all " + plural(wanted, "game") + " of the wishlist now?" : "Search all " + plural(wanted, "game") + " that miss something by name now?") + " That is one API call per indexer per game.", "Search",
+    () => post("/api/search-all", {wishlist: onWishlist}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")))),
+    {disabled: !wanted || (st.running && !onWishlist), title: onWishlist ? "Search every game of the wishlist on your indexers now" : "Search every game that misses something on your indexers now, not only the ones whose turn it is"});
   const testAll = tool("test", busy.has("testall") ? "Testing…" : "Test All", async () => {
     busy.add("testall"); renderToolbar();
     try { await request("/api/test-all", {}); toast("Tested"); } catch (e) { if (e !== LOGIN) toast("No connection to NSWHunter"); }

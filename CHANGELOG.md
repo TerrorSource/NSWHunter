@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.1] - 2026-11-22
+
+### Fixed
+
+- **Search All on the Wishlist** searches only the games of the wishlist, at once. It searched every game that misses something, and counted those games in its question.
+
 ## [3.21.0] - 2026-11-22
 
 ### Added
