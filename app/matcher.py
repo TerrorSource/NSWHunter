@@ -58,6 +58,17 @@ OTHER_PLATFORMS = {
 }
 # ... as do the product codes of PlayStation releases (CUSA34119).
 OTHER_CODE_RE = re.compile(r"(?<![0-9a-z])(cusa|ppsa|pcse|pcsb|bles|blus|npub|npeb|npua)\d{5}(?![0-9a-z])")
+# ... as do these, of PC releases and repacks, when the title does not name the Switch: words ...
+PC_WORDS = {"pc", "win", "win32", "win64", "windows", "x64", "x86", "gog", "steam", "steamrip", "linux",
+            "macos", "osx", "repack", "repacks"}
+# ... and the groups that release for the PC only (the name after the last dash).
+PC_GROUPS = {
+    "reloaded", "codex", "skidrow", "plaza", "cpy", "hoodlum", "prophet", "tinyiso", "darksiders", "flt",
+    "fairlight", "razor1911", "empress", "tenoke", "rune", "elamigos", "fitgirl", "dodi", "xatab", "kaoskrew",
+    "simplex", "doge", "chronos", "voksi", "ali213", "3dm", "postmortem", "dinobytes", "steampunks", "goldberg",
+    "gog", "rg mechanics", "masquerade", "corepack", "anomaly", "i know", "ksa", "rzr",
+}
+PC_GROUP_RE = re.compile(r"-\s*([0-9a-z_ ]+?)\s*$")
 # ... and these say it is the Switch.
 SWITCH_WORDS = {"nsw", "switch", "nsp", "nsz", "xci", "xcz", "eshop", "nx"}
 UNMARKED = 0.85  # a title that names no platform at all
@@ -419,6 +430,9 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         other = sorted(outside & OTHER_PLATFORMS) or [m.group() for m in [OTHER_CODE_RE.search(text)] if m]
         if other:
             return Rejection(f"for another platform ({other[0].upper()}), not for the Switch")
+        group = PC_GROUP_RE.search(text)
+        if not words & SWITCH_WORDS and (outside & PC_WORDS or (group and group.group(1) in PC_GROUPS)):
+            return Rejection("for the PC or a repack, not for the Switch")
         # Switch 2 releases are left alone on purpose: only the first Switch.
         if SWITCH2_RE.search(rest) or any(i.startswith("04") for i in ids):
             return Rejection("for the Switch 2, not for the Switch")

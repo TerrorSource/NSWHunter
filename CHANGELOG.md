@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.3] - 2026-11-22
+
+### Fixed
+
+- **PC releases and repacks are ruled out**: a title that does not name the Switch, with a PC word in it (PC, Win64, GOG, Steam, Repack) or by a group that releases for the PC only (RELOADED, CODEX, ElAmigos, FitGirl and others). They were offered for games of the wishlist, and could go out by themselves.
+
 ## [3.21.2] - 2026-11-22
 
 ### Fixed
