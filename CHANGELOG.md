@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.5] - 2026-11-22
+
+### Fixed
+
+- **Sorting on Score** in Wanted uses the score each row shows: of the best release that awaits a choice. It used the highest score of every release of the game, also of one already sent, so a row with 3/10 could stand on top.
+
 ## [3.21.4] - 2026-11-22
 
 ### Fixed

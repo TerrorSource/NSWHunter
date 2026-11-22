@@ -685,7 +685,8 @@ function games() {
 // What the list can be sorted on. `down`: the natural order is highest first.
 const releases = g => g.items.filter(i => !i.ignored).flatMap(i => i.candidates);
 const SORTS = {
-  score: {text: "Score", down: true, of: g => Math.max(0, ...releases(g).map(c => c.score || 0))},
+  // The score the row shows: of the best release that awaits a choice, not of one already sent.
+  score: {text: "Score", down: true, of: g => { const top = topOf(g); return top ? top.release.score || 0 : 0; }},
   name: {text: "Game", down: false, of: g => g.name},
   newest: {text: "Newest Release", down: true, of: g => Math.max(0, ...releases(g).map(c => Date.parse(c.published) || 0))},
   count: {text: "Number of Releases", down: true, of: g => releases(g).length},
