@@ -1232,6 +1232,8 @@ class Hunter:
         self.event(f"Added to the wishlist: {name}")
         found = await self.search_game(game_id) if search else None
         self.save()
+        if search:
+            await self.send_now()
         return found
 
     def pick_title(self, line):
@@ -1285,6 +1287,16 @@ class Hunter:
             except Exception as e:  # noqa: BLE001
                 self.skip(game_id, e)
         self.save()
+        await self.send_now()
+
+    async def send_now(self):
+        """Automatic Download right after a search between rounds, not an hour later in the
+        next round. Inside a round nothing is done here: the round sends after its searches."""
+        if self.lock.locked() or not self.working("DOWNLOAD_CLIENTS"):
+            return
+        async with self.lock:
+            await self.auto_grab()
+            self.save()
 
     def later(self, work):
         """Run something on its own, after the answer to the panel."""

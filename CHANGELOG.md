@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.2] - 2026-11-22
+
+### Fixed
+
+- **Automatic Download for the Wishlist** sends a game right after it is added and searched (Add Game, Add a List, Search All on the Wishlist). It waited for the next round, up to an hour later.
+
 ## [3.21.1] - 2026-11-22
 
 ### Fixed
