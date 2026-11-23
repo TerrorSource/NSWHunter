@@ -200,9 +200,12 @@ async def _qbittorrent_status(session, client):
     return f"qBittorrent {version.strip()[:40]}"
 
 
-async def _qbittorrent_add(session, client, kind, content):
+async def _qbittorrent_add(session, client, kind, content, seed=True):
     wanted = _own_hash(kind, content)
     fields = {"urls": content} if kind == "magnet" else {}
+    if not seed:
+        # A share limit of nothing: qBittorrent stops the torrent the moment it is complete.
+        fields.update(ratioLimit="0", seedingTimeLimit="0", inactiveSeedingTimeLimit="0")
     if client.get("category"):
         fields["category"] = client["category"]  # qBittorrent makes the category if it is new
     code, text = await _qbittorrent(
@@ -320,7 +323,7 @@ async def _transmission_status(session, client):
     return f"Transmission {str(answer.get('version', '?')).split(' ')[0][:40]}"
 
 
-async def _transmission_add(session, client, kind, content):
+async def _transmission_add(session, client, kind, content, seed=True):
     wanted, category = _own_hash(kind, content), client.get("category")
     arguments = {"filename": content} if kind == "magnet" else {"metainfo": base64.b64encode(content).decode()}
     if category:
@@ -333,6 +336,9 @@ async def _transmission_add(session, client, kind, content):
         # torrent-add knows labels since Transmission 4.0, torrent-set since 3.0: say it again
         # for the older one. Before 3.0 there are no labels and the key is ignored.
         await _transmission(session, client, "torrent-set", {"ids": [found], "labels": [category]})
+    if not seed:
+        # A seed ratio of its own of nothing: Transmission stops the torrent once it is complete.
+        await _transmission(session, client, "torrent-set", {"ids": [found], "seedRatioLimit": 0, "seedRatioMode": 1})
     return found
 
 
@@ -422,7 +428,9 @@ async def _utorrent_status(session, client):
     return f"uTorrent {number + ' ' if number else ''}(build {answer.get('build', '?')})"
 
 
-async def _utorrent_add(session, client, kind, content):
+async def _utorrent_add(session, client, kind, content, seed=True):
+    # shortcut: uTorrent has no seed limit per torrent in its API, so `seed` is not used; it is
+    # still taken out after the import (hunter.bring_in), only it may seed until then.
     wanted = _own_hash(kind, content)
     if kind == "magnet":
         answer = await _utorrent(session, client, [("action", "add-url"), ("s", content)])
@@ -507,12 +515,13 @@ async def status(session, client):
     return await _call(client, _STATUS, session, client)
 
 
-async def add(session, client, kind, content):
+async def add(session, client, kind, content, seed=True):
     """Hand a torrent to the client, in the client's category. kind "magnet": content is the
-    magnet URI; kind "file": content is the .torrent file in bytes. Returns the info hash
+    magnet URI; kind "file": content is the .torrent file in bytes. seed: False stops it as
+    soon as it is complete (qBittorrent and Transmission). Returns the info hash
     (40 lower-case hex), the key under which `states` reports it. A torrent the client
     already has is no error."""
-    return await _call(client, _ADD, session, client, kind, content)
+    return await _call(client, _ADD, session, client, kind, content, seed)
 
 
 async def states(session, client):

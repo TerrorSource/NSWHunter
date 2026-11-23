@@ -1129,7 +1129,8 @@ class Hunter:
             # Moving a file to another disk takes a while: not in the way of everything else.
             done, left = await asyncio.to_thread(importer.bring, client, grab.get("path") or self.guessed_path(client, grab),
                                                  self.files.get(item["game_id"]) or [],
-                                                 wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]))
+                                                 wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]),
+                                                 keep=grab.get("seed", True) and grab.get("protocol") == "torrent")
         except importer.ImportProblem as e:
             text = str(e)
             if grab.get("import_error") != text:
@@ -1155,8 +1156,8 @@ class Hunter:
         self.record("imported", item, grab["title"], client=grab.get("client_name", ""),
                     note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}")
         self.finished = True  # the library is asked to scan
-        if client.get("remove_completed") and (grab.get("protocol") or "usenet") == "usenet":
-            # The files are in the library: what is left of the download can go. Never a torrent, which seeds on.
+        if grab.get("seed") is False or (client.get("remove_completed") and (grab.get("protocol") or "usenet") == "usenet"):
+            # The files are in the library: what is left of the download can go. Never a torrent that seeds on.
             try:
                 await downloads.remove(self.session, client, grab.get("client_id"))
             except clients.ServiceError as e:
@@ -1552,7 +1553,9 @@ class Hunter:
                         "local_version": item.get("local_version", 0),
                         "dlc_missing": item.get("dlc_missing", 0), "state": "sent",
                         "client": client["id"], "client_name": client["name"], "client_id": client_id,
-                        "protocol": candidate.get("protocol") or "usenet", "indexer": candidate.get("indexer") or ""}
+                        "protocol": candidate.get("protocol") or "usenet", "indexer": candidate.get("indexer") or "",
+                        # Not seeded (see downloads.send): moved to the library, and then taken out of the client.
+                        **({"seed": False} if candidate.get("source") == "tg" else {})}
         self.record("grabbed", item, candidate["title"], client=client["name"], indexer=candidate.get("indexer") or "",
                     protocol=candidate.get("protocol") or "usenet", auto=auto, score=candidate.get("score"))
         item["ask"] = None  # a question about it in Telegram is answered by this

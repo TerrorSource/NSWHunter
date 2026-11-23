@@ -7,6 +7,7 @@ import re
 import clients
 import config
 import indexers
+import tg
 import torrent
 from clients import ServiceError, _percent
 
@@ -57,7 +58,8 @@ async def send(session, release):
     except ServiceError as e:
         raise clients.IndexerError(str(e)) from e
     if kind in torrent.TYPES:
-        return client, await torrent.add(session, client, what, content)
+        # What the chat source hands out is not seeded: stopped when complete, then moved and removed.
+        return client, await torrent.add(session, client, what, content, seed=release.get("source") != tg.SOURCE)
     name = clients.nzb_filename(release["title"])
     if kind == "nzbget":
         result = await clients.nzbget(session, client, "append", [

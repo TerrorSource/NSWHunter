@@ -248,7 +248,7 @@ def put(source, folder, keep, dry=False):
     return target, "moved"
 
 
-def bring(client, reported, game_files, wanted, protocol, game=None):
+def bring(client, reported, game_files, wanted, protocol, game=None, keep=None):
     """Put the Switch files of one finished download in the library.
 
     client: the download client entry. reported: where the client says the download is.
@@ -271,7 +271,9 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
             f"{source} is not there in this container. Make the download folder a volume of the container, under "
             f"the same path as in {client['name']}; or give the download client a Remote Path and a Local Path.")
     # Files named with the title ID of another game do not go to the folder of this one.
-    return place(source, game_files, wanted, protocol == "torrent", game, only=game[0] if game else None)
+    # A torrent that seeds keeps its files where they are: what goes to the library is a copy.
+    keep = protocol == "torrent" if keep is None else keep
+    return place(source, game_files, wanted, keep, game, only=game[0] if game else None)
 
 
 def ready(game_files, game, wanted=None):
