@@ -273,13 +273,20 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
     return done, left + others
 
 
+RAR_PART = re.compile(r"\.(rar|[r-z]\d\d)$")  # game.rar, game.r00 to game.r99, then game.s00
+
+
 def junk(name, patterns):
     """Is this file clutter that can go (Cleanup File Extensions)? name: its path inside the
     folder of the download. A pattern with a dot is an ending (".nfo"), one without a word in
-    the path ("sample", so also a file in a folder Sample). A Switch file never is."""
+    the path ("sample", so also a file in a folder Sample). A Switch file never is; the parts
+    of a RAR archive always are, as this is only asked once a Switch file was taken out of the
+    folder, so the archive was unpacked (by the download client, or by hand)."""
     lower = name.lower()
     if lower.endswith(EXTENSIONS + DISGUISED):
         return False
+    if RAR_PART.search(lower):
+        return True  # tidy runs after a Switch file came out: the archive was unpacked
     words = re.split(r"[^a-z0-9]+", lower)
     return any(lower.endswith(p) if p.startswith(".") else p in words for p in patterns)
 

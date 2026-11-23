@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.22.1] - 2026-11-23
+
+### Added
+
+- Cleanup File Extensions also removes the parts of a RAR archive (`.rar`, `.r00` to `.r99`) once a Switch file was imported from the folder: the archive was unpacked, by the download client or by hand.
+
 ## [3.22.0] - 2026-11-23
 
 ### Added
