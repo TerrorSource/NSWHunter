@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.5] - 2026-11-23
+
+### Fixed
+
+- Remove Failed now also clears the files of a failed NZBGet download (`.nfo`, `.sfv` and the rest) in the folder of finished downloads. NSWHunter did not get the folder of a failed download from NZBGet, so it left it alone.
+
 ## [3.24.4] - 2026-11-23
 
 ### Fixed

@@ -1075,7 +1075,7 @@ class Hunter:
         if (known or {}).get("path"):
             grab["path"] = known["path"]  # where the download client says the download is
             # And where this client keeps its finished downloads: for one it no longer lists.
-            if grab.get("client"):
+            if grab.get("client") and state == "done":  # a failed one is still in the working folder
                 self.state.setdefault("download_folders", {})[grab["client"]] = os.path.dirname(str(known["path"]).rstrip("/"))
         if grab.get("imported"):
             # Its files are in the folder of the game. If the library scanned on request after

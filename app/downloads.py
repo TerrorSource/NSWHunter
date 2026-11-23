@@ -107,9 +107,10 @@ async def _states(session, client):
             # SUCCESS/ALL, WARNING/HEALTH: the files are there. FAILURE/PAR, DELETED/MANUAL: not.
             done = status_.startswith(("SUCCESS", "WARNING"))
             # FinalDir is only filled when a post-processing script moved the files out of DestDir.
-            path = entry.get("FinalDir") or entry.get("DestDir")
+            # A failed one has only its working folder ("Game.#1213"): Remove Failed clears it.
+            path = (entry.get("FinalDir") if done else None) or entry.get("DestDir")
             states[str(entry.get("NZBID"))] = {"state": "done" if done else "failed", "percent": None,
-                                               "path": path if done and isinstance(path, str) and path else None,
+                                               "path": path if isinstance(path, str) and path else None,
                                                "size": _megabytes(entry.get("FileSizeMB")), "left": None}
         groups = await clients.nzbget(session, client, "listgroups", [0]) or []
         rate = 0
