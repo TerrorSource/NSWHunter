@@ -79,6 +79,8 @@ if AUTO_DOWNLOAD not in AUTO_LEVELS:
 AUTO_BUNDLES = flag("AUTO_BUNDLES")  # also send base+update bundles automatically
 # Also send a game of the wishlist automatically. Off: a whole game always waits for a click.
 AUTO_WISHLIST = flag("AUTO_WISHLIST")
+# A release of a whole game smaller than this many MB is broken or a fake; 0 = no minimum.
+MIN_GAME_MB = int(min(10000, max(0, number("MIN_GAME_MB", 20))))
 MAX_GRABS_PER_RUN = int(number("MAX_GRABS_PER_RUN", 10))
 INCLUDE_DLC = flag("INCLUDE_DLC", True)
 
@@ -212,7 +214,7 @@ UI_COLOR_IMPAIRED = flag("UI_COLOR_IMPAIRED")  # blue and orange instead of gree
 # empty), a range of whole numbers, or the tuple of allowed values.
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
-    "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
+    "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "MIN_GAME_MB": range(0, 10001), "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",

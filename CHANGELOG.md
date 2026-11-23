@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.9] - 2026-11-23
+
+### Added
+
+- **Minimum Size of a Game** (Settings > Media Management > Downloading, `MIN_GAME_MB`): the size under which a release of a whole game for the wishlist is ruled out. 20 MB by default; 0 = no minimum.
+
 ## [3.21.8] - 2026-11-23
 
 ### Fixed

@@ -1788,6 +1788,8 @@ const FORMS = {
        help: "The score is the chance that a download is the right one, from 1 to 10. Per game the best release is sent by itself when its score is at least this high. 10: title ID and version number match. 9: name and version are certain. 7-8: the version is derived from dates or from the numbering."},
       {name: "AUTO_WISHLIST", label: "Automatic Download for the Wishlist", checkbox: true,
        help: "Also send a game of the wishlist by itself, as Automatic Download does with updates and DLC. Off: a whole game always waits for your click, and a notification says when releases are found for it."},
+      {name: "MIN_GAME_MB", label: "Minimum Size of a Game", number: true, unit: "MB",
+       help: "A release of a whole game for the wishlist that is smaller than this is ruled out: it is broken or a fake. 0: no minimum."},
       {name: "GRAB_WAIT_MINUTES", label: "Wait for the Library", options: [
         ["30", "30 minutes"], ["60", "60 minutes"], ["120", "2 hours"], ["360", "6 hours"], ["1440", "24 hours"]],
        help: "How long a sent release may take to show up in your library. If the download fails, the next release gets its turn at once. While the download client is still downloading, the clock does not run."},

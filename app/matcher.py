@@ -24,7 +24,6 @@ UNSAID = 0.85  # a release of a new game that says neither game, update nor DLC
 VERSIONED = 0.7  # ... and does have a version above 1.0.0: it can be an update without the word
 WHOLE_GAME = 0.75  # an "update" as big as the game itself: the game is probably in it
 ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the library
-MIN_GAME = 20 * 2**20  # bytes: a whole game is never this small; such a release is broken or a fake
 PACK = 0.55  # a pack of DLC that does not say which DLC
 UNLOCKER = 0.35  # a "DLC Unlocker": a small file that opens DLC, not the DLC as the library counts it
 UNLOCKER_WORDS = {"unlocker", "unlockers", "unlock"}
@@ -357,15 +356,15 @@ NOT_THIS_GAME = ("title ID of another game", "name does not match")
 
 
 def evaluate(game, title, published=None, vermap=None, want="update", dlc=None, seen=None,
-             only_version=False, size=0):
+             only_version=False, size=0, min_game=0):
     """Judge one release for one game: a Candidate, or a Rejection with the reason.
 
     want: "update"; "dlc" with `dlc` = {"id": ..., "name": ...} of the missing DLC;
     "dlcpack" for a pack of the game's DLC that names none of them; or "game" for the game
     itself, of a game that is not in the library yet.
-    size: bytes of the release, if known.
+    size: bytes of the release, if known. min_game: bytes a whole game has at least (0: no minimum).
     """
-    result = _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size)
+    result = _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size, min_game)
     if isinstance(result, Rejection):
         result.known = not (result.reason in NOT_THIS_GAME or result.reason.startswith("another game"))
     return result
@@ -375,7 +374,7 @@ def size_text(size):
     return f"{size / 2**30:.1f} GB" if size >= 2**30 else f"{size / 2**20:.0f} MB"
 
 
-def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size):
+def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, size, min_game=0):
     """Judge one release for one game.
 
     published: datetime.date the release was posted, if known.
@@ -474,7 +473,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
 
     if want == "game":
         return _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons,
-                              bool(outside & SWITCH_WORDS), size)
+                              bool(outside & SWITCH_WORDS), size, min_game)
     if want in ("dlc", "dlcpack"):
         return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
                              bool(outside & SWITCH_WORDS), pack=want == "dlcpack")
@@ -590,7 +589,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
                      reasons, estimated, deduced)
 
 
-def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons, switch, size=0):
+def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons, switch, size=0, min_game=0):
     """A release judged as the game itself, for a game that is not in the library yet. A
     bundle with its update or DLC is as good: it holds the game."""
     if kind == "update":
@@ -599,7 +598,7 @@ def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons
         return Rejection("DLC only, not the game")
     if DEMO_WORDS & set(extras):
         return Rejection("a demo, not the game")
-    if 0 < size < MIN_GAME:
+    if 0 < size < min_game:
         return Rejection(f"only {size_text(size)}: too small for the whole game")
     if not (own_ids or switch):
         # Unmarked whole games turned out to be PC releases, mods and other consoles.
