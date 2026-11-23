@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.7] - 2026-11-23
+
+### Fixed
+
+- **A version written "vN1.50"** is read as version 1.50. Such an update was judged as one without a version, scored 3 and was never sent by itself.
+
 ## [3.21.6] - 2026-11-22
 
 ### Fixed

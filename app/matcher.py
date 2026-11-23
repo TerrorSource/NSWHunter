@@ -42,8 +42,8 @@ SWITCH2_RE = re.compile(r"(?<![0-9a-z])(switch|nsw|ns)[ ._-]?2(?![0-9a-z])")
 INTERNAL_RE = re.compile(r"(?<![0-9a-z])v\.?\s?(\d{5,10})(?![0-9a-z])")
 BRACKET_INTERNAL_RE = re.compile(r"[\[(](\d{5,10})[\])]")
 V0_RE = re.compile(r"(?<![0-9a-z])v0(?![0-9a-z.])")
-# v1.0.4, v.1.2, "v 2.0.1.3". Stops before ".nsw" but not in the middle of "1.0.4".
-DISPLAY_V_RE = re.compile(r"(?<![0-9a-z])v\.?\s?(\d{1,4}(?:\.\d{1,5}){1,3})(?![0-9a-z]|\.\d)")
+# v1.0.4, v.1.2, "v 2.0.1.3", "vN1.50" (as some groups write it). Stops before ".nsw" but not in the middle of "1.0.4".
+DISPLAY_V_RE = re.compile(r"(?<![0-9a-z])vn?\.?\s?(\d{1,4}(?:\.\d{1,5}){1,3})(?![0-9a-z]|\.\d)")
 # The same without the "v". Only trusted after the game name has been cut off (see parse).
 DISPLAY_BARE_RE = re.compile(r"(?<![0-9a-z])(?<!\d\.)(\d{1,2}(?:\.\d{1,5}){1,3})(?![0-9a-z]|\.\d)")
 EXTENSION_RE = re.compile(r"\.(nsp|nsz|xci|xcz|rar|zip|7z|nzb|par2)$")
