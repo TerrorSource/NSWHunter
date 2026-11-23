@@ -344,6 +344,8 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
                 raise ImportProblem(f"{folder} is not inside the root folder {root}")
             # What was unpacked here is no file of the download: moved, also from a torrent.
             target, how = put(file, folder, keep and file not in unpacked, dry)
+            if how == "was there already" and not keep and not dry and any(d["folder"] == folder and d["file"] == os.path.basename(target) for d in done):
+                os.remove(file)  # the same file twice in this download (game.nsp and game.nsp.hdf): one is in the library
             done.append({"file": os.path.basename(target), "folder": folder, "how": how})
     except PermissionError as e:
         raise ImportProblem(f"NSWHunter may not write {e.filename or 'there'}. The user of the container has to own "

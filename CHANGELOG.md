@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.1] - 2026-11-23
+
+### Fixed
+
+- A download that holds the same Switch file twice (`game.nsp` and `game.nsp.hdf`) brings it in once, and no longer leaves the second copy in the download folder.
+
 ## [3.24.0] - 2026-11-23
 
 ### Added
