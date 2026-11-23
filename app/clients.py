@@ -105,6 +105,23 @@ async def library(session, cfg=config):
     return data
 
 
+async def wishlist(session):
+    """The wishlist of switch-library-manager-web (its /api/wishlist, from version 2.0.22):
+    [{"id", "name", "addedAt", ...}], the first wished first. None: a version without it."""
+    headers = {"Authorization": f"Bearer {config.SLM_API_KEY}"} if config.SLM_API_KEY else {}
+    try:
+        async with session.get(f"{config.SLM_URL}/api/wishlist", headers=headers, timeout=SHORT) as r:
+            if r.status == 404:
+                return None
+            await _check(r, "Wishlist")
+            data = await _json(r)
+    except Exception as e:
+        raise _wrap("Wishlist", e) from e
+    if not isinstance(data, list):
+        raise ServiceError("Wishlist: unexpected answer (not a list)")
+    return data
+
+
 async def titledb_versions(session):
     """{title id: {version: "YYYY-MM-DD"}} for every Switch game, from the first address that
     answers."""

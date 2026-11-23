@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.23.0] - 2026-11-23
+
+### Added
+
+- **Use Wishlist from Switch-library-manager-web** (Settings > Connect, the library, `SLM_WISHLIST`, on by default): the games of the wishlist of switch-library-manager-web 2.0.22 and later (`/api/wishlist`) are looked for together with the wishlist of NSWHunter. They are added and removed there; a Switch 2 game is left out.
+
 ## [3.22.1] - 2026-11-23
 
 ### Added

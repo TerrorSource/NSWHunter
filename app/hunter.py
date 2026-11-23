@@ -129,6 +129,7 @@ class Hunter:
             "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
             "new_games": [],  # the wishlist: games that are not in the library yet: {"id", "name", "added", "released"}
+            "slm_wishes": [],  # the same, from the wishlist of Switch-library-manager-web (see read_slm_wishlist)
             "titles_fetched": 0,
         }
         self.load()
@@ -459,12 +460,16 @@ class Hunter:
                 game_id = str(title.get("id", "")).upper() if isinstance(title, dict) else ""
                 broken.add(game_id)  # what is known about it is kept as it is
                 self.skip(f"{game_id or 'a game'} of the library", e)
-        added = self.want_new_games(games, wanted, {g["id"] for g in listed} | broken)
+        owned = {g["id"] for g in listed}
+        await self.read_slm_wishlist(owned)
+        added = self.want_new_games(games, wanted, owned | broken)
         items = self.state["items"]
         arrived = []
         for key in [k for k in items if k not in wanted and items[k]["game_id"] not in broken]:
             gone = items.pop(key)
-            if gone["type"] == "game":
+            if gone["type"] == "game" and gone["game_id"] not in owned:
+                pass  # left the wishlist of Switch-library-manager-web, or that wishlist is no longer used
+            elif gone["type"] == "game":
                 self.arrive(gone, gone.get("grab") or {"title": gone["name"]}, "it leaves the wishlist")
             elif gone.get("grab") and gone["type"] != "dlcpack":
                 arrived.append(f"Arrived: {self.label(gone)} is now in the library")
@@ -506,15 +511,51 @@ class Hunter:
             await self.tell(text + ". NSWHunter looks for its updates and DLC now.", "arrive")
         return True
 
+    async def read_slm_wishlist(self, owned):
+        """The wishlist of Switch-library-manager-web, if Use Wishlist from Switch-library-manager-web
+        is on: kept apart from the own one, and looked for with it (see want_new_games). If it
+        cannot be read, the one read before stays. Only games of the first Switch."""
+        if not config.SLM_WISHLIST:
+            self.state["slm_wishes"] = []
+            return
+        try:
+            wishes = await clients.wishlist(self.session)
+        except clients.ServiceError as e:
+            logs.debug(f"Not read: {e}")
+            return
+        found = {}
+        for wish in wishes or []:
+            game_id = str(wish.get("id") or "").upper() if isinstance(wish, dict) else ""
+            if not re.fullmatch(r"01[0-9A-F]{14}", game_id) or int(game_id, 16) & 0x1FFF:
+                continue  # a Switch 2 game, an update or DLC: not for the wishlist here
+            known = self.titles.get(game_id) or ["", "", 0]
+            name = " ".join(str(wish.get("name") or known[0]).split())[:200]
+            try:
+                added = int(datetime.datetime.fromisoformat(str(wish.get("addedAt"))).timestamp())
+            except ValueError:
+                added = int(time.time())
+            if name:
+                found[game_id] = {"id": game_id, "name": name, "added": added, "released": known[2] or 0}
+        # One that is in the library now and so left that wishlist: once more, so that its arrival is said.
+        found.update({w["id"]: w for w in self.state.get("slm_wishes", []) if w["id"] in owned and w["id"] not in found})
+        self.state["slm_wishes"] = list(found.values())
+
+    def wished(self):
+        """The whole wishlist: the own games, then those only on the wishlist of Switch-library-manager-web."""
+        own = {g["id"] for g in self.state["new_games"]}
+        return self.state["new_games"] + [g for g in self.state.get("slm_wishes", []) if g["id"] not in own]
+
     def want_new_games(self, games, wanted, owned):
-        """The games of Add Game as items to look for. One that is in the library now leaves the
-        list; the games of the library are `owned`. Returns the ones that left."""
-        left = [g for g in self.state["new_games"] if g["id"] in owned]
+        """The games of the wishlist as items to look for. One that is in the library now leaves
+        the list; the games of the library are `owned`. Returns the ones that left."""
+        left = [g for g in self.wished() if g["id"] in owned]
         self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] not in owned]
-        for new in self.state["new_games"]:
+        self.state["slm_wishes"] = [g for g in self.state.get("slm_wishes", []) if g["id"] not in owned]
+        own = {g["id"] for g in self.state["new_games"]}
+        for new in self.wished():
             games[new["id"]] = matcher.Game(id=new["id"], name=new["name"])
             wanted[new["id"] + ":game"] = {"type": "game", "game_id": new["id"], "name": new["name"],
-                                           "released": new.get("released") or 0}
+                                           "released": new.get("released") or 0, "slm": new["id"] not in own}
         return left
 
     def read_title(self, title, games, wanted, listed):
@@ -1220,7 +1261,7 @@ class Hunter:
         if not self.titles:
             await self.refresh_titles()
         owned = {g["id"] for g in self.state.get("games", [])}
-        wanted = {g["id"] for g in self.state["new_games"]}
+        wanted = {g["id"] for g in self.wished()}
         hits = self.find_titles(name)[:MAX_LOOKUP] if self.titles else []
         if hits:
             return {"from": "titles", "games": [
@@ -1263,7 +1304,7 @@ class Hunter:
             raise clients.ServiceError("This title ID is not in the list of all games: fill in the name of the game too")
         if any(g["id"] == game_id for g in self.state.get("games", [])):
             raise clients.ServiceError(f"{name} is in your library already")
-        if any(g["id"] == game_id for g in self.state["new_games"]):
+        if any(g["id"] == game_id for g in self.wished()):
             raise clients.ServiceError(f"{name} is on the wishlist already")
         self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time()), "released": known[2] or 0})
         wanted = {}
@@ -1353,9 +1394,17 @@ class Hunter:
         if item and item.get("grab"):
             raise clients.ServiceError("This game is in the queue: take it out of the queue first")
         gone = [g for g in self.state["new_games"] if g["id"] == game_id]
+        if not gone and any(g["id"] == game_id for g in self.state.get("slm_wishes", [])):
+            raise clients.ServiceError("This game is on the wishlist of Switch-library-manager-web: "
+                                       "remove it there, with the heart on Missing Games")
         if not gone:
             raise clients.ServiceError("This game is not on the wishlist")
         self.state["new_games"] = [g for g in self.state["new_games"] if g["id"] != game_id]
+        if any(g["id"] == game_id for g in self.state.get("slm_wishes", [])):
+            item["slm"] = True  # still on the wishlist of Switch-library-manager-web: it is looked for still
+            self.event(f"Removed from the wishlist here, still on the one of Switch-library-manager-web: {gone[0]['name']}")
+            self.save()
+            return
         self.state["items"].pop(key, None)
         if not self.items_of(game_id):
             self.games.pop(game_id, None)

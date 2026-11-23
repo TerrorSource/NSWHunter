@@ -703,6 +703,8 @@ const SORTS = {
 const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
 // The Wishlist: games that are not in the library yet, added with Add Game. Missing leaves them out.
 const wished = g => g.items.some(i => i.type === "game");
+const fromSlm = g => g.items.some(i => i.type === "game" && i.slm);  // only on the wishlist of Switch-library-manager-web
+const SLM_WISH = "On the wishlist of Switch-library-manager-web: remove it there, with the heart on Missing Games";
 const WISHLIST = {has: wished, none: "The wishlist is empty. Add Game looks for a game that is not in your library yet."};
 const headsOf = () => page === "wishlist" ? WANTED_HEADS.map(head => head[1] === "behind" ? ["Added", "added"] : head) : WANTED_HEADS;
 function sortWanted(key) {
@@ -903,8 +905,8 @@ function wantedRow(game) {
       ibtn("person", "Interactive Search: choose a release yourself", () => openGame(game.id)),
       ibtn("download", top ? "Download the best release: " + top.release.title : "No release to download yet",
            () => grab(top.item, top.release), !top || busy.has(top.release.guid)),
-      wished(game) ? ibtn("trash", "Remove from the wishlist: stop looking for this game", () => post("/api/game/remove", {id: game.id}, "rm" + game.id),
-                          busy.has("rm" + game.id)) : null)));
+      wished(game) ? ibtn("trash", fromSlm(game) ? SLM_WISH : "Remove from the wishlist: stop looking for this game", () => post("/api/game/remove", {id: game.id}, "rm" + game.id),
+                          busy.has("rm" + game.id) || fromSlm(game)) : null)));
 }
 function wantedRows() {
   if (page === "wishlist") return {filter: WISHLIST, rows: games().filter(wished)};
@@ -2320,7 +2322,9 @@ function renderEditor() {
       values = {...settings.values, ...(keep || {})}; secrets = settings.secrets;
       fields = [{name: "SLM_URL", label: "URL", placeholder: "http://192.168.1.10:3000"},
         {name: "SLM_API_KEY", label: "API Key", secret: true,
-         help: "Make it in Switch-library-manager-web under My account > API keys > Make a key. Read only is enough; with the Editor role NSWHunter can also ask for a scan right after a download. The key starts with slm_ and is shown only once. If login is switched off there, leave this field empty."}];
+         help: "Make it in Switch-library-manager-web under My account > API keys > Make a key. Read only is enough; with the Editor role NSWHunter can also ask for a scan right after a download. The key starts with slm_ and is shown only once. If login is switched off there, leave this field empty."},
+        {name: "SLM_WISHLIST", label: "Use Wishlist from Switch-library-manager-web", checkbox: true,
+         help: "Also look for the games of the wishlist of Switch-library-manager-web (the hearts on Missing Games), together with the wishlist here. They are added and removed there. Needs version 2.0.22 or later of Switch-library-manager-web."}];
     } else {
       const spec = settings.schema[editing.kind][editing.entry.type];
       editing.entry = {...editing.entry, ...(keep || {})};
@@ -2520,7 +2524,7 @@ function renderToolbar() {
       h("span", {class: "sep"}),
       game && game.items.some(i => i.type === "game")
         ? tool("trash", "Remove", () => post("/api/game/remove", {id: gameId}, "rm" + gameId).then(d => d.ok && show("games")),
-               {disabled: busy.has("rm" + gameId), title: "Remove from the wishlist: stop looking for this game. What was found for it goes too."})
+               {disabled: busy.has("rm" + gameId) || fromSlm(game), title: fromSlm(game) ? SLM_WISH : "Remove from the wishlist: stop looking for this game. What was found for it goes too."})
         : tool("bookmark", allIgnored ? "Stop Ignoring" : "Ignore", () => post("/api/ignore", {keys: game.items.map(i => i.key), ignored: !allIgnored}, "i" + gameId),
         {disabled: !game, title: "Ignore everything this game misses: it is not searched or sent any more"}));
   } else if (SECTION(page) === "wanted") {

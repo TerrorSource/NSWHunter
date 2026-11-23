@@ -98,6 +98,8 @@ SEARCH_BY_TITLE_ID = flag("SEARCH_BY_TITLE_ID")
 # the clock does not run.
 WAITS = (30, 60, 120, 360, 1440)
 GRAB_WAIT_MINUTES = choice("GRAB_WAIT_MINUTES", WAITS, 30)
+# Also look for the games of the wishlist of Switch-library-manager-web, next to the own wishlist.
+SLM_WISHLIST = flag("SLM_WISHLIST", True)
 # Importing: put a finished download in the library, as Sonarr and Radarr do. It needs a root
 # folder, and the download folder as a volume of the container.
 IMPORT_COMPLETED = flag("IMPORT_COMPLETED", True)
@@ -218,7 +220,7 @@ UI_COLOR_IMPAIRED = flag("UI_COLOR_IMPAIRED")  # blue and orange instead of gree
 # name -> kind: "url", "text", "secret", "bool", "path", "file" (a file in the container, or
 # empty), a range of whole numbers, or the tuple of allowed values.
 EDITABLE = {
-    "SLM_URL": "url", "SLM_API_KEY": "secret",
+    "SLM_URL": "url", "SLM_API_KEY": "secret", "SLM_WISHLIST": "bool",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "MIN_GAME_MB": range(0, 10001), "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "IMPORT_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "CLEANUP_EXTENSIONS": "text", "FOLDER_TEMPLATE": "template",
