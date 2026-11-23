@@ -2,6 +2,18 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.22.0] - 2026-11-23
+
+### Added
+
+- **Cleanup File Extensions** (Settings > Media Management > File Management, `CLEANUP_EXTENSIONS`): the files removed from the folder of a download once its Switch files are in the library. Default `.nfo, .jpg, .jpeg, .png, .sfv, .txt, .url, .par2, sample`. A Switch file and a torrent are never touched.
+- **Remove Failed**: a usenet download that failed is taken out of the download client, with its files.
+
+### Changed
+
+- **Completed Download Handling** is in the form of each usenet download client, as in Radarr: Remove Completed and Remove Failed, both on by default. Remove Completed is no longer under Media Management; a client saved before keeps what that setting was.
+- Delete Empty Folders in Download Folder is under File Management.
+
 ## [3.21.10] - 2026-11-23
 
 ### Fixed

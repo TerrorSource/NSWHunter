@@ -109,6 +109,7 @@ class Hunter:
                        "skipped": 0}  # games and releases the last round had to leave out
         self.troubles = set()  # what was already written to the log about those
         self.cover_gate = asyncio.Semaphore(4)  # pictures fetched at the same time
+        self.failed = []  # the downloads that failed in this look at the download clients (see follow_grabs)
         self.no_cover = {}  # picture -> when fetching it last failed
         self.state = {
             "items": {},  # key -> one missing update or DLC, with its candidates
@@ -954,6 +955,7 @@ class Hunter:
         now, wait = time.time(), config.GRAB_WAIT_MINUTES * 60
         waited = f"{config.GRAB_WAIT_MINUTES} minutes" if wait < 7200 else f"{config.GRAB_WAIT_MINUTES // 60} hours"
         self.tell_later, self.dropped, self.finished = [], False, False
+        self.failed = []  # the sent releases the download client says failed (see follow)
         for item in pending:
             try:
                 self.follow(item, states, now, wait, waited)
@@ -969,6 +971,14 @@ class Hunter:
                         await self.bring_in(item)
                     except Exception as e:  # noqa: BLE001
                         self.skip(f"the import of {item['name']}", e)
+        for grab in self.failed:
+            client = next((c for c in config.providers("DOWNLOAD_CLIENTS") if c["id"] == grab.get("client")), None)
+            # Remove Failed, as in Radarr: the broken download goes, with its files. Usenet only.
+            if client and client.get("remove_failed") and config.protocol_of(client) == "usenet":
+                try:
+                    await downloads.remove(self.session, client, grab.get("client_id"))
+                except clients.ServiceError as e:
+                    self.event(f"Download failed, but not removed from {client['name']}: {grab['title']}: {e}", "warn")
         tell, dropped, finished = self.tell_later, self.dropped, self.finished
         placed = [i["grab"]["imported"] for i in pending if (i.get("grab") or {}).get("imported")]
         if placed and (self.state.get("rescan_at") or 0) < max(placed) and now - (self.state.get("rescan_tried") or 0) > wait:
@@ -1022,6 +1032,7 @@ class Hunter:
                 self.dropped = True
                 return
         if state == "failed":
+            self.failed.append(grab)
             self.tell_later.append(self.drop(
                 item, f"Download failed: {grab['title']}. The next release gets its turn.",
                 "the download client reports that the download failed"))
@@ -1074,18 +1085,20 @@ class Hunter:
         grab.update(imported=int(time.time()), imported_to=folder)
         grab.pop("import_error", None)
         more = f" ({len(left)} file(s) of the game itself left in the download)" if left else ""
-        if config.DELETE_EMPTY_FOLDERS and any(d["how"] == "moved" for d in done):
-            # The files went to the library: an empty folder is all that is left of the download.
+        clutter = importer.patterns(config.CLEANUP_EXTENSIONS)
+        if (config.DELETE_EMPTY_FOLDERS or clutter) and any(d["how"] == "moved" for d in done):
+            # The files went to the library: clutter and empty folders are all that is left of the download.
             where = grab.get("path") or self.guessed_path(client, grab)
             gone = await asyncio.to_thread(importer.tidy, client, where,
-                                           (self.state.get("download_folders", {}).get(client["id"]),))
+                                           (self.state.get("download_folders", {}).get(client["id"]),),
+                                           clutter, config.DELETE_EMPTY_FOLDERS)
             if gone:
                 more += "; the empty folder of the download was removed"
         self.event(f"Imported: {grab['title']}: {len(done)} file(s) to {folder}{more}", "grab")
         self.record("imported", item, grab["title"], client=grab.get("client_name", ""),
                     note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}")
         self.finished = True  # the library is asked to scan
-        if config.REMOVE_COMPLETED and (grab.get("protocol") or "usenet") == "usenet":
+        if client.get("remove_completed") and (grab.get("protocol") or "usenet") == "usenet":
             # The files are in the library: what is left of the download can go. Never a torrent, which seeds on.
             try:
                 await downloads.remove(self.session, client, grab.get("client_id"))

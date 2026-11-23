@@ -105,10 +105,15 @@ IMPORT_COMPLETED = flag("IMPORT_COMPLETED", True)
 # writes it: {TITLE_NAME} and {TITLE_ID}. Empty: a download goes next to the files its game
 # already has, as the library names them.
 FOLDER_TEMPLATE = env("FOLDER_TEMPLATE", "{TITLE_NAME} [{TITLE_ID}]")
-# After a usenet download was put in the library: take it out of the download client too.
+# After a usenet download was put in the library: take it out of the download client too. A
+# setting of each download client now (remove_completed); this is only what a client saved by
+# an older version gets.
 REMOVE_COMPLETED = flag("REMOVE_COMPLETED", True)
 # After the files of a download were moved to the library: remove its folder if nothing is left in it.
 DELETE_EMPTY_FOLDERS = flag("DELETE_EMPTY_FOLDERS", True)
+# What is cleared out of the folder of a download once its Switch files are in the library: a
+# name ending (".nfo") or a word in the name ("sample"), separated by commas.
+CLEANUP_EXTENSIONS = env("CLEANUP_EXTENSIONS", ".nfo, .jpg, .jpeg, .png, .sfv, .txt, .url, .par2, sample")
 # Where the library is: [{"path": the folder in this container, "library_path": the same folder
 # as Switch-library-manager-web names it}]. Set in the panel only (see add_root_folder).
 ROOT_FOLDERS = []
@@ -216,7 +221,7 @@ EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "MIN_GAME_MB": range(0, 10001), "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
-    "IMPORT_COMPLETED": "bool", "REMOVE_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "FOLDER_TEMPLATE": "template",
+    "IMPORT_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "CLEANUP_EXTENSIONS": "text", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
@@ -228,6 +233,8 @@ EDITABLE = {
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
 # Kept in the settings file too, but no setting of a form: set by steps of their own in the panel.
 PRIVATE = ("TOTP_SECRET", "ROOT_FOLDERS")
+# Settings of an older version, read once to move them to where they are now (see load_saved).
+LEGACY = ("REMOVE_COMPLETED",)
 # A key or password belongs to the address it was saved for: it is never sent to another one.
 BOUND = {"SLM_URL": "SLM_API_KEY"}
 
@@ -349,6 +356,9 @@ INDEXER_FIELDS = {"url": "url", "api_key": "secret", "categories": "numbers", "p
 # remote_path / local_path: where the download client says its downloads are, and where the
 # same folder is in this container. Only for importing, and only if the two differ.
 PATHS = {"remote_path": "folder", "local_path": "folder"}
+# Completed Download Handling, as Radarr has it per download client: take a download out of
+# the client once it is in the library, or once it failed. Usenet only: a torrent seeds on.
+HANDLING = {"remove_completed": "bool", "remove_failed": "bool"}
 TORRENT_FIELDS = {"url": "url", "username": "text", "password": "secret", "category": "text", **PATHS}
 # What a connection is told about; each can be switched off per connection.
 TRIGGERS = {
@@ -367,9 +377,9 @@ PROVIDERS = {
     },
     "DOWNLOAD_CLIENTS": {
         "nzbget": {"label": "NZBGet", "protocol": "usenet", "fields": {
-            "url": "url", "username": "text", "password": "secret", "category": "text", **PATHS}},
+            "url": "url", "username": "text", "password": "secret", "category": "text", **PATHS, **HANDLING}},
         "sabnzbd": {"label": "SABnzbd", "protocol": "usenet", "fields": {
-            "url": "url", "api_key": "secret", "category": "text", **PATHS}},
+            "url": "url", "api_key": "secret", "category": "text", **PATHS, **HANDLING}},
         "qbittorrent": {"label": "qBittorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
         "transmission": {"label": "Transmission", "protocol": "torrent", "fields": TORRENT_FIELDS},
         "utorrent": {"label": "uTorrent", "protocol": "torrent", "fields": TORRENT_FIELDS},
@@ -383,7 +393,7 @@ PROVIDERS = {
     },
 }
 KINDS = tuple(PROVIDERS)
-DEFAULTS = {"categories": ["1000"], "priority": 25, "category": "games", "ask": False, **{t: True for t in TRIGGERS}}
+DEFAULTS = {"categories": ["1000"], "priority": 25, "category": "games", "ask": False, "remove_completed": True, "remove_failed": True, **{t: True for t in TRIGGERS}}
 INDEXERS, DOWNLOAD_CLIENTS, CONNECTIONS = [], [], []
 
 
@@ -534,7 +544,7 @@ def saved():
         raise SettingsBroken(f"{SETTINGS_FILE} is damaged and cannot be read ({e})") from e
     if not isinstance(data, dict):
         raise SettingsBroken(f"{SETTINGS_FILE} is damaged: it does not hold settings")
-    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS or k in PRIVATE}
+    return {k: v for k, v in data.items() if k in EDITABLE or k in KINDS or k in PRIVATE or k in LEGACY}
 
 
 def write(data):
@@ -597,18 +607,22 @@ def load_saved():
             continue  # a broken one is left out, the rest still works
     globals()["ROOT_FOLDERS"] = folders
     for name, value in data.items():
-        if name in KINDS or name in PRIVATE:
+        if name in KINDS or name in PRIVATE or name in LEGACY:
             continue
         try:
             globals()[name] = kept[name] = normalize(name, value)
         except ValueError:
             continue
+    kept.pop("REMOVE_COMPLETED", None)  # a setting of each download client now (see below)
     globals()["BACKUP_FOLDER"] = backup_folder(BACKUP_FOLDER)  # a saved "/backup" without that volume
     old = legacy() if any(kind not in data for kind in KINDS) else {}
     for kind in KINDS:
         entries = []
         globals()[kind] = []
         for entry in data[kind] if isinstance(data.get(kind), list) else old.get(kind, []):
+            if kind == "DOWNLOAD_CLIENTS" and isinstance(entry, dict) and "remove_completed" not in entry:
+                # Saved before Remove Completed was a setting of each client: the one setting of then.
+                entry = {**entry, "remove_completed": clean_bool(data.get("REMOVE_COMPLETED", REMOVE_COMPLETED))}
             try:
                 clean = normalize_entry(kind, entry, keep_id=False)
             except ValueError:

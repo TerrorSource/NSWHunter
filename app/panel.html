@@ -1799,9 +1799,10 @@ const FORMS = {
       {name: "IMPORT_COMPLETED", label: "Import Completed Downloads", checkbox: true,
        help: "Put a finished download in the folder of its game in your library, as Completed Download Handling does in Sonarr and Radarr. It needs a root folder (below), and the download folder as a volume of the container."},
       {name: "FOLDER_TEMPLATE", label: "Folder Name Template", placeholder: "{TITLE_NAME} [{TITLE_ID}]",
-       help: "The folder of a game in the root folder, as Organize of Switch-library-manager-web names it: {TITLE_NAME} is the name of the game and {TITLE_ID} its title ID, so the default gives a folder like \"Some Game [0100ABCD0000A000]\". A folder that already has the title ID in its name is used as it is. Empty: a download goes next to the files its game already has."},
-      {name: "REMOVE_COMPLETED", label: "Remove Completed", checkbox: true,
-       help: "After a usenet download was put in your library, take it out of the download client too, with what is left of its files. A torrent is never removed: it goes on seeding."},
+       help: "The folder of a game in the root folder, as Organize of Switch-library-manager-web names it: {TITLE_NAME} is the name of the game and {TITLE_ID} its title ID, so the default gives a folder like \"Some Game [0100ABCD0000A000]\". A folder that already has the title ID in its name is used as it is. Empty: a download goes next to the files its game already has."}]},
+    {title: "File Management", fields: [
+      {name: "CLEANUP_EXTENSIONS", label: "Cleanup File Extensions", placeholder: ".nfo, .jpg, .jpeg, .png, .sfv, .txt, .url, .par2, sample",
+       help: "Once the Switch files of a download were moved to your library, these files are removed from the folder it came from. An ending like .nfo, or a word like sample, which also takes the files in a folder Sample; separate them with commas. A Switch file is never removed, and a torrent is left alone: it goes on seeding. Empty: nothing is removed."},
       {name: "DELETE_EMPTY_FOLDERS", label: "Delete Empty Folders in Download Folder", checkbox: true,
        help: "After the files of a download were moved to your library, look in the folder it came from and remove that folder if nothing is left in it. A folder that still holds a file stays as it is. The task Rescan Download Folder also removes the empty folders that earlier downloads left."}]},
     {title: "Searching", fields: [
@@ -2211,7 +2212,8 @@ $("config").addEventListener("submit", e => { e.preventDefault(); saveForm(); })
 // How the fields of an indexer, a download client or a connection are called and explained.
 const LABELS = {url: "URL", api_key: "API Key", categories: "Categories", priority: "Indexer Priority", username: "Username",
                 password: "Password", category: "Category", bot_token: "Bot Token", chat_id: "Chat ID", ask: "Choose in Telegram",
-                webhook: "Webhook URL", urls: "Apprise URLs", remote_path: "Remote Path", local_path: "Local Path"};
+                webhook: "Webhook URL", urls: "Apprise URLs", remote_path: "Remote Path", local_path: "Local Path",
+                remove_completed: "Remove Completed", remove_failed: "Remove Failed"};
 const TRIGGERS = {on_grab: "On Grab", on_arrive: "On Arrival", on_fail: "On Download Failure", on_choice: "On Manual Interaction Required", on_health: "On Health Issue"};
 const TRIGGER_HELP = {on_grab: "a release was sent automatically", on_arrive: "what was sent is in your library",
                       on_fail: "a download failed, did not arrive, or was never seen in the library",
@@ -2228,6 +2230,8 @@ const HELP = {
   "category": "Adding a category specific to NSWHunter avoids conflicts with unrelated downloads",
   "remote_path": "Only for importing, and only if this container has the download folder under another path than the download client: the folder as the download client names it, like /downloads/complete",
   "local_path": "The same folder as this container has it, like /downloads. Leave both empty if the paths are the same.",
+  "remove_completed": "Remove imported downloads from download client history, with what is left of their files",
+  "remove_failed": "Remove failed downloads from download client history, with their files",
   "telegram.bot_token": "Create a bot with @BotFather in Telegram; it gives you the token",
   "telegram.chat_id": "You must start a conversation with the bot or add it to your group to receive messages. @userinfobot tells you your own ID; for a group it is a number with a minus in front.",
   "telegram.ask": "For a release that awaits your choice you get a message with the buttons Download and Reject, at most 10 per round. Only this chat can press them. Switch this on only for a bot that NSWHunter has to itself: it then reads what the bot receives, and another program that reads the same bot would miss its messages.",
@@ -2326,9 +2330,11 @@ function renderEditor() {
       if (values.priority === undefined) values.priority = 25;
       if (values.categories === undefined && "categories" in spec.fields) values.categories = "1000";
       if (values.category === undefined && "category" in spec.fields) values.category = "games";
+      for (const name of ["remove_completed", "remove_failed"]) if (values[name] === undefined && name in spec.fields) values[name] = true;
       fields = [{name: "name", label: "Name"}, {name: "enabled", label: "Enable", checkbox: true}];
       for (const [name, type] of Object.entries(spec.fields)) {
         if (name in TRIGGERS) continue;
+        if (name === "remove_completed") fields.push({heading: "Completed Download Handling"});
         fields.push({name, label: LABELS[name] || name, secret: type === "secret", checkbox: type === "bool", number: type === "priority",
                      browse: name === "local_path" ? "folder" : null,
                      help: HELP[editing.entry.type + "." + name] || HELP[name] || ""});
@@ -2342,7 +2348,7 @@ function renderEditor() {
     }
     const triggers = !editing.library && editing.kind === "CONNECTIONS";
     const form = h("form", {id: "editor", autocomplete: "off", onsubmit: e => { e.preventDefault(); saveEditor(); }},
-      fields.slice(0, triggers ? 1 : fields.length).map(f => fieldRow(f, values, secrets, "e")),
+      fields.slice(0, triggers ? 1 : fields.length).map(f => f.heading ? h("h2", {}, f.heading) : fieldRow(f, values, secrets, "e")),
       // As in Sonarr and Radarr: which events this connection is told about.
       triggers ? h("div", {class: "field"}, h("div", {class: "name"}, "Notification Triggers"),
         h("div", {class: "checks"}, h("div", {class: "line"}, "Select which events should trigger this notification"),

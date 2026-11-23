@@ -273,10 +273,27 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
     return done, left + others
 
 
-def tidy(client, reported, spare=()):
+def junk(name, patterns):
+    """Is this file clutter that can go (Cleanup File Extensions)? name: its path inside the
+    folder of the download. A pattern with a dot is an ending (".nfo"), one without a word in
+    the path ("sample", so also a file in a folder Sample). A Switch file never is."""
+    lower = name.lower()
+    if lower.endswith(EXTENSIONS + DISGUISED):
+        return False
+    words = re.split(r"[^a-z0-9]+", lower)
+    return any(lower.endswith(p) if p.startswith(".") else p in words for p in patterns)
+
+
+def patterns(text):
+    """The patterns of Cleanup File Extensions: ".nfo, .jpg, sample" -> [".nfo", ".jpg", "sample"]."""
+    return [p for p in (p.strip().lower() for p in str(text or "").split(",")) if p.strip(".")]
+
+
+def tidy(client, reported, spare=(), clutter=(), empty=True):
     """Remove the folder of a download if nothing is left in it, with the empty folders inside
     it. Only a folder without a single file goes: one leftover (an .nfo, a sample, the game
     itself from a bundle) and it stays as it is, with every folder that leads to that file.
+    clutter: patterns of files to remove first (see junk). empty: False leaves the folders.
     Never a root folder or a folder one is in, never a volume, never a folder in `spare`
     (where the other downloads of the client are). Returns the folder if it is gone."""
     source = local_download(client, str(reported or ""))
@@ -287,7 +304,16 @@ def tidy(client, reported, spare=()):
     kept += [os.path.realpath(local_download(client, str(s))) for s in spare if s]
     if os.path.ismount(source) or any(under(k, real) for k in kept):
         return None
-    for folder, _, _ in os.walk(source, topdown=False):  # the deepest first; a link is not followed
+    for folder, _, names in os.walk(source, topdown=False):  # the deepest first; a link is not followed
+        for name in names:
+            path = os.path.join(folder, name)
+            if clutter and junk(os.path.relpath(path, source), clutter):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        if not empty:
+            continue
         try:
             os.rmdir(folder)  # refuses a folder that holds anything, so nothing is lost
         except OSError:
