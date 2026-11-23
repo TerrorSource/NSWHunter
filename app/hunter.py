@@ -109,6 +109,7 @@ class Hunter:
                        "skipped": 0}  # games and releases the last round had to leave out
         self.troubles = set()  # what was already written to the log about those
         self.cover_gate = asyncio.Semaphore(4)  # pictures fetched at the same time
+        self.round_sent = 0  # what Automatic Download sent in the round that runs (see backlog)
         self.failed = []  # the downloads that failed in this look at the download clients (see follow_grabs)
         self.no_cover = {}  # picture -> when fetching it last failed
         self.state = {
@@ -920,6 +921,10 @@ class Hunter:
             except Exception as e:  # noqa: BLE001
                 self.skip(self.games[game_id].name or game_id, e)
                 self.state["searched"][game_id] = int(time.time())  # again after the interval, not every round
+            else:
+                if self.working("DOWNLOAD_CLIENTS") and self.round_sent < config.MAX_GRABS_PER_RUN:
+                    # Sent at once, not after the searches of every other game of a long round.
+                    self.round_sent += await self.auto_grab(game_id, config.MAX_GRABS_PER_RUN - self.round_sent)
             self.save()  # a long first round: keep what was found so far
         if queue:
             self.event(f"Searched {len(queue)} game(s) by name")
@@ -1563,13 +1568,17 @@ class Hunter:
         if auto:
             await self.tell(f"Sent automatically: {candidate['title']}", "grab")
 
-    async def auto_grab(self):
-        sent = 0
+    async def auto_grab(self, game_id=None, budget=None):
+        """Automatic Download: send what may go out without a click, at most `budget` releases
+        (MAX_GRABS_PER_RUN). game_id: only for that game. Returns how many were sent."""
+        sent, budget = 0, config.MAX_GRABS_PER_RUN if budget is None else budget
         for item in list(self.state["items"].values()):
+            if game_id and item["game_id"] != game_id:
+                continue
             candidate = self.automatic(item)
             if candidate is None:
                 continue
-            if sent >= config.MAX_GRABS_PER_RUN:
+            if sent >= budget:
                 break
             try:
                 await self.grab(item["key"], candidate["guid"], auto=True)
@@ -1579,6 +1588,7 @@ class Hunter:
                 break
             except Exception as e:  # noqa: BLE001
                 self.skip(item["name"], e)
+        return sent
 
     async def grab_best(self, min_score):
         """The button "Download all": of every item that awaits a choice, send the best
@@ -1868,6 +1878,7 @@ class Hunter:
             self.status.update(running=True, skipped=0)
             try:
                 waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
+                self.round_sent = 0  # what Automatic Download sent in this round (see backlog)
                 self.status["phase"] = "testing the connections"
                 await self.task("health", self.check_services())
                 self.status["phase"] = "reading the library"
@@ -1884,7 +1895,7 @@ class Hunter:
                 await self.followed()
                 if self.working("DOWNLOAD_CLIENTS"):
                     self.status["phase"] = "sending"
-                    await self.auto_grab()
+                    await self.auto_grab(budget=config.MAX_GRABS_PER_RUN - self.round_sent)
                 now_waiting = sum(1 for i in self.state["items"].values() if self.awaits(i))
                 await self.tell_found()
                 if self.asking():

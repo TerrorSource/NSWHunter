@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.3] - 2026-11-23
+
+### Fixed
+
+- Automatic Download sends a release right after its game was searched in a round, not after the searches of every other game: a long round no longer holds it back. At most `MAX_GRABS_PER_RUN` per round, as before.
+
 ## [3.24.2] - 2026-11-23
 
 ### Fixed
