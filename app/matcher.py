@@ -135,7 +135,7 @@ class Rejection:
 
 def clean(text):
     """Lower case, no accents, no trademark signs or apostrophes. Separators are kept."""
-    text = re.sub(r"[™®©℠]", "", text)
+    text = re.sub(r"[™®©℠]", " ", text)  # "MotoGP™22" is "MotoGP 22" in a release
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"['’‘`´]", "", text.lower())

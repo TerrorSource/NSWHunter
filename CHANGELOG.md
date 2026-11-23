@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.5] - 2026-11-23
+
+### Fixed
+
+- A game named with a trademark sign between its name and number ("MotoGP™22") is searched and recognized as "MotoGP 22", as releases name it. Before, it was searched as "motogp22" and no release fitted.
+
 ## [3.25.4] - 2026-11-23
 
 ### Added
