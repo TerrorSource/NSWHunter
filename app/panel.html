@@ -125,6 +125,8 @@
   .label.error { background: var(--bad-bg); color: var(--bad); }
   .label.sent { background: var(--info-bg); color: var(--link); }
   .label.review { background: var(--warn-bg); color: var(--warn); }
+  /* Usenet or torrent, as the protocol column of Prowlarr. */
+  .label.usenet { background: var(--info-bg); color: var(--link); } .label.torrent { background: var(--good-bg); color: var(--good); }
   /* The state of a row, wide and in one colour, as the status of a movie in Radarr. */
   .label.wide { min-width: 104px; padding: 2px 8px; text-align: center; color: #fff; background: #6b6b6b; }
   .label.wide.ok { background: #1f8f3a; } .label.wide.danger { background: #d9342b; } .label.wide.warn { background: #b36b00; }
@@ -145,7 +147,7 @@
   .part { margin: 14px 8px 0; padding: 8px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--edge); }
   .part b { font-size: 16px; font-weight: 400; color: var(--head); }
   /* The releases of one missing thing, in columns like a table. */
-  .cand { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px 80px 96px auto; gap: 2px 12px; margin: 0 8px; padding: 8px 10px;
+  .cand { display: grid; grid-template-columns: 62px 70px minmax(0, 1fr) 150px 80px 96px auto; gap: 2px 12px; margin: 0 8px; padding: 8px 10px;
           align-items: start; border-bottom: 1px solid var(--line); }
   .cand.th { font-weight: 700; color: var(--head); font-size: 13px; padding-top: 6px; padding-bottom: 6px; }
   .cand .name { overflow-wrap: anywhere; color: var(--head); }
@@ -791,9 +793,11 @@ function fold(open, text, toggle) {
     h("button", {class: "quiet", "aria-expanded": open ? "true" : "false", onclick: toggle}, (open ? "▾ " : "▸ ") + text));
 }
 // One release in the columns of the list: score, release, source, size, age, what can be done.
+function protocolOf(release) { return release.protocol === "torrent" ? "torrent" : "usenet"; }
 function releaseRow(first, release, about, actions, cls) {
   return h("div", {class: "cand " + (cls || "")},
     h("div", {}, first),
+    h("div", {}, h("span", {class: "label " + protocolOf(release)}, protocolOf(release))),
     h("div", {}, h("div", {class: "name"}, link(release)), about.filter(Boolean).map(text => h("div", {class: "sub"}, text))),
     h("div", {}, source(release)),
     h("div", {}, size(release.size) || "–"),
@@ -845,7 +849,7 @@ function part(item) {
   if (item.ignored) return rows;
   // The other releases stay in view after one was sent: another can still be chosen.
   if (item.candidates.length) {
-    rows.push(h("div", {class: "cand th"}, h("div", {}, "Score"), h("div", {}, "Release"), h("div", {}, "Indexer"), h("div", {}, "Size"), h("div", {}, "Posted"), h("div", {})));
+    rows.push(h("div", {class: "cand th"}, h("div", {}, "Score"), h("div", {}, "Protocol"), h("div", {}, "Release"), h("div", {}, "Indexer"), h("div", {}, "Size"), h("div", {}, "Posted"), h("div", {})));
     rows.push(...item.candidates.map(c => candidate(item, c)));
   }
   // What was ruled out, and why: to see that nothing good was thrown away, and to overrule it.

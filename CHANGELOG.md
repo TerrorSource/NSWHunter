@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.4] - 2026-11-23
+
+### Added
+
+- The list of releases of a game (Interactive Search, Awaiting Choice) has a Protocol column, as Prowlarr has: usenet or torrent.
+
 ## [3.25.3] - 2026-11-23
 
 ### Changed
