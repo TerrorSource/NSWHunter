@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.4] - 2026-11-23
+
+### Fixed
+
+- When an indexer does not give the NZB or torrent of a release (a limit, HTTP 429), Automatic Download goes on with the other releases. Only a download client that refuses stops the sending of that round.
+
 ## [3.24.3] - 2026-11-23
 
 ### Fixed

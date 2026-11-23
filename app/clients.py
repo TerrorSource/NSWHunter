@@ -22,6 +22,10 @@ class ServiceError(Exception):
     pass
 
 
+class IndexerError(ServiceError):
+    """The indexer did not give a release (a limit, a dead link), not the download client."""
+
+
 async def _check(response, what):
     if response.status == 401 or response.status == 403:
         raise ServiceError(f"{what}: access denied (HTTP {response.status}). Check the API key or the login.")

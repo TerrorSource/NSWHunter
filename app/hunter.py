@@ -1583,9 +1583,12 @@ class Hunter:
             try:
                 await self.grab(item["key"], candidate["guid"], auto=True)
                 sent += 1
+            except clients.IndexerError as e:
+                # Only this release could not be had: the others may come from another indexer.
+                self.event(f"Sending failed: {candidate['title']}: {e}", "error")
             except clients.ServiceError as e:
                 self.event(f"Sending failed: {candidate['title']}: {e}", "error")
-                break
+                break  # the download client does not take anything now
             except Exception as e:  # noqa: BLE001
                 self.skip(item["name"], e)
         return sent

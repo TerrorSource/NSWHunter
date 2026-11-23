@@ -52,7 +52,10 @@ async def send(session, release):
     if kind == "prowlarr":
         await indexers.grab(session, release)
         return client, None
-    what, content = await indexers.fetch(session, release)
+    try:
+        what, content = await indexers.fetch(session, release)
+    except ServiceError as e:
+        raise clients.IndexerError(str(e)) from e
     if kind in torrent.TYPES:
         return client, await torrent.add(session, client, what, content)
     name = clients.nzb_filename(release["title"])
