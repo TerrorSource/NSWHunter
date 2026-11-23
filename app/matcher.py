@@ -24,6 +24,7 @@ UNSAID = 0.85  # a release of a new game that says neither game, update nor DLC
 VERSIONED = 0.7  # ... and does have a version above 1.0.0: it can be an update without the word
 WHOLE_GAME = 0.75  # an "update" as big as the game itself: the game is probably in it
 ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the library
+MIN_GAME = 20 * 2**20  # bytes: a whole game is never this small; such a release is broken or a fake
 PACK = 0.55  # a pack of DLC that does not say which DLC
 UNLOCKER = 0.35  # a "DLC Unlocker": a small file that opens DLC, not the DLC as the library counts it
 UNLOCKER_WORDS = {"unlocker", "unlockers", "unlock"}
@@ -473,7 +474,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
 
     if want == "game":
         return _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons,
-                              bool(outside & SWITCH_WORDS))
+                              bool(outside & SWITCH_WORDS), size)
     if want in ("dlc", "dlcpack"):
         return _evaluate_dlc(game, dlc, text, own_ids, kind, name_match, extras, reasons,
                              bool(outside & SWITCH_WORDS), pack=want == "dlcpack")
@@ -589,7 +590,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
                      reasons, estimated, deduced)
 
 
-def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons, switch):
+def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons, switch, size=0):
     """A release judged as the game itself, for a game that is not in the library yet. A
     bundle with its update or DLC is as good: it holds the game."""
     if kind == "update":
@@ -598,6 +599,8 @@ def _evaluate_game(text, rest, words, kind, own_ids, name_match, extras, reasons
         return Rejection("DLC only, not the game")
     if DEMO_WORDS & set(extras):
         return Rejection("a demo, not the game")
+    if 0 < size < MIN_GAME:
+        return Rejection(f"only {size_text(size)}: too small for the whole game")
     if not (own_ids or switch):
         # Unmarked whole games turned out to be PC releases, mods and other consoles.
         return Rejection("names no platform: a whole game must say it is for the Switch")

@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.8] - 2026-11-23
+
+### Fixed
+
+- **A whole game under 20 MB** is ruled out for the wishlist: such a release is broken or a fake. A release of 7 MB was sent as a whole game.
+
 ## [3.21.7] - 2026-11-23
 
 ### Fixed
