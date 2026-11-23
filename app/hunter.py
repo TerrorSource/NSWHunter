@@ -1020,6 +1020,11 @@ class Hunter:
                     await downloads.remove(self.session, client, grab.get("client_id"))
                 except clients.ServiceError as e:
                     self.event(f"Download failed, but not removed from {client['name']}: {grab['title']}: {e}", "warn")
+                    continue
+                # What it left on the disk too: the download client does not always delete it.
+                spare = self.state.get("download_folders", {}).get(client["id"])
+                if await asyncio.to_thread(importer.discard, client, grab.get("path"), spare):
+                    logs.debug(f"Removed the folder of the failed download {grab['title']}")
         tell, dropped, finished = self.tell_later, self.dropped, self.finished
         placed = [i["grab"]["imported"] for i in pending if (i.get("grab") or {}).get("imported")]
         if placed and (self.state.get("rescan_at") or 0) < max(placed) and now - (self.state.get("rescan_tried") or 0) > wait:

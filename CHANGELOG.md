@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.23.1] - 2026-11-23
+
+### Fixed
+
+- Remove Failed also deletes the folder a failed download left on the disk: NZBGet takes it out of its history, but leaves its files. Only a folder inside the folder of finished downloads of that client.
+
 ## [3.23.0] - 2026-11-23
 
 ### Added

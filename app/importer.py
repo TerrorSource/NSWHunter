@@ -328,6 +328,25 @@ def tidy(client, reported, spare=(), clutter=(), empty=True):
     return None if os.path.lexists(source) else source
 
 
+def discard(client, reported, spare):
+    """Delete the folder of a failed download with what is in it (Remove Failed): NZBGet takes
+    a download out of its history, but leaves its files on the disk. Only a folder inside the
+    folder of finished downloads of its client (`spare`): never that folder itself, a root
+    folder or one in it, a volume or a link. Returns the folder if it is gone."""
+    if not reported or not spare:
+        return None
+    source = local_download(client, str(reported))
+    top = os.path.realpath(local_download(client, str(spare)))
+    if os.path.islink(source) or not os.path.isdir(source) or os.path.ismount(source):
+        return None
+    real = os.path.realpath(source)
+    roots = [os.path.realpath(r["path"]) for r in config.ROOT_FOLDERS]
+    if real == top or not under(real, top) or any(under(r, real) or under(real, r) for r in roots):
+        return None
+    shutil.rmtree(source, ignore_errors=True)  # a link inside is removed, not followed
+    return None if os.path.lexists(source) else source
+
+
 EMPTY_AGE = 600  # seconds a folder has to be left alone before the sweep takes it for left behind
 
 
