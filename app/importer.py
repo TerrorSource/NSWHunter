@@ -18,6 +18,8 @@ import time
 import config
 
 EXTENSIONS = (".nsp", ".nsz", ".xci", ".xcz")
+# A Switch file some releases hide behind one more ending (game.nsp.hdf): it is brought in without it.
+DISGUISED = tuple(e + ".hdf" for e in EXTENSIONS)
 TITLE_ID = re.compile(r"(?<![0-9A-Fa-f])(0[0-9A-Fa-f]{15})(?![0-9A-Fa-f])")
 PART = ".nswhunter-part"  # a file that is still being copied; the library does not read this
 # What Switch-library-manager-web leaves out of a name: what a disk refuses or a path splits on.
@@ -110,10 +112,10 @@ def game_folder(game_id, name):
 def switch_files(path):
     """The Switch files of a download: the file itself, or everything in its folder."""
     if os.path.isfile(path):
-        return [path] if path.lower().endswith(EXTENSIONS) else []
+        return [path] if path.lower().endswith(EXTENSIONS + DISGUISED) else []
     found = []
     for folder, _, names in os.walk(path):
-        found += [os.path.join(folder, n) for n in sorted(names) if n.lower().endswith(EXTENSIONS) and not n.startswith(".")]
+        found += [os.path.join(folder, n) for n in sorted(names) if n.lower().endswith(EXTENSIONS + DISGUISED) and not n.startswith(".")]
     return found
 
 
@@ -143,7 +145,8 @@ def put(source, folder, keep, dry=False):
     """Bring one file into a folder; `keep` leaves the original where it is (a torrent that goes
     on seeding). Returns (the new file, how it got there). Nothing is overwritten. `dry`: only
     say what would be done."""
-    target = os.path.join(folder, os.path.basename(source))
+    name = os.path.basename(source)
+    target = os.path.join(folder, name[:-4] if name.lower().endswith(DISGUISED) else name)
     if os.path.lexists(target):
         if os.path.isfile(target) and os.path.getsize(target) == os.path.getsize(source):
             return target, "was there already"

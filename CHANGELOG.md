@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.21.10] - 2026-11-23
+
+### Fixed
+
+- A Switch file with `.hdf` behind its ending (`game.nsp.hdf`) is imported, as `game.nsp`.
+
 ## [3.21.9] - 2026-11-23
 
 ### Added
