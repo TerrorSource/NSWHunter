@@ -13,9 +13,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PUID=1000 \
     PGID=1000
 
-# tzdata: without it the log and the panel show UTC.
+# tzdata: without it the log and the panel show UTC. unrar-free: a RAR inside the RAR of a
+# download, which the download client unpacks only once.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata \
+ && apt-get install -y --no-install-recommends tzdata unrar-free \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt

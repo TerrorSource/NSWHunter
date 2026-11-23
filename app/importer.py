@@ -13,6 +13,7 @@ Both folders have to be volumes of this container. The library is named by its r
 import os
 import re
 import shutil
+import subprocess
 import time
 
 import config
@@ -114,12 +115,87 @@ def switch_files(path):
     if os.path.isfile(path):
         return [path] if path.lower().endswith(EXTENSIONS + DISGUISED) else []
     found = []
-    for folder, _, names in os.walk(path):
+    for folder, folders, names in os.walk(path):
+        folders[:] = [f for f in folders if not f.startswith(".")]  # such as the one unpack works in
         found += [os.path.join(folder, n) for n in sorted(names) if n.lower().endswith(EXTENSIONS + DISGUISED) and not n.startswith(".")]
     return found
 
 
 PACKED = (".rar", ".zip", ".7z", ".001", ".par2")
+UNPACKING = ".nswhunter-unpack"  # where unpack works; what is in it is not imported
+UNPACK_SECONDS = 3 * 3600
+# An archive that could not be unpacked, as it was then (each volume with its size and time):
+# the import is tried again every few minutes, but this is not, until the archive changes.
+UNPACK_FAILED = {}
+
+
+def volumes(folder):
+    """The RAR archives in one folder, each as the list of its volumes in order: game.rar,
+    game.r00 ... game.r99, game.s00 (the old naming), or game.part01.rar, game.part02.rar."""
+    names = sorted(os.listdir(folder))
+    found = []
+    for name in names:
+        lower = name.lower()
+        part = re.fullmatch(r"(.+)\.part0*1\.rar", lower)
+        if part:
+            found.append([os.path.join(folder, n) for n in names
+                          if re.fullmatch(re.escape(part.group(1)) + r"\.part\d+\.rar", n.lower())])
+        elif lower.endswith(".rar") and not re.search(r"\.part\d+\.rar$", lower):
+            stem = name[:-4]
+            rest = sorted((n for n in names if n[:-4] == stem and re.fullmatch(r"\.[r-z]\d\d", n[-4:].lower())),
+                          key=lambda n: n[-3:].lower())
+            found.append([os.path.join(folder, n) for n in [name] + rest])
+    return found
+
+
+def unpack(source):
+    """Unpack the RAR archives of a download that holds no Switch file: a RAR inside the RAR,
+    which the download client unpacks only once. They are unpacked in a folder of their own
+    and moved next to the archive when they are complete, so a half one is never imported.
+    Returns the files that came out. ImportProblem if it fails."""
+    if not os.path.isdir(source):
+        return []
+    made = []
+    for folder, folders, _ in os.walk(source):
+        folders[:] = [f for f in folders if not f.startswith(".")]
+        for parts in volumes(folder):
+            seen = tuple((p, os.path.getsize(p), os.path.getmtime(p)) for p in parts)
+            if seen in UNPACK_FAILED:
+                raise ImportProblem(UNPACK_FAILED[seen])
+            work = os.path.join(folder, UNPACKING)
+            shutil.rmtree(work, ignore_errors=True)  # what an unpack that was broken off left
+            os.makedirs(os.path.join(work, "out"))
+            try:
+                # unrar-free finds the next volume only by the name game.part2.rar: hard links
+                # with those names, also for the old naming (game.r00). No copies, no space.
+                first = parts[0]
+                for n, part in enumerate(parts if len(parts) > 1 else [], 1):
+                    link = os.path.join(work, f"v.part{n:03d}.rar")
+                    os.link(part, link)
+                    first = link if n == 1 else first
+                done = subprocess.run(["unrar-free", "-x", first, os.path.join(work, "out") + "/"],
+                                      capture_output=True, text=True, timeout=UNPACK_SECONDS, check=False)
+                if done.returncode:
+                    lines = [line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip()]
+                    why = next((line for line in reversed(lines) if "unrar-free:" in line), lines[-1] if lines else "")
+                    UNPACK_FAILED[seen] = f"unpacking {os.path.basename(parts[0])} failed ({why.replace('unrar-free: ', '')[:200]})"
+                    raise ImportProblem(UNPACK_FAILED[seen])
+                for inside, _, names in os.walk(os.path.join(work, "out")):
+                    for name in names:
+                        target = os.path.join(folder, name)
+                        if not os.path.lexists(target):
+                            os.replace(os.path.join(inside, name), target)
+                            made.append(target)
+            except FileNotFoundError as e:
+                if e.filename == "unrar-free":
+                    raise ImportProblem("this container cannot unpack it") from e
+                raise
+            except subprocess.TimeoutExpired as e:
+                raise ImportProblem(f"unpacking {os.path.basename(parts[0])} took longer than "
+                                    f"{UNPACK_SECONDS // 3600} hours") from e
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+    return made
 
 
 def holds(path):
@@ -238,9 +314,17 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
     templated = bool(game and config.FOLDER_TEMPLATE)
     try:
         files = switch_files(source)
+        unpacked, failed = [], ""
+        if not files:
+            try:
+                unpacked = unpack(source)
+            except ImportProblem as e:
+                failed = str(e)
+            files = switch_files(source)
         if not files:
             what, packed = holds(source)
-            advice = ("The download is still packed: let your download client unpack, or unpack it by hand and try again."
+            advice = (f"The download is still packed, and {failed}: unpack it by hand and try again." if failed
+                      else "The download is still packed: let your download client unpack, or unpack it by hand and try again."
                       if packed else "Were its files moved by hand?" if what == "the folder is empty"
                       else "Nothing in it is a file for the Switch.")
             raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
@@ -258,7 +342,8 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
             # Whatever the library says: nothing is written outside a root folder.
             if not under(os.path.realpath(folder), os.path.realpath(root)):
                 raise ImportProblem(f"{folder} is not inside the root folder {root}")
-            target, how = put(file, folder, keep, dry)
+            # What was unpacked here is no file of the download: moved, also from a torrent.
+            target, how = put(file, folder, keep and file not in unpacked, dry)
             done.append({"file": os.path.basename(target), "folder": folder, "how": how})
     except PermissionError as e:
         raise ImportProblem(f"NSWHunter may not write {e.filename or 'there'}. The user of the container has to own "

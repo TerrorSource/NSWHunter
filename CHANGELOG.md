@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.0] - 2026-11-23
+
+### Added
+
+- A download that holds a RAR archive but no Switch file is unpacked before the import: a RAR inside the RAR, which the download client unpacks only once. Old and new volume names (`game.r00`, `game.part2.rar`). It is unpacked in a hidden folder and moved in place when complete; an archive that cannot be unpacked is not tried again until it changes. The image has `unrar-free` for this.
+
 ## [3.23.1] - 2026-11-23
 
 ### Fixed
