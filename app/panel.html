@@ -2255,6 +2255,15 @@ function says(kind, entry) {
   if (!entry.enabled || !service) return null;
   return h("div", {class: "says" + (service.ok ? "" : " bad")}, (service.ok ? "✓ " : "✕ ") + service.text);
 }
+// Set up on a page of its own, which this card opens.
+function chatCard(chat) {
+  const on = chat.enabled && chat.logged_in;
+  return h("button", {class: "pcard", onclick: () => { location.href = "/telegrambot"; }},
+    h("div", {class: "name"}, "Telegram" + (chat.bot ? " (@" + chat.bot + ")" : "")),
+    h("div", {}, h("span", {class: "label " + (on ? "ok" : "")}, on ? "Enabled" : "Disabled"), h("span", {class: "label"}, "Torrent"),
+      h("span", {class: "label"}, "Priority: 50")),
+    h("div", {class: "says" + (chat.logged_in ? "" : " bad")}, chat.logged_in ? "✓ Logged in as " + chat.account : "✕ Not logged in"));
+}
 function cardLabels(kind, entry, schema) {
   const spec = schema[entry.type], labels = [];
   if (kind === "CONNECTIONS") {
@@ -2283,6 +2292,7 @@ function renderCards() {
     h("div", {class: "cards"},
       settings.providers[kind].map(entry => h("button", {class: "pcard", onclick: () => openEditor({kind, entry: {...entry}})},
         h("div", {class: "name"}, entry.name), cardLabels(kind, entry, schema), says(kind, entry))),
+      kind === "INDEXERS" && settings.chat ? chatCard(settings.chat) : null,
       h("button", {class: "pcard add", "aria-label": PICK[kind].title, title: PICK[kind].title, onclick: () => openEditor({kind, choose: true})}, h("span", {}, "+"))));
 }
 // The window in which one entry is added or changed.

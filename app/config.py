@@ -810,6 +810,9 @@ def editable():
         "secrets": {n: bool(globals()[n]) for n in SECRETS},
         "totp": bool(TOTP_SECRET),
         "providers": shown_providers(),
+        # The chat source of torrents, once it was set up on its own page: shown with the indexers.
+        "chat": {"bot": TG.get("bot", ""), "enabled": bool(TG.get("enabled")), "account": TG.get("account", ""),
+                 "logged_in": bool(TG.get("session"))} if TG.get("api_id") or TG.get("bot") else None,
         "schema": {kind: {t: {"label": spec["label"], "fields": spec["fields"], "protocol": spec.get("protocol", "")}
                           for t, spec in types.items()} for kind, types in PROVIDERS.items()},
     }
