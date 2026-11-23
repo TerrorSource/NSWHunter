@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.24.2] - 2026-11-23
+
+### Fixed
+
+- Remove Failed also deletes the working folder NZBGet named after the download (`Game.#1213`), and the folder of the same name among the finished downloads, where NZBGet links files while it downloads. Before, the files of a failed download stayed there.
+
 ## [3.24.1] - 2026-11-23
 
 ### Fixed

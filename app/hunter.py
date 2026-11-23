@@ -1023,8 +1023,13 @@ class Hunter:
                     continue
                 # What it left on the disk too: the download client does not always delete it.
                 spare = self.state.get("download_folders", {}).get(client["id"])
-                if await asyncio.to_thread(importer.discard, client, grab.get("path"), spare):
-                    logs.debug(f"Removed the folder of the failed download {grab['title']}")
+                path = str(grab.get("path") or "").rstrip("/")
+                # NZBGet names its working folder "Game.#1213", and may have put files in the
+                # folder "Game" of finished downloads already: both go.
+                named = re.sub(r"\.#\d+$", "", os.path.basename(path))
+                for folder in dict.fromkeys(f for f in (path, os.path.join(spare, named) if spare and named else "") if f):
+                    if await asyncio.to_thread(importer.discard, client, folder, spare, grab.get("client_id")):
+                        logs.debug(f"Removed {folder}, of the failed download {grab['title']}")
         tell, dropped, finished = self.tell_later, self.dropped, self.finished
         placed = [i["grab"]["imported"] for i in pending if (i.get("grab") or {}).get("imported")]
         if placed and (self.state.get("rescan_at") or 0) < max(placed) and now - (self.state.get("rescan_tried") or 0) > wait:
