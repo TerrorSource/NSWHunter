@@ -17,9 +17,10 @@ SOURCE = "tg"  # the "source" of its releases, where an indexer has its id
 NAME = "Telegram"
 GAP = 4  # seconds between two messages to the bot, so it does not limit us
 ANSWER = 30  # seconds the bot gets to answer
-# "Some Game - Subtitle\nSize: 6.01 GB\nDownload: /download3573 /cover3573"
-RESULT = re.compile(r"^[ \t]*(?P<title>\S[^\n]*?)[ \t]*\n[ \t]*Size:[ \t]*(?P<size>[\d.,]+)[ \t]*(?P<unit>[KMGT]?i?B)\b[^\n]*\n"
-                    r"[ \t]*Download:[ \t]*/download(?P<id>\d+)", re.M | re.I)
+# One release is a block of lines: "Some Game - Subtitle", maybe 'In the torrent: "A Collection"',
+# then "Size: 6.01 GB" and "Download: /download3573 /cover3573".
+SIZE = re.compile(r"^[ \t]*Size:[ \t]*(?P<size>[\d.,]+)[ \t]*(?P<unit>[KMGT]?i?B)\b", re.M | re.I)
+DOWNLOAD = re.compile(r"^[ \t]*Download:[ \t]*/download(?P<id>\d+)", re.M | re.I)
 UNITS = {"b": 1, "kb": 2**10, "mb": 2**20, "gb": 2**30, "tb": 2**40}
 TITLE_ID = re.compile(r"[0-9a-fA-F]{16}")
 
@@ -164,12 +165,16 @@ async def ask(text, done, wait=ANSWER, most=4):
 def results(text):
     """The releases in one answer of the bot."""
     found = []
-    for m in RESULT.finditer(text or ""):
+    for block in re.split(r"\n[ \t]*\n", text or ""):
+        number, size = DOWNLOAD.search(block), SIZE.search(block)
+        title = block.strip().split("\n")[0].strip(" *_")
+        if not number or not title or title == number.group(0).strip():
+            continue
         try:
-            size = int(float(m.group("size").replace(",", ".")) * UNITS.get(m.group("unit").lower().replace("i", ""), 1))
+            bytes_ = int(float(size.group("size").replace(",", ".")) * UNITS.get(size.group("unit").lower().replace("i", ""), 1)) if size else 0
         except ValueError:
-            size = 0
-        found.append({"id": m.group("id"), "title": m.group("title").strip(" *_"), "size": size})
+            bytes_ = 0
+        found.append({"id": number.group("id"), "title": title, "size": bytes_})
     return found
 
 
