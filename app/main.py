@@ -20,6 +20,7 @@ import config
 import importer
 import logs
 import tls
+import tg
 import totp
 from hunter import Hunter, log
 from version import __version__
@@ -36,11 +37,13 @@ pending_totp = {}  # the secret of a second step that is being set up, until its
 
 with open(os.path.join(HERE, "panel.html"), encoding="utf-8") as f:
     PANEL = f.read()
+with open(os.path.join(HERE, "tg.html"), encoding="utf-8") as f:
+    CHAT_PAGE = f.read()
 
 
-def _hash(tag):
-    """The hash of the one <script> or <style> of the panel, for the Content-Security-Policy."""
-    inside = re.search(rf"<{tag}>(.*?)</{tag}>", PANEL, re.S).group(1)
+def _hash(tag, page=PANEL):
+    """The hash of the one <script> or <style> of a page, for the Content-Security-Policy."""
+    inside = re.search(rf"<{tag}>(.*?)</{tag}>", page, re.S).group(1)
     return "'sha256-" + base64.b64encode(hashlib.sha256(inside.encode()).digest()).decode() + "'"
 
 
@@ -55,8 +58,10 @@ HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
+CHAT_HEADERS = {"Content-Security-Policy": HEADERS["Content-Security-Policy"]
+                .replace(_hash("script"), _hash("script", CHAT_PAGE)).replace(_hash("style"), _hash("style", CHAT_PAGE))}
 # What works without a login: the page itself (it holds no data) and logging in.
-OPEN = {"/", "/api/session", "/api/login"}
+OPEN = {"/", "/telegrambot", "/api/session", "/api/login"}
 # What works with the made-up password of the first start: choosing one of your own, nothing else.
 FIRST = {"/", "/api/session", "/api/login", "/api/logout", "/api/password"}
 
@@ -138,6 +143,68 @@ async def guarded(request, handler):
     if request.path not in FIRST and config.must_change_password():
         return refuse(403, "Choose a password of your own first", change=True)
     return await handler(request)
+
+
+async def chat_page(request):
+    return web.Response(text=CHAT_PAGE, content_type="text/html", headers=CHAT_HEADERS)
+
+
+def chat(handler):
+    """A call of the page /telegrambot: its answer always carries what the page shows."""
+    async def wrapped(request):
+        try:
+            body = await request.json() if request.method == "POST" else {}
+            if not isinstance(body, dict):
+                raise TypeError
+            return web.json_response({"ok": True, **(await handler(body) or {}), **tg.shown()})
+        except (clients.ServiceError, ValueError) as e:
+            return web.json_response({"ok": False, "error": str(e), **tg.shown()}, status=400)
+        except (AttributeError, TypeError, KeyError):
+            return web.json_response({"ok": False, "error": "Invalid request", **tg.shown()}, status=400)
+    return wrapped
+
+
+async def chat_get(body):
+    return {}
+
+
+async def chat_save(body):
+    api_id, api_hash = str(body.get("api_id", "")).strip(), str(body.get("api_hash", "")).strip()
+    bot = str(body.get("bot", "")).strip().lstrip("@")
+    if api_id and not api_id.isdigit():
+        raise ValueError("The API ID is a number")
+    if api_hash and not re.fullmatch(r"[0-9a-fA-F]{32}", api_hash):
+        raise ValueError("The API hash is 32 characters, 0-9 and a-f")
+    if bot and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", bot):
+        raise ValueError("The bot is a name like @SomeBot")
+    old = config.TG
+    new = {**old, "api_id": api_id, "bot": bot, "enabled": bool(body.get("enabled"))}
+    if api_hash:
+        new["api_hash"] = api_hash
+    if (new["api_id"], new.get("api_hash")) != (old.get("api_id"), old.get("api_hash")):
+        # Another app of Telegram: the login of the old one does not count for it.
+        new.pop("session", None)
+        new.pop("account", None)
+        await tg.close()
+    config.set_tg(new)
+
+
+async def chat_code(body):
+    await tg.send_code(body.get("phone"))
+
+
+async def chat_login(body):
+    done = await tg.sign_in(str(body.get("code", "")), str(body.get("password", "")))
+    return {"step": "password" if done == "password" else "done"}
+
+
+async def chat_logout(body):
+    await tg.log_out()
+
+
+async def chat_search(body):
+    found = await tg.search(str(body.get("query", "")))
+    return {"releases": [{"title": r["title"], "size": r["size"]} for r in found]}
 
 
 def session_cookie(request, response):
@@ -786,6 +853,7 @@ async def start(app):
 async def stop(app):
     for task in list(background):
         task.cancel()
+    await tg.close()
     await app["session"].close()
 
 
@@ -845,6 +913,13 @@ def make_app():
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),
         *apps.routes(),
+        web.get("/telegrambot", chat_page),
+        web.get("/api/tg", chat(chat_get)),
+        web.post("/api/tg", chat(chat_save)),
+        web.post("/api/tg/code", chat(chat_code)),
+        web.post("/api/tg/login", chat(chat_login)),
+        web.post("/api/tg/logout", chat(chat_logout)),
+        web.post("/api/tg/search", chat(chat_search)),
     ])
     return app
 

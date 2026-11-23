@@ -14,6 +14,8 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import config
+import logs
+import tg
 from clients import LARGE, LONG, SHORT, ServiceError, _check, _json, _read, _wrap
 
 # The Newznab subcategories of Console that are another console than the Switch. The Switch
@@ -260,8 +262,16 @@ async def search_all(session, query):
     """Ask every enabled indexer at once. Returns (releases, {indexer id: what went wrong}):
     one indexer that does not answer does not cost the releases of the others."""
     asked = config.indexers()
-    results = await asyncio.gather(*(search(session, i, query) for i in asked), return_exceptions=True)
+    chat = tg.ready() and config.wants_torrents()
+    results = await asyncio.gather(*(search(session, i, query) for i in asked),
+                                   *([tg.search(query)] if chat else []), return_exceptions=True)
     releases, errors = [], {}
+    if chat:
+        found = results.pop()
+        if isinstance(found, Exception):
+            logs.debug(f"{tg.NAME}: {found}")  # no indexer of the settings: its page says what went wrong
+        else:
+            releases += found
     for indexer, result in zip(asked, results):
         if isinstance(result, ServiceError):
             errors[indexer["id"]] = str(result)
@@ -307,6 +317,8 @@ async def _allowed(address):
 async def fetch(session, release):
     """Get what a download client needs of a release: ("nzb", bytes) for usenet, and for a
     torrent ("file", the .torrent as bytes) or ("magnet", the magnet link)."""
+    if release.get("source") == tg.SOURCE:
+        return await tg.fetch(release)
     address = release.get("downloadUrl") or ""
     indexer = by_id(release.get("source"))
     if indexer is not None and indexer["type"] == "prowlarr" and address.startswith(("http://", "https://")):

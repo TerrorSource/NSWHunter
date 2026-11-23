@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Telegram - NSWHunter</title>
+<style>
+:root { color-scheme: light dark; --bg: #f5f6f8; --card: #fff; --text: #1d2125; --muted: #66707a; --line: #d9dde2;
+  --accent: #2a8bd8; --good: #2e9e5b; --bad: #d64545; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1b1e22; --card: #24282d; --text: #e6e8ea; --muted: #9aa3ab; --line: #383e45; --accent: #4aa3ea; --good: #44b872; --bad: #e86464; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+p { margin: 0 0 12px; }
+.muted { color: var(--muted); font-size: 13px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 16px; }
+label { display: block; margin: 0 0 12px; }
+label span { display: block; font-weight: 600; margin-bottom: 4px; }
+input[type=text], input[type=password], input[type=tel] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit; }
+label.check { display: flex; gap: 8px; align-items: center; }
+label.check span { display: inline; margin: 0; }
+button { padding: 8px 14px; border: 0; border-radius: 6px; background: #1e6bb8; color: #fff; font: inherit; cursor: pointer; }
+button.plain { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row input { flex: 1; min-width: 160px; }
+.note { margin-top: 12px; padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+.note.good { background: color-mix(in srgb, var(--good) 15%, transparent); }
+.note.bad { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.hidden { display: none; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+td.size { white-space: nowrap; text-align: right; color: var(--muted); }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Telegram</h1>
+  <p class="muted">A bot that answers a game name with torrents, searched next to the indexers. <a href="/">Back to NSWHunter</a></p>
+  <div id="away" class="note bad hidden"></div>
+
+  <section id="setup">
+    <h2>Settings</h2>
+    <p class="muted">The API ID and API hash come from my.telegram.org, under API development tools. NSWHunter talks to the bot
+      as your own Telegram account: a bot cannot talk to another bot.</p>
+    <label><span>API ID</span><input type="text" id="api_id" inputmode="numeric" autocomplete="off"></label>
+    <label><span>API Hash</span><input type="password" id="api_hash" autocomplete="off" placeholder=""></label>
+    <label><span>Bot</span><input type="text" id="bot" autocomplete="off" placeholder="@SomeBot"></label>
+    <label class="check"><input type="checkbox" id="enabled"><span>Search this bot</span></label>
+    <p class="muted" id="torrents"></p>
+    <button id="save">Save</button>
+    <div id="saved" class="note hidden"></div>
+  </section>
+
+  <section id="login">
+    <h2>Account</h2>
+    <p id="account"></p>
+    <div id="phone_step">
+      <label><span>Phone Number</span><input type="tel" id="phone" autocomplete="off" placeholder="+31612345678"></label>
+      <button id="code">Send Code</button>
+    </div>
+    <div id="code_step" class="hidden">
+      <label><span>Code</span><input type="text" id="code_value" inputmode="numeric" autocomplete="one-time-code"></label>
+      <button id="sign_in">Log In</button>
+    </div>
+    <div id="password_step" class="hidden">
+      <label><span>Password of the Second Step</span><input type="password" id="password" autocomplete="off"></label>
+      <button id="sign_in_password">Log In</button>
+    </div>
+    <button id="log_out" class="plain hidden">Log Out</button>
+    <div id="logged" class="note hidden"></div>
+  </section>
+
+  <section id="try">
+    <h2>Try a Search</h2>
+    <div class="row"><input type="text" id="query" placeholder="Name of a game"><button id="search">Search</button></div>
+    <div id="found" class="note hidden"></div>
+    <table id="results"></table>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let current = {};
+
+function note(id, text, good) {
+  const el = $(id);
+  el.textContent = text || "";
+  el.className = "note " + (good ? "good" : "bad") + (text ? "" : " hidden");
+}
+
+function size(bytes) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return bytes.toFixed(i > 2 ? 2 : 0) + " " + units[i];
+}
+
+function show(data) {
+  current = data;
+  $("api_id").value = data.api_id || "";
+  $("api_hash").placeholder = data.api_hash ? "Saved; type a new one to change it" : "";
+  $("bot").value = data.bot ? "@" + data.bot.replace(/^@/, "") : "";
+  $("enabled").checked = !!data.enabled;
+  $("torrents").textContent = data.torrents ? "" : "Its releases are torrents: switch on a torrent client under Settings > Download Clients, or nothing is searched here.";
+  $("account").textContent = data.logged_in ? "Logged in as " + data.account + "." : "Not logged in.";
+  $("phone_step").classList.toggle("hidden", data.logged_in || data.waiting);
+  $("code_step").classList.toggle("hidden", data.logged_in || !data.waiting || $("password_step").offsetParent !== null);
+  $("log_out").classList.toggle("hidden", !data.logged_in);
+  if (data.logged_in) $("password_step").classList.add("hidden");
+  if (data.last_error) note("logged", "Last problem: " + data.last_error, false);
+}
+
+async function call(path, body) {
+  const options = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const response = await fetch(path, options);
+  let data = {};
+  try { data = await response.json(); } catch (e) { data = {ok: false, error: "No answer from NSWHunter"}; }
+  if (response.status === 401) {
+    $("away").innerHTML = "";
+    $("away").append("Log in to NSWHunter first: ");
+    const link = document.createElement("a");
+    link.href = "/";
+    link.textContent = "open the panel";
+    $("away").append(link, ", then come back to this page.");
+    $("away").classList.remove("hidden");
+    throw new Error("login");
+  }
+  if (data.change) { note("away", data.error, false); throw new Error("change"); }
+  if (data.api_id !== undefined) show(data);
+  return data;
+}
+
+async function busy(button, work) {
+  button.disabled = true;
+  try { await work(); } catch (e) { if (!["login", "change"].includes(e.message)) console.error(e); } finally { button.disabled = false; }
+}
+
+$("save").onclick = () => busy($("save"), async () => {
+  const data = await call("/api/tg", {api_id: $("api_id").value, api_hash: $("api_hash").value, bot: $("bot").value, enabled: $("enabled").checked});
+  $("api_hash").value = "";
+  note("saved", data.ok ? "Saved." : data.error, data.ok);
+});
+
+$("code").onclick = () => busy($("code"), async () => {
+  const data = await call("/api/tg/code", {phone: $("phone").value});
+  note("logged", data.ok ? "Telegram sent a code to your account." : data.error, data.ok);
+  if (data.ok) $("code_value").focus();
+});
+
+async function signIn(button, body) {
+  await busy(button, async () => {
+    const data = await call("/api/tg/login", body);
+    if (data.ok && data.step === "password") {
+      $("code_step").classList.add("hidden");
+      $("password_step").classList.remove("hidden");
+      note("logged", "This account has a second step: fill in its password.", true);
+      $("password").focus();
+    } else {
+      $("password").value = "";
+      $("code_value").value = "";
+      note("logged", data.ok ? "Logged in." : data.error, data.ok);
+    }
+  });
+}
+$("sign_in").onclick = () => signIn($("sign_in"), {code: $("code_value").value});
+$("sign_in_password").onclick = () => signIn($("sign_in_password"), {password: $("password").value});
+
+$("log_out").onclick = () => busy($("log_out"), async () => {
+  const data = await call("/api/tg/logout", {});
+  note("logged", data.ok ? "Logged out." : data.error, data.ok);
+});
+
+$("search").onclick = () => busy($("search"), async () => {
+  $("results").replaceChildren();
+  note("found", "Asking the bot...", true);
+  const data = await call("/api/tg/search", {query: $("query").value});
+  if (!data.ok) return note("found", data.error, false);
+  note("found", data.releases.length ? data.releases.length + " release(s)" : "The bot found nothing.", data.releases.length > 0);
+  for (const r of data.releases) {
+    const row = document.createElement("tr");
+    const title = document.createElement("td");
+    title.textContent = r.title;
+    const amount = document.createElement("td");
+    amount.className = "size";
+    amount.textContent = size(r.size);
+    row.append(title, amount);
+    $("results").append(row);
+  }
+});
+$("query").onkeydown = (e) => { if (e.key === "Enter") $("search").click(); };
+
+call("/api/tg").catch(() => {});
+</script>
+</body>
+</html>

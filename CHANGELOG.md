@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.1] - 2026-11-23
+
+### Changed
+
+- Internal changes.
+
 ## [3.25.0] - 2026-11-23
 
 ### Added

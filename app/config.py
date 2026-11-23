@@ -237,7 +237,9 @@ EDITABLE = {
 }
 SECRETS = [name for name, kind in EDITABLE.items() if kind == "secret"]
 # Kept in the settings file too, but no setting of a form: set by steps of their own in the panel.
-PRIVATE = ("TOTP_SECRET", "ROOT_FOLDERS")
+PRIVATE = ("TOTP_SECRET", "ROOT_FOLDERS", "TG")
+# The chat source of torrents (see tg.py): set on its own page only, kept in the settings file.
+TG = {}
 # Settings of an older version, read once to move them to where they are now (see load_saved).
 LEGACY = ("REMOVE_COMPLETED",)
 # A key or password belongs to the address it was saved for: it is never sent to another one.
@@ -519,6 +521,11 @@ def save_provider(kind, entry):
     return clean
 
 
+def set_tg(values):
+    globals()["TG"] = dict(values)
+    write({**saved(), "TG": TG})
+
+
 def replace_providers(kind, entries):
     """The whole list of one kind at once, already normalized (see apps.py)."""
     globals()[kind] = list(entries)
@@ -627,6 +634,7 @@ def load_saved():
         except (ValueError, KeyError, TypeError):
             continue  # a broken one is left out, the rest still works
     globals()["ROOT_FOLDERS"] = folders
+    globals()["TG"] = data["TG"] if isinstance(data.get("TG"), dict) else {}
     for name, value in data.items():
         if name in KINDS or name in PRIVATE or name in LEGACY:
             continue
