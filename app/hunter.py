@@ -691,14 +691,15 @@ class Hunter:
             del self.state["vermap"][game.id]
         if isinstance(result, matcher.Rejection):
             return result
-        if item["type"] == "game" and result.name_match != "tid":
+        if result.name_match != "tid":
+            # "Double Dragon Gaiden ... Update" is no update of "Double Dragon".
             other = self.other_title(game.name, release["title"])
             if other:
                 return matcher.Rejection(f"another game: {other}")
         return {**{k: release.get(k) for k in RELEASE_FIELDS}, **result.to_dict()}
 
     def other_title(self, name, title):
-        """For a game of the wishlist: another game of the list of all games whose whole name is
+        """Another game of the list of all games whose whole name is
         in the release title and longer than this one ("Double Dragon Gaiden" for "Double Dragon").
         Another edition of the same game does not count ("... Special Edition")."""
         if not self.titles:

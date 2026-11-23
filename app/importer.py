@@ -270,7 +270,8 @@ def bring(client, reported, game_files, wanted, protocol, game=None):
         raise ImportProblem(
             f"{source} is not there in this container. Make the download folder a volume of the container, under "
             f"the same path as in {client['name']}; or give the download client a Remote Path and a Local Path.")
-    return place(source, game_files, wanted, protocol == "torrent", game)
+    # Files named with the title ID of another game do not go to the folder of this one.
+    return place(source, game_files, wanted, protocol == "torrent", game, only=game[0] if game else None)
 
 
 def ready(game_files, game, wanted=None):

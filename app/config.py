@@ -166,6 +166,9 @@ MIN_PASSWORD = 8
 # Extra host names the panel answers to, comma separated: the name of a reverse proxy, for
 # example. An IP address and a name inside the home network always work (see auth.py).
 PANEL_HOSTS = env("PANEL_HOSTS").lower().replace(" ", "")
+# The key another app (Prowlarr) uses to talk to NSWHunter, in the header X-Api-Key (see apps.py).
+# Made up at the first start (see load_saved); emptied in the panel, a new one is made.
+API_KEY = env("API_KEY")
 
 # info: what happens. debug: also every search and every call to a service. trace: also every
 # release that was judged, with the verdict.
@@ -224,7 +227,7 @@ EDITABLE = {
     "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "MIN_GAME_MB": range(0, 10001), "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "IMPORT_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "CLEANUP_EXTENSIONS": "text", "FOLDER_TEMPLATE": "template",
-    "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text",
+    "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text", "API_KEY": "apikey",
     "SSL_ENABLED": "bool", "SSL_PORT": range(1, 65536), "SSL_CERT_PATH": "file", "SSL_KEY_PATH": "file",
     "LOG_LEVEL": LOG_LEVELS, "LOG_KEEP_DAYS": LOG_KEEPS,
     "BACKUP_FOLDER": "path", "BACKUP_INTERVAL_DAYS": range(1, 91), "BACKUP_RETENTION_DAYS": range(1, 366),
@@ -337,6 +340,11 @@ def normalize(name, value):
     elif kind == "file":
         if value and (not value.startswith("/") or ".." in value.split("/") or "\\" in value):
             raise ValueError(f"{name}: fill in the whole path of a file in the container, like /config/certs/panel.pem")
+    elif kind == "apikey":
+        if not value:
+            value = secrets.token_hex(16)
+        elif not (20 <= len(value) <= 64 and value.isascii() and value.isalnum()):
+            raise ValueError(f"{name}: 20 to 64 letters and digits, or empty for a new key")
     elif name == "PANEL_USER" and (not value or ":" in value):
         raise ValueError("PANEL_USER: fill in a name, without a colon")
     elif name == "PANEL_PASSWORD":
@@ -484,6 +492,10 @@ def normalize_entry(kind, entry, keep_id=True):
         else:
             value = clean_text(label, value)
         clean[field] = value
+    # What Prowlarr sent for an indexer it put here (see apps.py): it gets the same back.
+    app = (old or {}).get("app") if keep_id else entry.get("app")
+    if isinstance(app, dict):
+        clean["app"] = app
     if kept and old and "url" in spec["fields"] and origin(clean["url"]) != origin(old.get("url")):
         raise ValueError(f"{name}: fill in the {kept[0].replace('_', ' ')} again, because the address changed. "
                          "A saved key or password is only sent to the address it was saved for.")
@@ -507,6 +519,12 @@ def save_provider(kind, entry):
     return clean
 
 
+def replace_providers(kind, entries):
+    """The whole list of one kind at once, already normalized (see apps.py)."""
+    globals()[kind] = list(entries)
+    write({**saved(), kind: globals()[kind]})
+
+
 def delete_provider(kind, entry_id):
     if kind not in PROVIDERS:
         raise ValueError("Invalid request")
@@ -521,7 +539,8 @@ def shown_providers():
         result[kind] = []
         for entry in globals()[kind]:
             fields = PROVIDERS[kind][entry["type"]]["fields"]
-            shown = {k: v for k, v in entry.items() if fields.get(k) != "secret"}
+            shown = {k: v for k, v in entry.items() if fields.get(k) != "secret" and k != "app"}
+            shown["synced"] = "app" in entry  # put here by Prowlarr
             shown["secrets"] = {k: bool(entry.get(k)) for k, f in fields.items() if f == "secret"}
             result[kind].append(shown)
     return result
@@ -616,6 +635,8 @@ def load_saved():
         except ValueError:
             continue
     kept.pop("REMOVE_COMPLETED", None)  # a setting of each download client now (see below)
+    if not API_KEY:
+        globals()["API_KEY"] = kept["API_KEY"] = normalize("API_KEY", "")
     globals()["BACKUP_FOLDER"] = backup_folder(BACKUP_FOLDER)  # a saved "/backup" without that volume
     old = legacy() if any(kind not in data for kind in KINDS) else {}
     for kind in KINDS:

@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.0] - 2026-11-23
+
+### Added
+
+- Prowlarr can put its indexers in NSWHunter, as it does for Radarr and Sonarr. Settings > General has an API Key for it. In Prowlarr, NSWHunter is added under Settings > Apps as a Radarr, with Console as its Sync Categories. Each indexer of Prowlarr then becomes a Newznab or Torznab indexer in NSWHunter, which Prowlarr keeps in step.
+
+### Fixed
+
+- An update or DLC whose title holds the longer name of another game is no longer taken for one of the shorter game: "Double Dragon Gaiden ... Update" is no update of "Double Dragon". This was already so for the wishlist.
+- A file with the title ID of another game in its name is not imported into the folder of the game the download was sent for. It stays in the download.
+
 ## [3.24.5] - 2026-11-23
 
 ### Fixed

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from aiohttp import web
 
+import apps
 import auth
 import backup
 import clients
@@ -129,6 +130,9 @@ async def guarded(request, handler):
         return refuse(403, "This request comes from another site")
     if request.method == "POST" and request.content_type != "application/json":
         return refuse(415, "JSON required")
+    if request.path.startswith(apps.ROUTE + "/"):
+        # Prowlarr, with the API key of Settings > General instead of a login (see apps.py).
+        return await handler(request) if apps.allowed(request) else refuse(401, "Unauthorized: a valid X-Api-Key is required")
     if request.path not in OPEN and not logged_in(request):
         return refuse(401, "Login required", login=True)
     if request.path not in FIRST and config.must_change_password():
@@ -840,6 +844,7 @@ def make_app():
         web.post("/api/browse", api_browse),
         web.get("/api/rootfolders", api_root_folders),
         web.post("/api/rootfolders", api_root_folders_change),
+        *apps.routes(),
     ])
     return app
 

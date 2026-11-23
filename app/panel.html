@@ -1829,7 +1829,9 @@ const FORMS = {
       {name: "SSL_KEY_PATH", label: "Certificate Key Path", placeholder: "/config/certs/panel.key", browse: "file",
        help: "The PEM file with the key of the certificate. Leave it empty if the key is in the same file."},
       {name: "PANEL_HOSTS", label: "Host Names", placeholder: "nswhunter.example.com",
-       help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."}]},
+       help: "Only needed if you open the panel by a domain name, behind a reverse proxy for example: fill in that name, several separated by commas. An IP address and a name inside your home network (nas, nas.local) always work. Other names are refused, so a website cannot reach the panel through your browser."},
+      {name: "API_KEY", label: "API Key",
+       help: "The key with which Prowlarr puts its indexers in NSWHunter. In Prowlarr, under Settings > Apps, add a Radarr with the address of NSWHunter and this key, and set its Sync Categories (an advanced setting) to Console. Empty it and save for a new key; Prowlarr then needs the new one."}]},
     {title: "Logging", fields: [
       {name: "LOG_LEVEL", label: "Log Level", options: [["info", "Info"], ["debug", "Debug"], ["trace", "Trace"]],
        help: "Info: what happens. Debug: also every search and every talk with a service. Trace: also every release that was judged, with the verdict. Debug and trace go to the output of the container and to the log files, not to the Events page."},
