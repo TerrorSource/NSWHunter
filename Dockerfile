@@ -13,10 +13,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PUID=1000 \
     PGID=1000
 
-# tzdata: without it the log and the panel show UTC. unrar-free: a RAR inside the RAR of a
-# download, which the download client unpacks only once.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tzdata unrar-free \
+# tzdata: without it the log and the panel show UTC. unrar (of non-free): a RAR inside the RAR
+# of a download, which the download client unpacks only once. Not unrar-free: it brings
+# libarchive and libxml2, and with them their CVEs. The upgrade takes the fixes of Debian that
+# the python image does not have yet.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get upgrade -y \
+ && apt-get install -y --no-install-recommends tzdata unrar \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt

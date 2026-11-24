@@ -2,6 +2,17 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.26.0] - 2026-11-24
+
+### Added
+
+- A link to NSWHunter on GitHub, always in the top right of the panel.
+
+### Security
+
+- RAR archives are unpacked with unrar instead of unrar-free. That takes libarchive and libxml2 out of the image, and with them CVE-2026-6653 (critical) and other CVEs that Debian has no fix for yet.
+- The packages of the image are upgraded when it is built: it gets the fixes of Debian that the Python base image does not have yet.
+
 ## [3.25.9] - 2026-11-24
 
 ### Fixed

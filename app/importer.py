@@ -166,19 +166,20 @@ def unpack(source):
             shutil.rmtree(work, ignore_errors=True)  # what an unpack that was broken off left
             os.makedirs(os.path.join(work, "out"))
             try:
-                # unrar-free finds the next volume only by the name game.part2.rar: hard links
-                # with those names, also for the old naming (game.r00). No copies, no space.
+                # One naming for unrar, whatever the download has (game.r00 or game.part2.rar):
+                # hard links named v.part001.rar and on. No copies, no space.
                 first = parts[0]
                 for n, part in enumerate(parts if len(parts) > 1 else [], 1):
                     link = os.path.join(work, f"v.part{n:03d}.rar")
                     os.link(part, link)
                     first = link if n == 1 else first
-                done = subprocess.run(["unrar-free", "-x", first, os.path.join(work, "out") + "/"],
+                # -p-: never wait for a password; -o-: never overwrite; -y: yes to any other question.
+                done = subprocess.run(["unrar", "x", "-p-", "-o-", "-y", "-idcdp", first, os.path.join(work, "out") + "/"],
                                       capture_output=True, text=True, timeout=UNPACK_SECONDS, check=False)
                 if done.returncode:
                     lines = [line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip()]
-                    why = next((line for line in reversed(lines) if "unrar-free:" in line), lines[-1] if lines else "")
-                    UNPACK_FAILED[seen] = f"unpacking {os.path.basename(parts[0])} failed ({why.replace('unrar-free: ', '')[:200]})"
+                    why = next((line for line in reversed(lines) if "rror" in line or "not RAR" in line), lines[-1] if lines else "")
+                    UNPACK_FAILED[seen] = f"unpacking {os.path.basename(parts[0])} failed ({why[:200]})"
                     raise ImportProblem(UNPACK_FAILED[seen])
                 for inside, _, names in os.walk(os.path.join(work, "out")):
                     for name in names:
@@ -187,7 +188,7 @@ def unpack(source):
                             os.replace(os.path.join(inside, name), target)
                             made.append(target)
             except FileNotFoundError as e:
-                if e.filename == "unrar-free":
+                if e.filename == "unrar":
                     raise ImportProblem("this container cannot unpack it") from e
                 raise
             except subprocess.TimeoutExpired as e:
