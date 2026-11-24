@@ -125,8 +125,6 @@
   .label.error { background: var(--bad-bg); color: var(--bad); }
   .label.sent { background: var(--info-bg); color: var(--link); }
   .label.review { background: var(--warn-bg); color: var(--warn); }
-  /* Usenet or torrent, as the protocol column of Prowlarr. */
-  .label.usenet { background: var(--info-bg); color: var(--link); } .label.torrent { background: var(--good-bg); color: var(--good); }
   /* The state of a row, wide and in one colour, as the status of a movie in Radarr. */
   .label.wide { min-width: 104px; padding: 2px 8px; text-align: center; color: #fff; background: #6b6b6b; }
   .label.wide.ok { background: #1f8f3a; } .label.wide.danger { background: #d9342b; } .label.wide.warn { background: #b36b00; }
@@ -194,6 +192,7 @@
   /* A drawing that says what a row is. */
   .mark { display: inline-flex; vertical-align: middle; color: var(--soft); }
   .mark.good { color: var(--good); } .mark.bad { color: var(--bad); } .mark.warn { color: #d98200; } .mark.info { color: var(--link); }
+  /* Usenet or torrent, as the protocol column of Prowlarr. */
   .label.usenet { background: #17a2c6; color: #fff; } .label.torrent { background: #1f8f3a; color: #fff; }
   /* The lines of a details window and of About: the name on the left, in bold. */
   .facts { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px 20px; margin: 0; }
@@ -699,10 +698,11 @@ const SORTS = {
   searched: {text: "Last Search", down: true, of: g => Math.max(0, ...g.items.map(i => i.last_search || 0))},
   added: {text: "Added", down: true, of: g => Math.max(0, ...g.items.map(i => i.first_seen || 0))},
   release: {text: "Best Release", down: false, of: g => { const top = topOf(g); return top ? top.release.title : "\uffff"; }},
+  protocol: {text: "Protocol", down: false, of: g => { const top = topOf(g); return top ? protocolOf(top.release) : "\uffff"; }},
   status: {text: "Status", down: false, of: g => ["Awaiting Choice", "In Queue", "Already Tried", "Nothing Found", "Not Searched", "Ignored"].indexOf(gameStatus(g)[1])},
 };
 // The heads of the Wanted table and what each sorts on; the Sort menu of the toolbar does the same.
-const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
+const WANTED_HEADS = [["Game", "name"], ["Missing", "behind"], ["Best Release", "release"], ["Protocol", "protocol"], ["Score", "score"], ["Status", "status"], ["Last Search", "searched"]];
 // The Wishlist: games that are not in the library yet, added with Add Game. Missing leaves them out.
 const wished = g => g.items.some(i => i.type === "game");
 const fromSlm = g => g.items.some(i => i.type === "game" && i.slm);  // only on the wishlist of Switch-library-manager-web
@@ -794,10 +794,11 @@ function fold(open, text, toggle) {
 }
 // One release in the columns of the list: score, release, source, size, age, what can be done.
 function protocolOf(release) { return release.protocol === "torrent" ? "torrent" : "usenet"; }
+const protocolLabel = release => h("span", {class: "label " + protocolOf(release)}, release.protocol === "torrent" ? "torrent" : "nzb");
 function releaseRow(first, release, about, actions, cls) {
   return h("div", {class: "cand " + (cls || "")},
     h("div", {}, first),
-    h("div", {}, h("span", {class: "label " + protocolOf(release)}, protocolOf(release))),
+    h("div", {}, protocolLabel(release)),
     h("div", {}, h("div", {class: "name"}, link(release)), about.filter(Boolean).map(text => h("div", {class: "sub"}, text))),
     h("div", {}, source(release)),
     h("div", {}, size(release.size) || "–"),
@@ -899,6 +900,7 @@ function wantedRow(game) {
     h("td", {}, h("button", {class: "linkish", title: "Open the page of this game", onclick: () => showGame(game.id)}, game.name)),
     h("td", {class: "tight"}, page === "wishlist" ? ago(Math.max(0, ...game.items.map(i => i.first_seen || 0))) : missingText(game)),
     h("td", {class: "wrap"}, top ? [top.release.title, count > 1 ? h("span", {class: "sub"}, " · " + (count - 1) + " more") : null] : "–"),
+    h("td", {class: "tight"}, top ? protocolLabel(top.release) : "–"),
     h("td", {class: "tight"}, top ? score(top.release.score, "Score of the best release that was found") : "–"),
     h("td", {class: "tight"}, h("span", {class: "label wide " + cls, title: statusTip(game, text)}, text),
       failed(game).length ? h("span", {class: "label error"}, failed(game).length + " failed") : null),
@@ -1250,7 +1252,7 @@ function details(title, pairs) {
   put($("modal"), dialog(title, facts(pairs), [h("span", {class: "grow"}), h("button", {type: "button", onclick: closeModal}, "Close")]));
   $("modal").hidden = false;
 }
-const protocol = name => h("span", {class: "label " + (name === "torrent" ? "torrent" : "usenet")}, name || "usenet");
+const protocol = name => h("span", {class: "label " + (name === "torrent" ? "torrent" : "usenet")}, name === "torrent" ? "torrent" : "nzb");
 // What the toolbar does with the ticked rows of a list, one after the other.
 async function eachTicked(set, rows, done, work) {
   const chosen = rows.filter(r => set.has(r.id));

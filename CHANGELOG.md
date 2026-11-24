@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.7] - 2026-11-24
+
+### Added
+
+- Wanted has a Protocol column: whether the best release is a usenet (nzb) or a torrent download. The Queue and the Interactive Search say "nzb" too, as Prowlarr does.
+
 ## [3.25.6] - 2026-11-23
 
 ### Changed
