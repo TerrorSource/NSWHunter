@@ -1520,8 +1520,11 @@ class Hunter:
         threshold = config.auto_min_score()
         if not threshold or not self.awaits(item):
             return None
-        best = self.untried(item)[0]  # what was sent before is not sent again without a click
-        if best.get("score", 0) < threshold:
+        # What was sent before is not sent again without a click; while the bot gives no more
+        # downloads today, its releases wait and the best of the others may go.
+        paused = tg.free_at()
+        best = next((c for c in self.untried(item) if not (paused and c.get("source") == tg.SOURCE)), None)
+        if best is None or best.get("score", 0) < threshold:
             return None
         if best["kind"] == "bundle" and not config.AUTO_BUNDLES:
             return None
@@ -1529,8 +1532,6 @@ class Hunter:
             return None  # a DLC unlocker only goes out with a click of its own
         if item["type"] == "game" and not config.AUTO_WISHLIST:
             return None  # a whole game of the wishlist waits for a click, unless asked otherwise
-        if best.get("source") == tg.SOURCE and tg.free_at():
-            return None  # the bot gives no more downloads today: it waits, and is not counted as failed
         return best
 
     async def grab(self, key, guid, auto=False):

@@ -753,7 +753,7 @@ function pick(key, value) { picks = {...picks, [key]: value}; remember("choicefi
 // the update goes before DLC. On Awaiting Choice: the best of those that fit its Filter.
 function topOf(game) {
   const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
-  return live(game).filter(waiting).map(i => ({item: i, release: i.candidates.find(c => fits(i, c))})).filter(t => t.release)
+  return live(game).filter(waiting).map(i => ({item: i, release: untried(i).find(c => fits(i, c))})).filter(t => t.release)
     .sort((a, b) => rank(b) - rank(a))[0];
 }
 // What "Download All" would send: the best release of every waiting item, if it scores high enough.

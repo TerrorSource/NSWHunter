@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.9] - 2026-11-24
+
+### Fixed
+
+- Wanted showed a release that was sent before as the best release of a row, and its download button sent that one again. It now shows the best release that was not sent yet.
+
+### Changed
+
+- Internal changes.
+
 ## [3.25.8] - 2026-11-24
 
 ### Added
