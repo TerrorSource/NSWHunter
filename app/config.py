@@ -521,6 +521,11 @@ def save_provider(kind, entry):
     return clean
 
 
+def _chat_usage():
+    import tg  # noqa: PLC0415  (tg imports this module)
+    return {"used": len(tg.used()), "daily": tg.daily(), "paused": bool(tg.free_at())}
+
+
 def set_tg(values):
     globals()["TG"] = dict(values)
     write({**saved(), "TG": TG})
@@ -812,7 +817,7 @@ def editable():
         "providers": shown_providers(),
         # The chat source of torrents, once it was set up on its own page: shown with the indexers.
         "chat": {"bot": TG.get("bot", ""), "enabled": bool(TG.get("enabled")), "account": TG.get("account", ""),
-                 "logged_in": bool(TG.get("session"))} if TG.get("api_id") or TG.get("bot") else None,
+                 "logged_in": bool(TG.get("session")), **_chat_usage()} if TG.get("api_id") or TG.get("bot") else None,
         "schema": {kind: {t: {"label": spec["label"], "fields": spec["fields"], "protocol": spec.get("protocol", "")}
                           for t, spec in types.items()} for kind, types in PROVIDERS.items()},
     }

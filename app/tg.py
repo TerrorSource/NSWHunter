@@ -23,6 +23,10 @@ SIZE = re.compile(r"^[ \t]*Size:[ \t]*(?P<size>[\d.,]+)[ \t]*(?P<unit>[KMGT]?i?B
 DOWNLOAD = re.compile(r"^[ \t]*Download:[ \t]*/download(?P<id>\d+)", re.M | re.I)
 UNITS = {"b": 1, "kb": 2**10, "mb": 2**20, "gb": 2**30, "tb": 2**40}
 TITLE_ID = re.compile(r"[0-9a-fA-F]{16}")
+DAY = 24 * 3600
+DAILY = 20  # downloads a day the bot allows, if the page does not say
+# What the bot answers a download over its limit; each one over it lowers that limit.
+OVER = re.compile(r"download limit", re.I)
 
 logging.getLogger("telethon").setLevel(logging.WARNING)
 state = {"client": None, "key": None, "pending": None, "last": 0.0, "paused_until": 0.0, "error": "", "error_at": 0}
@@ -34,13 +38,40 @@ def ready():
     return bool(s.get("enabled") and s.get("session") and s.get("bot") and s.get("api_id") and s.get("api_hash"))
 
 
+def daily():
+    try:
+        return max(1, int(config.TG.get("daily") or DAILY))
+    except (TypeError, ValueError):
+        return DAILY
+
+
+def used(now=None):
+    """The downloads of the last 24 hours. A rolling day: whenever the day of the bot starts,
+    no day of it gets more than this."""
+    now = time.time() if now is None else now
+    return [t for t in config.TG.get("downloads", []) if now - t < DAY]
+
+
+def free_at():
+    """When the next download may be asked for: 0 for now."""
+    times, now = used(), time.time()
+    waits = [config.TG.get("full_until", 0)] + ([min(times) + DAY] if len(times) >= daily() else [])
+    return max([0, *(w for w in waits if w > now)])
+
+
+def full_text():
+    return (f"The bot allows {daily()} downloads a day: the next one can be asked for at "
+            f"{time.strftime('%H:%M', time.localtime(free_at()))}")
+
+
 def shown():
     """What the page gets: no hash and no session, only whether they are there."""
     s = config.TG
     return {"api_id": s.get("api_id", ""), "api_hash": bool(s.get("api_hash")), "bot": s.get("bot", ""),
             "enabled": bool(s.get("enabled")), "account": s.get("account", "") if s.get("session") else "",
             "logged_in": bool(s.get("session")), "waiting": bool(state["pending"]),
-            "last_error": state["error"], "last_error_at": state["error_at"], "torrents": config.wants_torrents()}
+            "last_error": state["error"], "last_error_at": state["error_at"], "torrents": config.wants_torrents(),
+            "daily": daily(), "used": len(used()), "free_at": int(free_at())}
 
 
 async def close():
@@ -184,6 +215,8 @@ async def search(query):
     query = str(query or "").strip()
     if not query or TITLE_ID.fullmatch(query):
         return []
+    if free_at():
+        raise ServiceError(full_text())  # what it finds could not be downloaded today
     try:
         answers = await ask(query, lambda got: any("/download" in (a.raw_text or "") for a in got) or len(got) >= 2)
     except ServiceError as e:
@@ -205,8 +238,16 @@ async def fetch(release):
     number = str(release.get("downloadUrl") or "").removeprefix(f"{SOURCE}:")
     if not number.isdigit():
         raise ServiceError("This release has no number the bot knows")
+    if free_at():
+        raise ServiceError(full_text())
+    # Counted when asked, not when it comes: an answer that fails may count for the bot too.
+    config.set_tg({**config.TG, "downloads": [*used(), int(time.time())]})
     answers = await ask(f"/download{number}", lambda got: any(a.file for a in got), wait=60)
     sent = next((a for a in answers if a.file), None)
+    if sent is None and any(OVER.search(a.raw_text or "") for a in answers):
+        config.set_tg({**config.TG, "full_until": int(time.time()) + DAY})
+        logs.info(f"{NAME}: the bot says its daily download limit is reached; lower the limit on /telegrambot")
+        raise ServiceError(full_text())
     if sent is None:
         raise ServiceError(f"The bot sent no torrent for this release: {(answers[-1].raw_text or '')[:200]}")
     data = await sent.download_media(file=bytes)

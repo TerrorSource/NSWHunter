@@ -178,7 +178,13 @@ async def chat_save(body):
     if bot and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,31}", bot):
         raise ValueError("The bot is a name like @SomeBot")
     old = config.TG
-    new = {**old, "api_id": api_id, "bot": bot, "enabled": bool(body.get("enabled"))}
+    try:
+        daily = int(body.get("daily") or tg.DAILY)
+    except (TypeError, ValueError):
+        daily = 0
+    if not 1 <= daily <= 1000:
+        raise ValueError("Downloads a day is a number from 1 to 1000")
+    new = {**old, "api_id": api_id, "bot": bot, "enabled": bool(body.get("enabled")), "daily": daily}
     if api_hash:
         new["api_hash"] = api_hash
     if (new["api_id"], new.get("api_hash")) != (old.get("api_id"), old.get("api_hash")):

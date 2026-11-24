@@ -53,6 +53,10 @@ a { color: var(--accent); }
     <label><span>API ID</span><input type="text" id="api_id" inputmode="numeric" autocomplete="off"></label>
     <label><span>API Hash</span><input type="password" id="api_hash" autocomplete="off" placeholder=""></label>
     <label><span>Bot</span><input type="text" id="bot" autocomplete="off" placeholder="@SomeBot"></label>
+    <label><span>Downloads a Day</span><input type="text" id="daily" inputmode="numeric" autocomplete="off"></label>
+    <p class="muted">The most the bot allows in 24 hours; each download over it lowers that number at the bot. Once it is
+      reached, the bot is not searched and nothing is downloaded from it until one of the last 24 hours is over.</p>
+    <p id="usage"></p>
     <label class="check"><input type="checkbox" id="enabled"><span>Search this bot</span></label>
     <p class="muted" id="torrents"></p>
     <button id="save">Save</button>
@@ -109,6 +113,9 @@ function show(data) {
   $("api_hash").placeholder = data.api_hash ? "Saved; type a new one to change it" : "";
   $("bot").value = data.bot ? "@" + data.bot.replace(/^@/, "") : "";
   $("enabled").checked = !!data.enabled;
+  if (document.activeElement !== $("daily")) $("daily").value = data.daily || "";
+  const at = data.free_at ? new Date(data.free_at * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "";
+  $("usage").textContent = "Downloads in the last 24 hours: " + data.used + " of " + data.daily + "." + (at ? " Paused until " + at + "." : "");
   $("torrents").textContent = data.torrents ? "" : "Its releases are torrents: switch on a torrent client under Settings > Download Clients, or nothing is searched here.";
   $("account").textContent = data.logged_in ? "Logged in as " + data.account + "." : "Not logged in.";
   $("phone_step").classList.toggle("hidden", data.logged_in || data.waiting);
@@ -144,7 +151,7 @@ async function busy(button, work) {
 }
 
 $("save").onclick = () => busy($("save"), async () => {
-  const data = await call("/api/tg", {api_id: $("api_id").value, api_hash: $("api_hash").value, bot: $("bot").value, enabled: $("enabled").checked});
+  const data = await call("/api/tg", {api_id: $("api_id").value, api_hash: $("api_hash").value, bot: $("bot").value, daily: $("daily").value, enabled: $("enabled").checked});
   $("api_hash").value = "";
   note("saved", data.ok ? "Saved." : data.error, data.ok);
 });

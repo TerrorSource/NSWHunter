@@ -99,6 +99,8 @@
   .menu button:focus-visible, #top .menu button:focus-visible { outline: 2px solid var(--accent-on-dark); outline-offset: -2px; }
   .menu button.on { font-weight: 700; }
   .menu .about { padding: 10px 20px; font-size: 12px; opacity: .7; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, .15); }
+  .menu .about.group { padding: 8px 20px 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .menu .about.group:not(:first-child) { border-top: 1px solid rgba(255, 255, 255, .15); }
   .content { padding: 20px; width: 100%; }
 
   /* ---- what the pages are made of */
@@ -498,6 +500,7 @@ function addressed() {
 let [page, gameId] = addressed();
 let settings = null, clearing = new Set(), opened = false, confirming = false, editing = null, backups = null, dirty = false;
 let selected = new Set();  // the games that are ticked on a Wanted page
+let picks = (() => { try { return JSON.parse(remembered("choicefilter", "{}")) || {}; } catch (e) { return {}; } })();  // the Filter of Awaiting Choice
 let only = remembered("wantedfilter", "all"), sortBy = remembered("sort", "score"), flipped = remembered("flipped", "") === "1";
 let auth = null;  // "login" or "change" while the login screen is up
 let events = null, logLevel = remembered("loglevel", "all"), logNeedle = "", logFiles = null;
@@ -734,11 +737,24 @@ const WANTED = {
   queue: {text: "In Queue", has: g => live(g).some(i => i.grab), none: "Nothing is in the queue."},
   ignored: {text: "Ignored", has: g => g.items.some(i => i.ignored), none: "You ignore no games."},
 };
+// The Filter of Awaiting Choice: per group the options, and whether a release of an item fits one.
+const PICKS = {
+  score: {text: "Score", options: {"": ["Any", () => true], s9: ["9 or 10", s => s >= 9], s7: ["7 and Up", s => s >= 7],
+                                   s5: ["5 and Up", s => s >= 5], low: ["Under 5", s => s < 5]}, of: (i, c) => c.score || 0},
+  protocol: {text: "Protocol", options: {"": ["Any", () => true], usenet: ["Usenet", p => p === "usenet"], torrent: ["Torrent", p => p === "torrent"]},
+             of: (i, c) => protocolOf(c)},
+  type: {text: "Missing", options: {"": ["Any", () => true], update: ["Update", t => t === "update"], dlc: ["DLC", t => t === "dlc" || t === "dlcpack"],
+                                    game: ["Game", t => t === "game"]}, of: i => i.type},
+};
+const fits = (i, c) => page !== "choice" || Object.entries(PICKS).every(([key, p]) => (p.options[picks[key] || ""] || p.options[""])[1](p.of(i, c)));
+const picking = () => page === "choice" && Object.keys(PICKS).some(key => picks[key] && PICKS[key].options[picks[key]]);
+function pick(key, value) { picks = {...picks, [key]: value}; remember("choicefilter", JSON.stringify(picks)); render(); }
 // The best release of a game: the one the download button of its row sends. Of equal scores
-// the update goes before DLC.
+// the update goes before DLC. On Awaiting Choice: the best of those that fit its Filter.
 function topOf(game) {
   const rank = t => (t.release.score || 0) * 2 + (t.item.type === "update" ? 1 : 0);
-  return live(game).filter(waiting).map(i => ({item: i, release: i.candidates[0]})).sort((a, b) => rank(b) - rank(a))[0];
+  return live(game).filter(waiting).map(i => ({item: i, release: i.candidates.find(c => fits(i, c))})).filter(t => t.release)
+    .sort((a, b) => rank(b) - rank(a))[0];
 }
 // What "Download All" would send: the best release of every waiting item, if it scores high enough.
 function ready() {
@@ -892,7 +908,7 @@ function missingText(game) {
 function wantedRow(game) {
   const top = topOf(game), [cls, text] = gameStatus(game), searching = busy.has("s" + game.id);
   const searched = Math.max(0, ...game.items.map(i => i.last_search || 0));
-  const count = live(game).filter(waiting).reduce((n, i) => n + untried(i).length, 0);
+  const count = live(game).filter(waiting).reduce((n, i) => n + untried(i).filter(c => fits(i, c)).length, 0);
   return h("tr", {class: selected.has(game.id) ? "picked" : ""},
     h("td", {class: "check"}, h("input", {type: "checkbox", checked: selected.has(game.id), "aria-label": "Select " + game.name,
       onchange: e => { e.target.checked ? selected.add(game.id) : selected.delete(game.id); render(); }})),
@@ -917,6 +933,7 @@ function wantedRow(game) {
 function wantedRows() {
   if (page === "wishlist") return {filter: WISHLIST, rows: games().filter(wished)};
   const key = page === "choice" ? "choice" : (WANTED[only] ? only : "all");
+  if (picking()) return {filter: {none: "No release that awaits your choice fits the Filter."}, rows: games().filter(g => WANTED.choice.has(g) && topOf(g))};
   return {filter: WANTED[key], rows: games().filter(g => WANTED[key].has(g) && (page === "choice" || !wished(g)))};
 }
 function renderWanted() {
@@ -2267,7 +2284,9 @@ function chatCard(chat) {
   return h("button", {class: "pcard", onclick: () => { location.href = "/telegrambot"; }},
     h("div", {class: "name"}, "Telegram" + (chat.bot ? " (@" + chat.bot + ")" : "")),
     h("div", {}, h("span", {class: "label " + (on ? "ok" : "")}, on ? "Enabled" : "Disabled"), h("span", {class: "label"}, "Torrent"),
-      h("span", {class: "label"}, "Priority: 50")),
+      h("span", {class: "label"}, "Priority: 50"),
+      h("span", {class: "label " + (chat.paused ? "error" : ""), title: "Downloads in the last 24 hours, of the most the bot allows"},
+        "Downloads: " + chat.used + "/" + chat.daily)),
     h("div", {class: "says" + (chat.logged_in ? "" : " bad")}, chat.logged_in ? "✓ Logged in as " + chat.account : "✕ Not logged in"));
 }
 function cardLabels(kind, entry, schema) {
@@ -2467,7 +2486,7 @@ function tool(name, text, onclick, more) {
   return h("button", {class: "tool", type: "button", onclick, ...(more || {})}, icon(name), h("span", {}, text));
 }
 // A button that opens a short list under it, as Sort and Filter do in Sonarr and Radarr.
-// items: [text, is it the chosen one, what a click does, a mark behind it].
+// items: [text, is it the chosen one, what a click does, a mark behind it], or a text: the head of a group.
 let openMenu = null;
 function menu(id, attrs, content, items, about) {
   const open = openMenu === id;
@@ -2475,8 +2494,11 @@ function menu(id, attrs, content, items, about) {
     h("button", {...attrs, type: "button", "aria-haspopup": "menu", "aria-expanded": open ? "true" : "false",
                  onclick: e => { e.stopPropagation(); openMenu = open ? null : id; render(); }}, content),
     open ? h("div", {class: "menu", role: "menu"}, about ? h("div", {class: "about"}, about) : null,
-      items.map(([text, on, pick, mark]) => h("button", {type: "button", role: "menuitem", class: on ? "on" : "",
-        onclick: () => { openMenu = null; pick(); }}, h("span", {}, text), h("span", {}, mark || (on ? "✓" : ""))))) : null);
+      items.map(item => typeof item === "string" ? h("div", {class: "about group", role: "presentation"}, item) : menuItem(...item))) : null);
+}
+function menuItem(text, on, pick, mark) {
+  return h("button", {type: "button", role: "menuitem", class: on ? "on" : "",
+    onclick: () => { openMenu = null; pick(); }}, h("span", {}, text), h("span", {}, mark || (on ? "✓" : "")));
 }
 document.addEventListener("click", () => { if (openMenu) { openMenu = null; render(); } });
 function menuTool(id, name, text, items) {
@@ -2560,6 +2582,9 @@ function renderToolbar() {
       sortWanted)));
     if (page === "wanted") right.push(menuTool("filter", "filter", "Filter", Object.entries(WANTED).map(([key, v]) =>
       [v.text, key === only, () => { only = key; remember("wantedfilter", key); render(); }])));
+    if (page === "choice") right.push(menuTool("choicefilter", "filter", picking() ? "Filter (on)" : "Filter",
+      Object.entries(PICKS).flatMap(([key, p]) => [p.text, ...Object.entries(p.options).map(([value, [text]]) =>
+        [text, (picks[key] || "") === value || (!p.options[picks[key] || ""] && !value), () => pick(key, value)])])));
   } else if (page === "queue") {
     const picked = ticked.queue.size, working = busy.has("bulk");
     left.push(tool("refresh", "Refresh", load), h("span", {class: "sep"}),

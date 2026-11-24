@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.25.8] - 2026-11-24
+
+### Added
+
+- Awaiting Choice has a Filter: on score, protocol (usenet or torrent) and what is missing (update, DLC or game). The rows, Download Selected and the sort follow the best release that fits it.
+
+### Changed
+
+- Internal changes.
+
 ## [3.25.7] - 2026-11-24
 
 ### Added

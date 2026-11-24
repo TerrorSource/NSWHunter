@@ -18,6 +18,7 @@ import indexers
 import logs
 import matcher
 import notify
+import tg
 
 MAX_CANDIDATES = 15
 MAX_REJECTED = 25
@@ -1528,6 +1529,8 @@ class Hunter:
             return None  # a DLC unlocker only goes out with a click of its own
         if item["type"] == "game" and not config.AUTO_WISHLIST:
             return None  # a whole game of the wishlist waits for a click, unless asked otherwise
+        if best.get("source") == tg.SOURCE and tg.free_at():
+            return None  # the bot gives no more downloads today: it waits, and is not counted as failed
         return best
 
     async def grab(self, key, guid, auto=False):

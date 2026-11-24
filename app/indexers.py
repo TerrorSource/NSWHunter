@@ -262,7 +262,7 @@ async def search_all(session, query):
     """Ask every enabled indexer at once. Returns (releases, {indexer id: what went wrong}):
     one indexer that does not answer does not cost the releases of the others."""
     asked = config.indexers()
-    chat = tg.ready() and config.wants_torrents()
+    chat = tg.ready() and config.wants_torrents() and not tg.free_at()  # no search when no download is left
     results = await asyncio.gather(*(search(session, i, query) for i in asked),
                                    *([tg.search(query)] if chat else []), return_exceptions=True)
     releases, errors = [], {}
