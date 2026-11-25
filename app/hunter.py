@@ -82,6 +82,14 @@ def published_ordinal(release):
 
 
 
+def zone(country):
+    """The region of a country of the list of all games, as Switch-library-manager-web groups
+    them: the other stores of Nintendo of Europe are Europe."""
+    country = str(country or "").upper()
+    return ("US" if country in ("US", "CA", "MX", "BR", "AR", "CL", "CO", "PE") else "AU" if country in ("AU", "NZ")
+            else country if country in ("JP", "KR", "CN") else "HK" if country in ("HK", "TW") else "EU")
+
+
 def words_of(name):
     """The words of a name, to hold names against each other: without case, accents, marks
     like ™ and punctuation. "Assassin's Creed®" and "assassins creed" are the same."""
@@ -99,7 +107,7 @@ class Hunter:
         self.files = {}  # game id -> where its files are, as the library names them; of every game
         self.disks = (0, [])  # (when it was looked at, the free space of the folders that matter)
         self.versions = {}  # titledb: lower-case title id -> {"65536": "2021-10-05"}
-        self.titles = {}  # titledb: base title ID -> [name, picture address, YYYYMMDD], for Add Game
+        self.titles = {}  # titledb: base title ID -> [name, picture address, YYYYMMDD, country], for Add Game
         self.titles_gate = asyncio.Lock()
         self.background = set()  # tasks that run on their own, kept until they are done
         self.newly_owned = []  # games of the wishlist the last library sync found in the library
@@ -160,6 +168,8 @@ class Hunter:
         try:
             with open(config.TITLES_FILE) as f:
                 self.titles = json.load(f)
+            if any(len(t) < 4 for t in self.titles.values()):
+                self.state["titles_fetched"] = 0  # kept by an older version, without the regions
         except (FileNotFoundError, ValueError):
             self.state["titles_fetched"] = 0
 
@@ -463,7 +473,10 @@ class Hunter:
                 broken.add(game_id)  # what is known about it is kept as it is
                 self.skip(f"{game_id or 'a game'} of the library", e)
         owned = {g["id"] for g in listed}
+        self.move_wishes()
         await self.read_slm_wishlist(owned)
+        # A wish is in the library also when the game is there with the title ID of another region.
+        owned |= {g["id"] for g in self.state["new_games"] if self.same_game(g["id"]) & owned}
         added = self.want_new_games(games, wanted, owned | broken)
         items = self.state["items"]
         arrived = []
@@ -530,6 +543,9 @@ class Hunter:
             game_id = str(wish.get("id") or "").upper() if isinstance(wish, dict) else ""
             if not re.fullmatch(r"01[0-9A-F]{14}", game_id) or int(game_id, 16) & 0x1FFF:
                 continue  # a Switch 2 game, an update or DLC: not for the wishlist here
+            if game_id not in owned and self.same_game(game_id) & owned:
+                owned.add(game_id)  # in the library with the title ID of another region
+                continue
             known = self.titles.get(game_id) or ["", "", 0]
             name = " ".join(str(wish.get("name") or known[0]).split())[:200]
             try:
@@ -1132,7 +1148,8 @@ class Hunter:
             done, left = await asyncio.to_thread(importer.bring, client, grab.get("path") or self.guessed_path(client, grab),
                                                  self.files.get(item["game_id"]) or [],
                                                  wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]),
-                                                 keep=grab.get("seed", True) and grab.get("protocol") == "torrent")
+                                                 keep=grab.get("seed", True) and grab.get("protocol") == "torrent",
+                                                 same=self.same_game(item["game_id"]) if wanted == "BASE" else ())
         except importer.ImportProblem as e:
             text = str(e)
             if grab.get("import_error") != text:
@@ -1254,6 +1271,55 @@ class Hunter:
             raise clients.ServiceError("This game is not in your library")
         return name
 
+    def index_titles(self):
+        if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
+            self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
+            self.by_words = {}
+            for tid, words in self.title_words.items():
+                self.by_words.setdefault(words, set()).add(tid)
+
+    def country(self, game_id):
+        """The country of a game in the list of all games: "" when it says none."""
+        title = self.titles.get(game_id) or []
+        return title[3] if len(title) > 3 else ""
+
+    def in_regions(self, game_id):
+        """Is this game of one of the Regions of the settings? One the list of all games gives no country is."""
+        return not self.country(game_id) or zone(self.country(game_id)) in config.REGIONS.split(",")
+
+    def same_game(self, game_id):
+        """The title IDs of this game: its own, and those of the Regions that the list of all
+        games gives the same name (the game of another region: a wish can be one, its download
+        the other)."""
+        self.index_titles()
+        words = self.title_words.get(game_id)
+        return {game_id} | {t for t in (self.by_words.get(words, set()) if words else ()) if self.in_regions(t)}
+
+    def move_wishes(self):
+        """A game of the own wishlist of a region that is not one of the Regions becomes the
+        game of the same name of one that is, if there is one, with what was found and sent for it."""
+        order = config.REGIONS.split(",")
+        items, mine = self.state["items"], {g["id"] for g in self.state["new_games"]}
+        for wish in list(self.state["new_games"]):
+            if self.in_regions(wish["id"]):
+                continue
+            others = sorted(self.same_game(wish["id"]) - {wish["id"]},
+                            key=lambda t: (order.index(zone(self.country(t))) if self.country(t) else len(order), t))
+            if not others:
+                continue
+            old, new = wish["id"], others[0]
+            if new in mine:
+                self.state["new_games"].remove(wish)  # on the wishlist already
+                continue
+            wish.update(id=new, name=self.titles[new][0], released=self.titles[new][2] or 0)
+            mine.add(new)
+            item = items.pop(old + ":game", None)
+            if item is not None:
+                items[new + ":game"] = {**item, "key": new + ":game", "game_id": new, "name": wish["name"]}
+            self.state["searched"].pop(old, None)
+            self.event(f"Wishlist: {wish['name']} [{old}] is a game of {config.REGION_NAMES[zone(self.country(old))]}, "
+                       f"not of your Regions: it is now the one of {config.REGION_NAMES.get(zone(self.country(new)), 'no region')} [{new}]")
+
     def find_titles(self, name):
         """The games of the list of all games whose name holds every word of `name` (as the
         start of one of its words): the same name first, then the ones that start with it,
@@ -1261,11 +1327,10 @@ class Hunter:
         wanted = words_of(name)
         if not wanted:
             return []
-        if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
-            self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
+        self.index_titles()
         hits = []
         for title_id, have in self.title_words.items():
-            if all(any(w.startswith(q) for w in have) for q in wanted):
+            if all(any(w.startswith(q) for w in have) for q in wanted) and self.in_regions(title_id):
                 rank = 0 if have == wanted else 1 if have[:len(wanted)] == wanted else 2
                 hits.append((rank, len(have), -(self.titles[title_id][2] or 0), title_id))
         return [t[3] for t in sorted(hits)]
@@ -1323,6 +1388,9 @@ class Hunter:
             raise clients.ServiceError("This title ID is not in the list of all games: fill in the name of the game too")
         if any(g["id"] == game_id for g in self.state.get("games", [])):
             raise clients.ServiceError(f"{name} is in your library already")
+        if not self.in_regions(game_id):
+            raise clients.ServiceError(f"{name} [{game_id}] is a game of {config.REGION_NAMES[zone(self.country(game_id))]}: "
+                                       "not one of your Regions (Settings > Media Management)")
         if any(g["id"] == game_id for g in self.wished()):
             raise clients.ServiceError(f"{name} is on the wishlist already")
         self.state["new_games"].append({"id": game_id, "name": name, "added": int(time.time()), "released": known[2] or 0})
@@ -1460,7 +1528,7 @@ class Hunter:
         wanted = {"game": "BASE", None: "UPD", "update": "UPD"}.get(item_type, "DLC")
         try:
             done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,
-                                                 (game_id, name), dry)
+                                                 (game_id, name), dry, self.same_game(game_id) if wanted == "BASE" else ())
         except importer.ImportProblem as e:
             raise clients.ServiceError(str(e)[:1].upper() + str(e)[1:]) from e
         result = {"files": done, "left": [os.path.basename(f) for f in left]}

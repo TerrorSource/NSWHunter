@@ -156,7 +156,7 @@ TITLE_KEY = re.compile(r'\s*,?\s*"([0-9A-Fa-f]{16})"\s*:\s*')
 
 
 def title_list(data):
-    """{base title ID: [name, picture address, release date as YYYYMMDD or 0]} of every game
+    """{base title ID: [name, picture address, release date as YYYYMMDD or 0, country or ""]} of every game
     of the first Switch in titles.json (zstd or plain). It is read one game at a time: the
     whole file, with every description and screenshot, is over 100 MB."""
     from compression import zstd  # only here: the module is not in every Python build
@@ -184,7 +184,8 @@ def title_list(data):
                 and isinstance(title.get("name"), str) and title["name"].strip() and not title.get("isDemo")):
             picture = title.get("iconUrl") if isinstance(title.get("iconUrl"), str) else ""
             day = title.get("releaseDate") if isinstance(title.get("releaseDate"), int) else 0
-            found[title_id] = [" ".join(title["name"].split()), picture, day]
+            country = title.get("region") if isinstance(title.get("region"), str) else ""
+            found[title_id] = [" ".join(title["name"].split()), picture, day, country.upper()]
     if not found:
         raise ServiceError("Title list: no games in it")
     return found

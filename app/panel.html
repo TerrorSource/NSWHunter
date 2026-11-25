@@ -297,6 +297,7 @@
   .dialog .field { grid-template-columns: 200px minmax(0, 1fr); }
   .field .help { grid-column: 2; color: var(--soft); font-size: 13px; }
   .field .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .field .choices { display: flex; flex-wrap: wrap; gap: 0 18px; }
   .field .check { display: flex; gap: 10px; align-items: flex-start; padding-top: 6px; color: var(--soft); }
   .field .checks { display: grid; gap: 2px; }
   .field .checks label { display: flex; gap: 10px; align-items: center; padding: 3px 0; font-weight: 400; color: var(--text); }
@@ -1838,6 +1839,9 @@ const FORMS = {
         ["6", "Every 6 hours"], ["12", "Every 12 hours"], ["24", "Every 24 hours"], ["48", "Every 48 hours"]],
        help: "How often every game that misses something is searched by name. That costs one API call per indexer per game; choose 24 or 48 hours if an indexer has a daily limit."},
       {name: "INCLUDE_DLC", label: "Missing DLC", checkbox: true, help: "Also search for the DLC your library misses"},
+      {name: "REGIONS", label: "Regions", choices: [["EU", "Europe"], ["US", "Americas"], ["AU", "Australia and New Zealand"],
+        ["JP", "Japan"], ["KR", "Korea"], ["HK", "Hong Kong and Taiwan"], ["CN", "China"]],
+       help: "The regions whose games you want, as Preferred Region of Switch-library-manager-web groups them. Add Game only offers their games, and a download is only imported when it is a game of them. A game of another region on the wishlist becomes the game of the same name of one of these, when there is one. The region of a game is the one of the list of all games."},
       {name: "BLOCKED_WORDS", label: "Blocked Words", placeholder: "unlocker, unlockers",
        help: "A release with one of these words in its name is never offered or downloaded. A whole word like unlocker, or a few words in a row like fitgirl repack; separate them with commas. A * after a word stands for any end of it: unlock* also blocks unlocker and unlockers. Case, dots and dashes do not matter. Releases for the PC, other consoles and the Switch 2 are always left out. Empty: nothing more is blocked."}]}],
   general: [
@@ -1899,6 +1903,11 @@ function control(f, values, secrets, where) {
   if (f.options) {
     return h("select", {id, name: f.name}, f.options.map(([value, text]) => h("option", {value, selected: String(values[f.name]) === value}, text)));
   }
+  if (f.choices) {
+    const on = String(values[f.name] || "").split(",");
+    return h("div", {class: "choices"}, f.choices.map(([value, text], i) => h("label", {class: "check"},
+      h("input", {id: i ? undefined : id, name: f.name, type: "checkbox", value, "data-many": "", checked: on.includes(value)}), h("span", {}, text))));
+  }
   if (f.checkbox) return h("div", {class: "check"}, h("input", {id, name: f.name, type: "checkbox", checked: values[f.name] === true}), h("span", {}, f.help || ""));
   if (f.secret) {
     const set = secrets[f.name], wipe = clearing.has(where + f.name);
@@ -1948,6 +1957,10 @@ function typed(form) {
   const values = {};
   for (const el of form.elements) {
     if (!el.name) continue;
+    if (el.dataset.many !== undefined) {  // checkboxes of one setting: the values of the ones on
+      values[el.name] = [...(values[el.name] ? values[el.name].split(",") : []), ...(el.checked ? [el.value] : [])].join(",");
+      continue;
+    }
     values[el.name] = el.type === "checkbox" ? el.checked : el.value;
   }
   return values;

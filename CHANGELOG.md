@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.0] - 2026-11-25
+
+### Added
+
+- Regions under Settings > Media Management > Searching: the regions whose games you want, as Preferred Region of Switch-library-manager-web groups them. Europe and the Americas by default.
+  - Add Game only offers the games of these regions.
+  - A game of another region on the wishlist becomes the game of the same name of one of these, with what was found and sent for it.
+  - A download of the same game of another of these regions is imported, into a folder with its own title ID; the wish leaves the wishlist once the library has it.
+  - A download of a region that is not one of these is not imported.
+
 ## [3.27.3] - 2026-11-25
 
 ### Changed
