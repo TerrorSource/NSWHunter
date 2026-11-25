@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.26.1] - 2026-11-25
+
+### Changed
+
+- A release with "unlocker" in its name is never downloaded, nor offered: a DLC unlocker is not the DLC.
+
 ## [3.26.0] - 2026-11-24
 
 ### Added

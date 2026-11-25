@@ -27,6 +27,7 @@ ODD_SIZE = 0.8  # an update many times bigger or smaller than the one in the lib
 PACK = 0.55  # a pack of DLC that does not say which DLC
 UNLOCKER = 0.35  # a "DLC Unlocker": a small file that opens DLC, not the DLC as the library counts it
 UNLOCKER_WORDS = {"unlocker", "unlockers", "unlock"}
+BLOCKED_WORDS = {"unlocker", "unlockers"}  # never wanted, whatever the release is
 CRACK = 0.9  # an update with a crack holds changed files
 NAMED = 0.6  # the share of a DLC's own words that must be in a title to call it named
 
@@ -386,6 +387,8 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     toks = tokens(text)
     words = {t for t, _, _ in toks}
     reasons = []
+    if words & BLOCKED_WORDS:
+        return Rejection("a DLC unlocker: never downloaded")
 
     # ---- which game
     ids = [m.group(1).upper() for m in TID_RE.finditer(text)]
