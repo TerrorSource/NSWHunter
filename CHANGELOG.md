@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.27.3] - 2026-11-25
+
+### Changed
+
+- Back to how 3.27.1 imports: a game of another region is not the same game, also when it has the same name.
+
 ## [3.27.2] - 2026-11-25
 
 ### Fixed

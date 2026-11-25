@@ -464,8 +464,6 @@ class Hunter:
                 self.skip(f"{game_id or 'a game'} of the library", e)
         owned = {g["id"] for g in listed}
         await self.read_slm_wishlist(owned)
-        # A wish is in the library also when the game is there with the title ID of another region.
-        owned |= {g["id"] for g in self.state["new_games"] if self.same_game(g["id"]) & owned}
         added = self.want_new_games(games, wanted, owned | broken)
         items = self.state["items"]
         arrived = []
@@ -532,9 +530,6 @@ class Hunter:
             game_id = str(wish.get("id") or "").upper() if isinstance(wish, dict) else ""
             if not re.fullmatch(r"01[0-9A-F]{14}", game_id) or int(game_id, 16) & 0x1FFF:
                 continue  # a Switch 2 game, an update or DLC: not for the wishlist here
-            if game_id not in owned and self.same_game(game_id) & owned:
-                owned.add(game_id)  # in the library with the title ID of another region
-                continue
             known = self.titles.get(game_id) or ["", "", 0]
             name = " ".join(str(wish.get("name") or known[0]).split())[:200]
             try:
@@ -1137,8 +1132,7 @@ class Hunter:
             done, left = await asyncio.to_thread(importer.bring, client, grab.get("path") or self.guessed_path(client, grab),
                                                  self.files.get(item["game_id"]) or [],
                                                  wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]),
-                                                 keep=grab.get("seed", True) and grab.get("protocol") == "torrent",
-                                                 same=self.same_game(item["game_id"]) if wanted == "BASE" else ())
+                                                 keep=grab.get("seed", True) and grab.get("protocol") == "torrent")
         except importer.ImportProblem as e:
             text = str(e)
             if grab.get("import_error") != text:
@@ -1260,20 +1254,6 @@ class Hunter:
             raise clients.ServiceError("This game is not in your library")
         return name
 
-    def index_titles(self):
-        if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
-            self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
-            self.by_words = {}
-            for tid, words in self.title_words.items():
-                self.by_words.setdefault(words, set()).add(tid)
-
-    def same_game(self, game_id):
-        """The title IDs of this game: its own, and those titledb gives the same name (the game
-        of another region: a wish can be one, its download the other)."""
-        self.index_titles()
-        words = self.title_words.get(game_id)
-        return {game_id} | (self.by_words.get(words, set()) if words else set())
-
     def find_titles(self, name):
         """The games of the list of all games whose name holds every word of `name` (as the
         start of one of its words): the same name first, then the ones that start with it,
@@ -1281,7 +1261,8 @@ class Hunter:
         wanted = words_of(name)
         if not wanted:
             return []
-        self.index_titles()
+        if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
+            self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
         hits = []
         for title_id, have in self.title_words.items():
             if all(any(w.startswith(q) for w in have) for q in wanted):
@@ -1479,7 +1460,7 @@ class Hunter:
         wanted = {"game": "BASE", None: "UPD", "update": "UPD"}.get(item_type, "DLC")
         try:
             done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,
-                                                 (game_id, name), dry, self.same_game(game_id) if wanted == "BASE" else ())
+                                                 (game_id, name), dry)
         except importer.ImportProblem as e:
             raise clients.ServiceError(str(e)[:1].upper() + str(e)[1:]) from e
         result = {"files": done, "left": [os.path.basename(f) for f in left]}
