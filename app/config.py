@@ -119,7 +119,7 @@ CLEANUP_EXTENSIONS = env("CLEANUP_EXTENSIONS", ".nfo, .jpg, .jpeg, .png, .sfv, .
 # The regions whose games are wanted, as Switch-library-manager-web groups the countries of the
 # list of all games (see hunter.zone): Add Game offers only their games, and only theirs are imported.
 REGION_NAMES = {"EU": "Europe", "US": "Americas", "AU": "Australia and New Zealand", "JP": "Japan",
-                "KR": "Korea", "HK": "Hong Kong and Taiwan", "CN": "China"}
+                "KR": "Korea", "HK": "Hong Kong, Taiwan and Thailand", "CN": "China"}
 REGIONS = env("REGIONS", "EU,US")
 # Words that rule a release out, whatever else it is, separated by commas ("fitgirl repack").
 BLOCKED_WORDS = env("BLOCKED_WORDS", "unlocker, unlockers")

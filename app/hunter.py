@@ -84,10 +84,11 @@ def published_ordinal(release):
 
 def zone(country):
     """The region of a country of the list of all games, as Switch-library-manager-web groups
-    them: the other stores of Nintendo of Europe are Europe."""
+    them: the other stores of Nintendo of Europe are Europe. Thailand is not: its games are
+    those of the stores of Asia, here with Hong Kong and Taiwan."""
     country = str(country or "").upper()
     return ("US" if country in ("US", "CA", "MX", "BR", "AR", "CL", "CO", "PE") else "AU" if country in ("AU", "NZ")
-            else country if country in ("JP", "KR", "CN") else "HK" if country in ("HK", "TW") else "EU")
+            else country if country in ("JP", "KR", "CN") else "HK" if country in ("HK", "TW", "TH") else "EU")
 
 
 def words_of(name):

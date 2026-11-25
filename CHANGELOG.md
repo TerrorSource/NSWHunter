@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.1] - 2026-11-25
+
+### Changed
+
+- The games of Thailand are of the region Hong Kong, Taiwan and Thailand, not of Europe: they are those of the stores of Asia.
+
 ## [3.28.0] - 2026-11-25
 
 ### Added
