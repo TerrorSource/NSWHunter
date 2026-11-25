@@ -249,15 +249,16 @@ def put(source, folder, keep, dry=False):
     return target, "moved"
 
 
-def bring(client, reported, game_files, wanted, protocol, game=None, keep=None):
+def bring(client, reported, game_files, wanted, protocol, game=None, keep=None, same=()):
     """Put the Switch files of one finished download in the library.
 
     client: the download client entry. reported: where the client says the download is.
     game_files: [{"type", "path", "version"}] of the game as the library has it. wanted: "UPD",
     "DLC" or "BASE" (a game that is not in the library yet), what the download was sent for. game: (title ID, name) of the game; with it and
     a folder name template, the folder comes from the template and not from the files the game
-    has. Returns ([{"file", "folder", "how"}] of what was brought in, [files that were left
-    where they are]). ImportProblem says why not."""
+    has. same: other title IDs of the same game (of another region). Returns ([{"file",
+    "folder", "how"}] of what was brought in, [files that were left where they are]).
+    ImportProblem says why not."""
     ready(game_files, game, wanted)
     if not reported:
         raise ImportProblem(f"{client['name']} no longer has this download in its list, so it does not say where the files are, "
@@ -274,7 +275,7 @@ def bring(client, reported, game_files, wanted, protocol, game=None, keep=None):
     # Files named with the title ID of another game do not go to the folder of this one.
     # A torrent that seeds keeps its files where they are: what goes to the library is a copy.
     keep = protocol == "torrent" if keep is None else keep
-    return place(source, game_files, wanted, keep, game, only=game[0] if game else None)
+    return place(source, game_files, wanted, keep, game, only=game[0] if game else None, same=same)
 
 
 def ready(game_files, game, wanted=None):
@@ -288,7 +289,7 @@ def ready(game_files, game, wanted=None):
         raise ImportProblem("the library has not been read yet, or does not say where the files of this game are")
 
 
-def manual(path, game_files, wanted, game, dry=False):
+def manual(path, game_files, wanted, game, dry=False, same=()):
     """Manual Import: the Switch files of a folder or a file the user chose, moved to the
     folder of a game. A file that has the title ID of another game in its name is left where
     it is. `dry`: only say what would be done. Returns what bring() returns."""
@@ -303,7 +304,7 @@ def manual(path, game_files, wanted, game, dry=False):
             raise ImportProblem(f"{source} is in your library already (the root folder {root['path']})")
         if under(inside, real):
             raise ImportProblem(f"{source} holds your library (the root folder {root['path']}): choose the folder of the download itself")
-    return place(source, game_files, wanted, False, game, dry=dry, only=game[0])
+    return place(source, game_files, wanted, False, game, dry=dry, only=game[0], same=same)
 
 
 def family(title_id):
@@ -311,11 +312,13 @@ def family(title_id):
     return int(title_id, 16) & ~0x1FFF
 
 
-def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
+def place(source, game_files, wanted, keep, game=None, dry=False, only=None, same=()):
     """Put the Switch files of a folder or a file of this container in the library (see bring).
     keep: leave the originals where they are. only: the title ID of the game; files named with
-    the title ID of another game are left."""
+    the title ID of another game are left. same: other title IDs of this game (another region):
+    their files are of this game, in a folder with their own title ID."""
     templated = bool(game and config.FOLDER_TEMPLATE)
+    mine = {family(i) for i in (only, *same)} if only else set()
     try:
         files = switch_files(source)
         unpacked, failed = [], ""
@@ -335,14 +338,16 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None):
         done, left, others = [], [], []
         for file in files:
             named = TITLE_ID.search(os.path.basename(file))
-            if only and named and family(named.group(1)) != family(only):
+            if only and named and family(named.group(1)) not in mine:
                 others.append(file)  # of another game: not for the folder of this one
                 continue
+            region = named and only and family(named.group(1)) != family(only)
+            own = f"{family(named.group(1)):016X}" if region else game[0] if game else None
             kind = kind_of(os.path.basename(file), wanted)
             if kind == "BASE" and wanted != "BASE":
                 left.append(file)  # the game itself, from a bundle: the library has it already
                 continue
-            folder, root = game_folder(*game) if templated else local_library(folder_for(game_files, kind))
+            folder, root = game_folder(own, game[1]) if templated else local_library(folder_for(game_files, kind))
             # Whatever the library says: nothing is written outside a root folder.
             if not under(os.path.realpath(folder), os.path.realpath(root)):
                 raise ImportProblem(f"{folder} is not inside the root folder {root}")

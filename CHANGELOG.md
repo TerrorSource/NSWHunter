@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.27.2] - 2026-11-25
+
+### Fixed
+
+- A game of the wishlist that was downloaded as the game of another region, with another title ID, was not imported: "the Switch files have the title ID of another game". A title ID that the list of all games gives the same name is now the same game: its files go to a folder with their own title ID, and the wish leaves the wishlist once the library has it.
+
 ## [3.27.1] - 2026-11-25
 
 ### Added
