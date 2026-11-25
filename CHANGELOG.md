@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.27.1] - 2026-11-25
+
+### Added
+
+- A * after a word in Blocked Words stands for any end of it: unlock* also blocks unlocker and unlockers.
+
 ## [3.27.0] - 2026-11-25
 
 ### Added

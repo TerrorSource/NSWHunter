@@ -153,8 +153,10 @@ def tokens(text):
 
 
 def blocked_terms(text):
-    """The words of Blocked Words: "Unlocker, FitGirl Repack" -> ["unlocker", "fitgirl repack"]."""
-    return [t for t in (" ".join(w for w, _, _ in tokens(clean(p))) for p in str(text or "").split(",")) if t]
+    """The words of Blocked Words: "Unlock*, FitGirl Repack" -> ["unlock*", "fitgirl repack"]. A *
+    after a word stands for any end of it."""
+    return [t for t in (" ".join(w + "*" * (p[e:e + 1] == "*") for w, _, e in tokens(p))
+                        for p in (clean(p) for p in str(text or "").split(","))) if t]
 
 
 def search_term(name):
@@ -393,7 +395,7 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
     words = {t for t, _, _ in toks}
     reasons = []
     said = f" {' '.join(t for t, _, _ in toks)} "
-    hit = next((b for b in blocked_terms(blocked) if f" {b} " in said), None)
+    hit = next((b for b in blocked_terms(blocked) if re.search(" " + re.escape(b).replace(r"\*", "[0-9a-z]*") + " ", said)), None)
     if hit:
         return Rejection(f"has a blocked word: {hit}")
 
