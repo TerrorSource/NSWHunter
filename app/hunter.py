@@ -687,7 +687,8 @@ class Hunter:
         vermap = self.state["vermap"].setdefault(game.id, {})
         result = matcher.evaluate(game, release["title"], published_date(release), vermap,
                                   want=item["type"], dlc=dlc, seen=self.seen(game.id),
-                                  size=int(release.get("size") or 0), min_game=config.MIN_GAME_MB * 2**20)
+                                  size=int(release.get("size") or 0), min_game=config.MIN_GAME_MB * 2**20,
+                                  blocked=config.BLOCKED_WORDS)
         if not self.state["vermap"][game.id]:
             del self.state["vermap"][game.id]
         if isinstance(result, matcher.Rejection):

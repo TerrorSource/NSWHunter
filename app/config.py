@@ -116,6 +116,8 @@ DELETE_EMPTY_FOLDERS = flag("DELETE_EMPTY_FOLDERS", True)
 # What is cleared out of the folder of a download once its Switch files are in the library: a
 # name ending (".nfo") or a word in the name ("sample"), separated by commas.
 CLEANUP_EXTENSIONS = env("CLEANUP_EXTENSIONS", ".nfo, .jpg, .jpeg, .png, .sfv, .txt, .url, .par2, sample")
+# Words that rule a release out, whatever else it is, separated by commas ("fitgirl repack").
+BLOCKED_WORDS = env("BLOCKED_WORDS", "unlocker, unlockers")
 # Where the library is: [{"path": the folder in this container, "library_path": the same folder
 # as Switch-library-manager-web names it}]. Set in the panel only (see add_root_folder).
 ROOT_FOLDERS = []
@@ -225,6 +227,7 @@ UI_COLOR_IMPAIRED = flag("UI_COLOR_IMPAIRED")  # blue and orange instead of gree
 EDITABLE = {
     "SLM_URL": "url", "SLM_API_KEY": "secret", "SLM_WISHLIST": "bool",
     "AUTO_DOWNLOAD": AUTO_LEVELS, "AUTO_WISHLIST": "bool", "MIN_GAME_MB": range(0, 10001), "INCLUDE_DLC": "bool", "SEARCH_INTERVAL_HOURS": INTERVALS,
+    "BLOCKED_WORDS": "text",
     "GRAB_WAIT_MINUTES": WAITS, "HIDE_FAILED_DOWNLOADS": "bool",
     "IMPORT_COMPLETED": "bool", "DELETE_EMPTY_FOLDERS": "bool", "CLEANUP_EXTENSIONS": "text", "FOLDER_TEMPLATE": "template",
     "PANEL_USER": "text", "PANEL_PASSWORD": "secret", "PANEL_HOSTS": "text", "API_KEY": "apikey",

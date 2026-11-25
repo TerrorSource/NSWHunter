@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.27.0] - 2026-11-25
+
+### Added
+
+- Blocked Words under Settings > Media Management > Searching: a release with one of these words in its name is never offered or downloaded. By default unlocker and unlockers, as in 3.26.1.
+
 ## [3.26.1] - 2026-11-25
 
 ### Changed
