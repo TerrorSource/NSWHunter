@@ -91,6 +91,14 @@ def zone(country):
             else country if country in ("JP", "KR", "CN") else "HK" if country in ("HK", "TW", "TH") else "EU")
 
 
+def same_name(one, other):
+    """Are these the words of the names of one game? Also when one has more words after the
+    other's that only name an edition ("Complete Edition") or are not in Latin letters (the
+    name of the game of Hong Kong)."""
+    short, long = sorted((one, other), key=len)
+    return long[:len(short)] == short and all(w in EDITION_WORDS or not w.isascii() for w in long[len(short):])
+
+
 def words_of(name):
     """The words of a name, to hold names against each other: without case, accents, marks
     like ™ and punctuation. "Assassin's Creed®" and "assassins creed" are the same."""
@@ -1280,9 +1288,11 @@ class Hunter:
     def index_titles(self):
         if getattr(self, "title_words", None) is None or len(self.title_words) != len(self.titles):
             self.title_words = {tid: words_of(t[0]) for tid, t in self.titles.items()}
-            self.by_words = {}
+            self.by_words, self.by_first = {}, {}
             for tid, words in self.title_words.items():
                 self.by_words.setdefault(words, set()).add(tid)
+                if words:
+                    self.by_first.setdefault(words[0], set()).add(tid)
 
     def country(self, game_id):
         """The country of a game in the list of all games: "" when it says none."""
@@ -1305,7 +1315,8 @@ class Hunter:
         the other)."""
         self.index_titles()
         words = self.title_words.get(game_id)
-        return {game_id} | {t for t in (self.by_words.get(words, set()) if words else ()) if self.in_regions(t)}
+        return {game_id} | {t for t in (self.by_first.get(words[0], set()) if words else ())
+                            if self.in_regions(t) and same_name(words, self.title_words[t])}
 
     def move_wishes(self):
         """A game of the own wishlist of a region that is not one of the Regions becomes the

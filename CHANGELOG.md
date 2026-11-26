@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.3] - 2026-11-26
+
+### Fixed
+
+- A download of another edition of a game was not imported: The Witcher 3: Wild Hunt — Complete Edition for The Witcher 3: Wild Hunt. A name with only the words of an edition more, or words that are not in Latin letters (as "OCTOPATH TRAVELER 歧路旅人" of Hong Kong), is now the same game, in the Regions.
+
 ## [3.28.2] - 2026-11-26
 
 ### Fixed
