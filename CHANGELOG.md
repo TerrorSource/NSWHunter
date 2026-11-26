@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.5] - 2026-11-26
+
+### Fixed
+
+- "METAL GEAR SOLID 2 SONS OF LIBERTY (MASTER COLLECTION版)" of Japan was not the same game as "METAL GEAR SOLID 2: Sons of Liberty - Master Collection Version": names are now the same when only their last words differ, in words of an edition or words that are not in Latin letters.
+
 ## [3.28.4] - 2026-11-26
 
 ### Fixed

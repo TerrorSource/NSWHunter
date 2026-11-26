@@ -92,11 +92,15 @@ def zone(country):
 
 
 def same_name(one, other):
-    """Are these the words of the names of one game? Also when one has more words after the
-    other's that only name an edition ("Complete Edition") or are not in Latin letters (the
-    name of the game of Hong Kong)."""
-    short, long = sorted((one, other), key=len)
-    return long[:len(short)] == short and all(w in EDITION_WORDS or not w.isascii() for w in long[len(short):])
+    """Are these the words of the names of one game? Also when their last words differ only in
+    words that name an edition ("Complete Edition", "Version") or are not in Latin letters (the
+    name of the game of Hong Kong, "MASTER COLLECTION版" of Japan)."""
+    def core(words):
+        parts = [p for w in words for p in re.findall(r"[a-z0-9_]+|[^a-z0-9_]+", w)]
+        while parts and (parts[-1] in EDITION_WORDS or not parts[-1].isascii()):
+            parts.pop()
+        return parts
+    return bool(one and other) and core(one) == core(other)
 
 
 def words_of(name):
