@@ -2,6 +2,13 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.2] - 2026-11-26
+
+### Fixed
+
+- "NBA 2K21" was taken for NBA 2K19 and NBA 2K20: a number in a word of the name, as in 2K19, now has to be the same too.
+- A release with a shorter name that is the name of another game, as "Splatoon 2" for Splatoon 2 Global Testfire or "Super Bomberman R" for Super Bomberman R Online, is that other game, not a short name of this one.
+
 ## [3.28.1] - 2026-11-25
 
 ### Changed

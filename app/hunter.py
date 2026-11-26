@@ -715,6 +715,11 @@ class Hunter:
             other = self.other_title(game.name, release["title"])
             if other:
                 return matcher.Rejection(f"another game: {other}")
+        if result.name_match == "fuzzy":
+            # "Splatoon 2 NSW" is no short name of "Splatoon 2 Global Testfire": it is another game.
+            other = self.named(matcher.guessed_name(release["title"]), game.id)
+            if other:
+                return matcher.Rejection(f"another game: {other}")
         return {**{k: release.get(k) for k in RELEASE_FIELDS}, **result.to_dict()}
 
     def other_title(self, name, title):
@@ -1283,6 +1288,12 @@ class Hunter:
         """The country of a game in the list of all games: "" when it says none."""
         title = self.titles.get(game_id) or []
         return title[3] if len(title) > 3 else ""
+
+    def named(self, name, game_id):
+        """The name of another game in the list of all games that has just this name, if there is one."""
+        self.index_titles()
+        others = sorted(self.by_words.get(words_of(name), set()) - self.same_game(game_id)) if name else []
+        return self.titles[others[0]][0] if others and words_of(name) != self.title_words.get(game_id) else None
 
     def in_regions(self, game_id):
         """Is this game of one of the Regions of the settings? One the list of all games gives no country is."""

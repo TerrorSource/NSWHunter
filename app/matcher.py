@@ -438,8 +438,8 @@ def _evaluate(game, title, published, vermap, want, dlc, seen, only_version, siz
         wanted = " ".join(name_tokens)
         ratio = difflib.SequenceMatcher(None, name_part, wanted).ratio() if name_part else 0
         shortened = len(name_part.split()) >= 2 and wanted.startswith(name_part + " ")
-        # "FIFA 22" and "FIFA 23" are almost the same text and not the same game.
-        numbers = lambda ws: {w for w in ws if w.isdigit() or w in ROMAN}  # noqa: E731
+        # "FIFA 22" and "FIFA 23" are almost the same text and not the same game, nor are "NBA 2K19" and "NBA 2K21".
+        numbers = lambda ws: {w for w in ws if any(c.isdigit() for c in w) or w in ROMAN}  # noqa: E731
         if (ratio < 0.85 and not shortened) or numbers(name_part.split()) != numbers(name_tokens):
             return Rejection("name does not match")
         name_match = "fuzzy"
