@@ -1189,7 +1189,12 @@ class Hunter:
         self.record("imported", item, grab["title"], client=grab.get("client_name", ""),
                     note=f"{len(done)} file(s) {done[0]['how']} to {folder}{more}")
         self.finished = True  # the library is asked to scan
-        if grab.get("seed") is False or (client.get("remove_completed") and (grab.get("protocol") or "usenet") == "usenet"):
+        # One download (a collection) sent for more games: it stays until the last of them is in.
+        waiting = [i["name"] for i in self.unplaced() if i is not item and i["grab"].get("client") == grab.get("client")
+                   and i["grab"].get("client_id") == grab.get("client_id")]
+        if waiting:
+            logs.debug(f"Left in {client['name']}: {grab['title']} is also the download of {', '.join(waiting)}")
+        elif grab.get("seed") is False or (client.get("remove_completed") and (grab.get("protocol") or "usenet") == "usenet"):
             # The files are in the library: what is left of the download can go. Never a torrent that seeds on.
             try:
                 await downloads.remove(self.session, client, grab.get("client_id"))

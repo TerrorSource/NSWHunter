@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.28.4] - 2026-11-26
+
+### Fixed
+
+- A torrent that does not seed on, sent for more than one game (a collection), was taken out of the download client with its files once the first of those games was imported: the others found their download gone. It now stays until the last of them is in the library.
+
 ## [3.28.3] - 2026-11-26
 
 ### Fixed
