@@ -365,7 +365,9 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None, sam
                       else "Nothing in it is a file for the Switch.")
             if broken:
                 raise BadRelease(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}, and {failed}")
-            raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
+            # Finished, and no archive in it either: no hand can make it a Switch file.
+            raise (ImportProblem if packed else BadRelease)(
+                f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
         done, left, others = [], [], []
         for file in files:
             named = TITLE_ID.search(os.path.basename(file))

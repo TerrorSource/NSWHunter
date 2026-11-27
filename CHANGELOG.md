@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.29.1] - 2026-11-27
+
+### Changed
+
+- A finished download with no Switch file and no archive in it (an empty folder, or only other files) is now a failed download too: the next release gets its turn.
+
 ## [3.29.0] - 2026-11-27
 
 ### Changed
