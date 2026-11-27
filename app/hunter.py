@@ -1652,6 +1652,10 @@ class Hunter:
         candidate = next((c for c in listed if c["guid"] == guid), None)
         if candidate is None:
             raise clients.ServiceError("This release is no longer in the list")
+        busy = item.get("grab")
+        if busy and not busy.get("imported"):
+            # One download is followed per item: a second one would leave the first unseen in the client.
+            raise clients.ServiceError(f"{busy['title']} is in the queue for this already: take it out of the queue first")
         candidate = {**candidate, "source": candidate.get("source") or self.legacy_source()}
         try:
             client, client_id = await downloads.send(self.session, candidate)

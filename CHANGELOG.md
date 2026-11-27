@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.29.2] - 2026-11-27
+
+### Fixed
+
+- A release sent for a game that had a download in the queue already took the place of that download: the earlier one was no longer followed, and stayed in the download folder. Sending a second one is now refused until the first is out of the queue.
+
 ## [3.29.1] - 2026-11-27
 
 ### Changed
