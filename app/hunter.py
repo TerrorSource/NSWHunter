@@ -295,18 +295,25 @@ class Hunter:
             self.save()
         return False
 
-    def search_all(self):
+    def search_all(self, protocol=None):
         """The button "Search All": every game is searched by name in the next round, not only
-        the ones whose turn it is. Returns how many games that are."""
+        the ones whose turn it is. Returns how many games that are. With a protocol, the games
+        that miss something are searched at once on the indexers of that one only: their turn
+        for the searches by name stays what it was."""
+        if protocol:
+            ids = sorted(g for g in self.games if any(not i["ignored"] and not i["grab"] for i in self.items_of(g)))
+            if ids:
+                self.later(self.search_games(ids, protocol))
+            return len(ids)
         self.state["searched"] = {}
         return len(self.games)
 
-    def search_wishlist(self):
+    def search_wishlist(self, protocol=None):
         """The button "Search All" on the Wishlist: only the games of the wishlist, at once.
         Returns how many games that are."""
         ids = sorted({i["game_id"] for i in self.state["items"].values() if i["type"] == "game"})
         if ids:
-            self.later(self.search_games(ids))
+            self.later(self.search_games(ids, protocol))
         return len(ids)
 
     def event(self, text, level="info"):
@@ -932,7 +939,7 @@ class Hunter:
             elif not self.state["services"].get(name, {}).get("ok"):
                 self.provider("INDEXERS", indexer, True, "answers")
 
-    async def search_game(self, game_id, words=None):
+    async def search_game(self, game_id, words=None, protocol=None):
         """Search the indexers for one game: by its name, or with words of the user's own (for
         releases that are not named after the game). Returns how many new candidates."""
         game = self.games.get(game_id)
@@ -944,14 +951,14 @@ class Hunter:
             queries.append(update_id)
         releases = []
         for query in queries:
-            found, errors = await indexers.search_all(self.session, query)
+            found, errors = await indexers.search_all(self.session, query, protocol)
             self.heard(errors)
             if errors and len(errors) == len(config.indexers()):
                 raise clients.ServiceError(next(iter(errors.values())))  # nobody answered: no use going on
             releases += found
         found = self.process(releases, [game_id])
         logs.debug(f"Searched {queries}: {len(releases)} releases, {found} new candidate(s) for {game.name or game_id}")
-        if words:
+        if words or protocol:
             return found  # the turn of this game in the searches by name stays what it was
         self.state["searched"][game_id] = int(time.time())
         for item in self.items_of(game_id):
@@ -1514,13 +1521,13 @@ class Hunter:
             self.later(self.search_games(added))
         return done
 
-    async def search_games(self, game_ids):
+    async def search_games(self, game_ids, protocol=None):
         """Search some games by name, one after the other, as the backlog does."""
         for n, game_id in enumerate(game_ids):
             if n:
                 await asyncio.sleep(config.SEARCH_DELAY_SECONDS)
             try:
-                await self.search_game(game_id)
+                await self.search_game(game_id, protocol=protocol)
             except clients.ServiceError:
                 break  # no indexer answers; heard() has said which
             except Exception as e:  # noqa: BLE001
@@ -2170,7 +2177,7 @@ class Hunter:
             "items": items,
             "arrived": [a for a in self.state.get("arrived", []) if a["at"] > time.time() - ARRIVED_DAYS * 86400],
             "settings": {
-                "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC,
+                "auto": config.auto_min_score(), "dlc": config.INCLUDE_DLC, "torrents": config.wants_torrents(),
                 "interval": config.SYNC_INTERVAL_MINUTES, "search_hours": config.SEARCH_INTERVAL_HOURS,
                 "wait_minutes": config.GRAB_WAIT_MINUTES, "asking": self.asking(),
                 "hide_failed": config.HIDE_FAILED_DOWNLOADS,

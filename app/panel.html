@@ -667,9 +667,11 @@ function whatOf(item) {
   return item.type === "dlc" ? "DLC: " + (item.dlc_name || item.dlc_id) : item.type === "dlcpack" ? "DLC pack" : item.type === "game" ? "Game" : "Update";
 }
 // A question in the page before something big happens: no window of the browser.
+// `yes` and `action` may be lists: one button per choice, the first the main one.
 function ask(text, yes, action) {
+  const choices = [].concat(yes), actions = [].concat(action);
   put($("ask"), h("div", {class: "alert ask"}, h("span", {class: "grow"}, text),
-    h("button", {class: "primary", onclick: () => { put($("ask")); confirming = false; action(); }}, yes),
+    ...choices.map((label, n) => h("button", {class: n ? "" : "primary", onclick: () => { put($("ask")); confirming = false; actions[n](); }}, label)),
     h("button", {onclick: () => { put($("ask")); confirming = false; }}, "Cancel")));
 }
 
@@ -2547,8 +2549,10 @@ function renderToolbar() {
   const here = PAGES[page], st = state.status, left = [], right = [];
   const onWishlist = page === "wishlist";
   const wanted = new Set(state.items.filter(i => !onWishlist || i.type === "game").map(i => i.game_id)).size;
-  const searchAll = tool("search", "Search All", () => ask((onWishlist ? "Search all " + plural(wanted, "game") + " of the wishlist now?" : "Search all " + plural(wanted, "game") + " that miss something by name now?") + " That is one API call per indexer per game.", "Search",
-    () => post("/api/search-all", {wishlist: onWishlist}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")))),
+  const searchOn = protocol => () => post("/api/search-all", {wishlist: onWishlist, protocol}, "searchall").then(d => d.ok && toast("Searching " + plural(d.games, "game")));
+  const searchAll = tool("search", "Search All", () => ask((onWishlist ? "Search all " + plural(wanted, "game") + " of the wishlist now?" : "Search all " + plural(wanted, "game") + " that miss something by name now?") + " That is one API call per indexer per game.",
+    state.settings.torrents ? ["Usenet and torrents", "Usenet", "Torrents"] : "Search",
+    state.settings.torrents ? [searchOn(""), searchOn("usenet"), searchOn("torrent")] : searchOn("")),
     {disabled: !wanted || (st.running && !onWishlist), title: onWishlist ? "Search every game of the wishlist on your indexers now" : "Search every game that misses something on your indexers now, not only the ones whose turn it is"});
   const testAll = tool("test", busy.has("testall") ? "Testing…" : "Test All", async () => {
     busy.add("testall"); renderToolbar();

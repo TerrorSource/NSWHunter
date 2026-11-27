@@ -108,12 +108,13 @@ async def priorities(session, indexer):
     return {i["id"]: int(i.get("priority") or 25) for i in await _prowlarr_indexers(session, indexer) if "id" in i}
 
 
-async def _prowlarr_search(session, indexer, query):
+async def _prowlarr_search(session, indexer, query, protocol=None):
     params = [("query", query), ("type", "search"), ("limit", "100"), ("offset", "0")]
     params += [("categories", c) for c in indexer["categories"]]
     # -1 is Prowlarr's shorthand for "all usenet indexers" (-2 is all torrent indexers). With a
     # torrent client set up nothing is passed: Prowlarr then searches every indexer it has.
-    chosen = config.PROWLARR_INDEXER_IDS or ([] if config.wants_torrents() else ["-1"])
+    chosen = config.PROWLARR_INDEXER_IDS or (
+        ["-2"] if protocol == "torrent" else ["-1"] if protocol == "usenet" or not config.wants_torrents() else [])
     params += [("indexerIds", i) for i in chosen]
     try:
         async with session.get(f"{indexer['url']}/api/v1/search", params=params, headers=_key(indexer),
@@ -249,21 +250,23 @@ async def status(session, indexer):
     return await (_prowlarr_status if indexer["type"] == "prowlarr" else _newznab_status)(session, indexer)
 
 
-async def search(session, indexer, query):
+async def search(session, indexer, query, protocol=None):
     """Releases of one indexer for a query; an empty query gives its newest posts."""
     if indexer["type"] == "prowlarr":
-        return await _prowlarr_search(session, indexer, query)
+        return await _prowlarr_search(session, indexer, query, protocol)
     if indexer["type"] == "torznab" and not config.wants_torrents():
         return []  # nothing could take what it finds
     return await _newznab_search(session, indexer, query)
 
 
-async def search_all(session, query):
+async def search_all(session, query, protocol=None):
     """Ask every enabled indexer at once. Returns (releases, {indexer id: what went wrong}):
-    one indexer that does not answer does not cost the releases of the others."""
-    asked = config.indexers()
-    chat = tg.ready() and config.wants_torrents() and not tg.free_at()  # no search when no download is left
-    results = await asyncio.gather(*(search(session, i, query) for i in asked),
+    one indexer that does not answer does not cost the releases of the others. With a protocol
+    ("usenet" or "torrent"), only releases of that one."""
+    asked = [i for i in config.indexers() if not protocol or i["type"] == "prowlarr"
+             or (i["type"] == "torznab") == (protocol == "torrent")]
+    chat = tg.ready() and config.wants_torrents() and not tg.free_at() and protocol != "usenet"  # no search when no download is left
+    results = await asyncio.gather(*(search(session, i, query, protocol) for i in asked),
                                    *([tg.search(query)] if chat else []), return_exceptions=True)
     releases, errors = [], {}
     if chat:
@@ -278,7 +281,7 @@ async def search_all(session, query):
         elif isinstance(result, Exception):
             errors[indexer["id"]] = f"{indexer['name']}: {result!r}"
         else:
-            releases += result
+            releases += [r for r in result if not protocol or r["protocol"] == protocol]
     return releases, errors
 
 

@@ -448,10 +448,12 @@ async def api_search_all(request):
     """Search every game by name in a round that starts now; with "wishlist", only the games of
     the wishlist, at once."""
     body = await request.json() if request.can_read_body else {}
+    protocol = body.get("protocol") if body.get("protocol") in ("usenet", "torrent") else None
     if body.get("wishlist"):
-        return web.json_response({"ok": True, "games": request.app["hunter"].search_wishlist()})
-    games = request.app["hunter"].search_all()
-    request.app["wake"].set()
+        return web.json_response({"ok": True, "games": request.app["hunter"].search_wishlist(protocol)})
+    games = request.app["hunter"].search_all(protocol)
+    if not protocol:
+        request.app["wake"].set()
     return web.json_response({"ok": True, "games": games})
 
 

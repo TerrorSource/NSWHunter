@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.30.0] - 2026-11-27
+
+### Added
+
+- Search All asks where to search when a torrent client is set up: usenet and torrents, usenet only, or torrents only. A search of one of them runs at once and leaves the regular turn of each game for the searches by name as it was.
+
 ## [3.29.3] - 2026-11-27
 
 ### Changed
