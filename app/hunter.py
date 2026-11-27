@@ -69,6 +69,12 @@ def best_first(candidate):
             priority_of(candidate), -(candidate.get("grabs") or 0))
 
 
+def release_group(title):
+    """The scene group of a Switch release: "VENOM" of "... Update v1.8.4 NSW-VENOM-FTP"."""
+    found = re.search(r"(?i)(?<![0-9a-z])nsw[-_.]([0-9a-z]+)", title)
+    return found.group(1).upper() if found else None
+
+
 def priority_of(release):
     """The priority in Prowlarr of the indexer a release came from. A release kept by an
     older version has none, and one without a number cannot be sorted."""
@@ -148,6 +154,7 @@ class Hunter:
             "games": [],  # every game of the library, for the Games page
             "history": [],  # what was sent, arrived and failed, newest first
             "covers": {},  # title ID -> where the small picture of the game is
+            "other_region": {},  # game id -> release groups whose files of it are of another region
             "covers_fetched": 0,
             "tasks": {},  # name -> {"last": when it last ran, "duration": seconds}
             "telegram_offset": 0,  # the next update to ask Telegram for
@@ -167,6 +174,8 @@ class Hunter:
             for item in self.state["items"].values():
                 for candidate in item.get("candidates", []):
                     candidate.setdefault("score", 0)  # judged again in the first round
+                for failed in item.get("failed", []):  # failed before the groups were kept
+                    self.note_other_region(item, failed["title"], failed.get("why") or "")
             if "seen" not in saved:
                 # State from before the version ladder: search every game once more, so the
                 # display versions in the release names are noticed.
@@ -732,6 +741,10 @@ class Hunter:
             other = self.named(matcher.guessed_name(release["title"]), game.id)
             if other:
                 return matcher.Rejection(f"another game: {other}")
+        group = release_group(release["title"])
+        if group in self.state.get("other_region", {}).get(game.id, ()) and result.name_match != "tid":
+            # A group dumps one region: its next release of this game holds the same title ID.
+            return matcher.Rejection(f"{group} releases of this game hold the title ID of another region", known=True)
         return {**{k: release.get(k) for k in RELEASE_FIELDS}, **result.to_dict()}
 
     def other_title(self, name, title):
@@ -821,10 +834,22 @@ class Hunter:
         del item["candidates"][MAX_CANDIDATES:]
         return result in item["candidates"] and not twin
 
-    def reevaluate(self):
+    def note_other_region(self, item, title, why):
+        """A release of this group held the files of this game for another region: True if
+        that is new."""
+        group = release_group(title)
+        if not group or "title ID of another game" not in why:
+            return False
+        groups = self.state.setdefault("other_region", {}).setdefault(item["game_id"], [])
+        if group in groups:
+            return False
+        groups.append(group)
+        return True
+
+    def reevaluate(self, items=None):
         """The library changed (new local version, newer update out) or more became known about
         the versions: judge everything again, also what fell off before."""
-        for item in self.state["items"].values():
+        for item in items if items is not None else self.state["items"].values():
             pool = item["candidates"] + item.get("rejected", [])
             item["candidates"], item["rejected"] = [], []
             for release in sorted(pool, key=priority_of):
@@ -1174,6 +1199,8 @@ class Hunter:
                 self.failed.append(grab)
             grab["import_error"] = str(e)  # for the button "Try the import again"
             text = self.drop(item, f"Not put in your library: {grab['title']}: {e}. The next release gets its turn.", str(e))
+            if self.note_other_region(item, grab["title"], str(e)):
+                self.reevaluate(self.items_of(item["game_id"]))
             if hasattr(self, "tell_later"):
                 self.tell_later.append(text)
             self.dropped = True

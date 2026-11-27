@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.29.3] - 2026-11-27
+
+### Changed
+
+- When a release of a group turns out to hold a game's files for another region, the other releases of that group for that game are now ruled out too, with the reason shown. A group dumps one region, so they would fail the same way. A release named with the game's own title ID still counts, and a ruled-out release can still be sent by hand.
+
 ## [3.29.2] - 2026-11-27
 
 ### Fixed
