@@ -1168,6 +1168,16 @@ class Hunter:
                                                  wanted, grab.get("protocol") or "usenet", (item["game_id"], item["name"]),
                                                  keep=grab.get("seed", True) and grab.get("protocol") == "torrent",
                                                  same=self.same_game(item["game_id"]) if wanted == "BASE" else ())
+        except importer.BadRelease as e:
+            # As a failed download: Remove Failed takes it away, and the next release gets its turn.
+            if hasattr(self, "failed"):
+                self.failed.append(grab)
+            grab["import_error"] = str(e)  # for the button "Try the import again"
+            text = self.drop(item, f"Not put in your library: {grab['title']}: {e}. The next release gets its turn.", str(e))
+            if hasattr(self, "tell_later"):
+                self.tell_later.append(text)
+            self.dropped = True
+            return False
         except importer.ImportProblem as e:
             text = str(e)
             if grab.get("import_error") != text:
@@ -1234,7 +1244,7 @@ class Hunter:
                     await self.bring_in(item)
                 except Exception as e:  # noqa: BLE001
                     self.skip(f"the import of {item['name']}", e)
-            placed += bool(item["grab"].get("imported"))
+            placed += bool((item["grab"] or {}).get("imported"))
         self.tell_later = []
         if placed:
             await self.rescan()

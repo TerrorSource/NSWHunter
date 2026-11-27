@@ -2,6 +2,16 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.29.0] - 2026-11-27
+
+### Changed
+
+- A download that will never do is now a failed download: the next release gets its turn, and Remove Failed takes it away. That is an archive that cannot be unpacked (a checksum error, a missing part), and a download that only holds files of another game.
+
+### Fixed
+
+- A DLC or an update of the game of another region (the US one, for the game of Europe in your library) was put in your library when its files had no title ID in their name. The title ID is now read from the ticket in the NSP or NSZ.
+
 ## [3.28.5] - 2026-11-26
 
 ### Fixed

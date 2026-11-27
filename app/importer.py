@@ -13,6 +13,7 @@ Both folders have to be volumes of this container. The library is named by its r
 import os
 import re
 import shutil
+import struct
 import subprocess
 import time
 
@@ -29,6 +30,30 @@ ILLEGAL = re.compile(r'[/\\?%*:;=|"<>]')
 
 class ImportProblem(Exception):
     """Why a download could not be put in the library, in words for the user."""
+
+
+class BadRelease(ImportProblem):
+    """The download itself will never do: a broken archive, or the files of another game (such
+    as its DLC for another region). The next release gets its turn."""
+
+
+def ticket_title_id(path):
+    """The title ID of an NSP or NSZ by the ticket in it: <rights ID>.tik, of which the first 16
+    hex digits are the title ID. None for another file, or one without a ticket."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+            if head[:4] != b"PFS0":
+                return None
+            count, size = struct.unpack("<II", head[4:12])
+            if count > 10000 or size > 1 << 20:
+                return None
+            f.seek(16 + 24 * count)  # past the entries, to their names
+            names = f.read(size)
+    except OSError:
+        return None
+    found = re.search(rb"(?<![0-9a-fA-F])(0[0-9a-fA-F]{15})[0-9a-fA-F]{16}\.tik\x00", names)
+    return found.group(1).decode().upper() if found else None
 
 
 def under(path, folder):
@@ -161,7 +186,8 @@ def unpack(source):
         for parts in volumes(folder):
             seen = tuple((p, os.path.getsize(p), os.path.getmtime(p)) for p in parts)
             if seen in UNPACK_FAILED:
-                raise ImportProblem(UNPACK_FAILED[seen])
+                kind, text = UNPACK_FAILED[seen]
+                raise kind(text)
             work = os.path.join(folder, UNPACKING)
             shutil.rmtree(work, ignore_errors=True)  # what an unpack that was broken off left
             os.makedirs(os.path.join(work, "out"))
@@ -179,8 +205,11 @@ def unpack(source):
                 if done.returncode:
                     lines = [line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip()]
                     why = next((line for line in reversed(lines) if "rror" in line or "not RAR" in line), lines[-1] if lines else "")
-                    UNPACK_FAILED[seen] = f"unpacking {os.path.basename(parts[0])} failed ({why[:200]})"
-                    raise ImportProblem(UNPACK_FAILED[seen])
+                    # 5, 6, 8, 9: unrar could not write, open, have the memory or make a file: not the
+                    # archive. Otherwise it is broken (3: a checksum error), incomplete or locked.
+                    kind = ImportProblem if done.returncode in (5, 6, 8, 9) else BadRelease
+                    UNPACK_FAILED[seen] = kind, f"unpacking {os.path.basename(parts[0])} failed ({why[:200]})"
+                    raise kind(UNPACK_FAILED[seen][1])
                 for inside, _, names in os.walk(os.path.join(work, "out")):
                     for name in names:
                         target = os.path.join(folder, name)
@@ -321,12 +350,12 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None, sam
     mine = {family(i) for i in (only, *same)} if only else set()
     try:
         files = switch_files(source)
-        unpacked, failed = [], ""
+        unpacked, failed, broken = [], "", False
         if not files:
             try:
                 unpacked = unpack(source)
             except ImportProblem as e:
-                failed = str(e)
+                failed, broken = str(e), isinstance(e, BadRelease)
             files = switch_files(source)
         if not files:
             what, packed = holds(source)
@@ -334,16 +363,20 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None, sam
                       else "The download is still packed: let your download client unpack, or unpack it by hand and try again."
                       if packed else "Were its files moved by hand?" if what == "the folder is empty"
                       else "Nothing in it is a file for the Switch.")
+            if broken:
+                raise BadRelease(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}, and {failed}")
             raise ImportProblem(f"there are no Switch files (NSP, NSZ, XCI, XCZ) in {source}: {what}. {advice}")
         done, left, others = [], [], []
         for file in files:
             named = TITLE_ID.search(os.path.basename(file))
-            if only and named and family(named.group(1)) not in mine:
+            # A name without it (as VENOM names them): the title ID of the ticket in the file.
+            named = named.group(1) if named else ticket_title_id(file) if only else None
+            if only and named and family(named) not in mine:
                 others.append(file)  # of another game: not for the folder of this one
                 continue
-            region = named and only and family(named.group(1)) != family(only)
-            own = f"{family(named.group(1)):016X}" if region else game[0] if game else None
-            kind = kind_of(os.path.basename(file), wanted)
+            region = named and only and family(named) != family(only)
+            own = f"{family(named):016X}" if region else game[0] if game else None
+            kind = kind_of(named or os.path.basename(file), wanted)
             if kind == "BASE" and wanted != "BASE":
                 left.append(file)  # the game itself, from a bundle: the library has it already
                 continue
@@ -363,7 +396,7 @@ def place(source, game_files, wanted, keep, game=None, dry=False, only=None, sam
         raise ImportProblem(f"{e.filename or source}: {e.strerror or e}") from e
     if not done and others:
         names = ", ".join(os.path.basename(f) for f in others[:3]) + (" and more" if len(others) > 3 else "")
-        raise ImportProblem(f"the Switch files in {source} have the title ID of another game: {names}")
+        raise BadRelease(f"the Switch files in {source} have the title ID of another game: {names}")
     if not done:
         raise ImportProblem("the download only holds the game itself, which the library has already")
     return done, left + others
