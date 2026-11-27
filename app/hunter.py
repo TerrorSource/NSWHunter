@@ -1596,11 +1596,18 @@ class Hunter:
         of a game. key: the item of the Queue it is done for; its download then counts as put
         in the library. dry: only say what would be moved. Returns {"files": [{"file",
         "folder", "how"}], "left": [names of files that stay where they are]}."""
-        name = self.game_name(game_id)
         item = self.state["items"].get(key) if key else None
         if item is not None and item["game_id"] != game_id:
             raise ValueError
         item_type = (item or self.state["items"].get(game_id + ":game") or {}).get("type")
+        try:
+            name = self.game_name(game_id)
+        except clients.ServiceError:
+            # Not in the library nor on the wishlist (the game of another region than the one
+            # you have, say): a game of the list of all games can still get its own folder.
+            if not (self.titles.get(game_id) and self.in_regions(game_id)):
+                raise
+            name, item_type = self.titles[game_id][0], "game"
         wanted = {"game": "BASE", None: "UPD", "update": "UPD"}.get(item_type, "DLC")
         try:
             done, left = await asyncio.to_thread(importer.manual, path, self.files.get(game_id) or [], wanted,

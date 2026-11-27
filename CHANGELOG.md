@@ -2,6 +2,12 @@
 
 All changes per version. The version number is in `app/version.py`; each version has a section here and a release on GitHub.
 
+## [3.30.1] - 2026-11-27
+
+### Changed
+
+- Manual Import also takes a game of the list of all games that is neither in the library nor on the wishlist, such as the same game for another region. The files get a folder of their own.
+
 ## [3.30.0] - 2026-11-27
 
 ### Added
